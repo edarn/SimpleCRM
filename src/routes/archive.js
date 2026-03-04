@@ -26,4 +26,17 @@ router.get('/contacts', (req, res) => {
   }
 });
 
+// GET /api/archive/candidates - List archived candidates (optional ?category= filter)
+router.get('/candidates', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const category = req.query.category || null;
+    const candidates = data.getArchivedCandidates(userId, category);
+    res.json(candidates);
+  } catch (err) {
+    console.error('Error fetching archived candidates:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

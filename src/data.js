@@ -1331,7 +1331,7 @@ function getAllCandidates(userId) {
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.team_id = ?
+      WHERE c.team_id = ? AND c.archived_at IS NULL
       ORDER BY c.name
     `).all(teamId);
   } else {
@@ -1339,12 +1339,16 @@ function getAllCandidates(userId) {
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.created_by = ? AND c.team_id IS NULL
+      WHERE c.created_by = ? AND c.team_id IS NULL AND c.archived_at IS NULL
       ORDER BY c.name
     `).all(userId);
   }
 
-  return rows.map(row => ({
+  return rows.map(row => formatCandidateRow(row));
+}
+
+function formatCandidateRow(row) {
+  return {
     id: row.id,
     name: row.name,
     email: row.email,
@@ -1353,15 +1357,18 @@ function getAllCandidates(userId) {
     skills: row.skills,
     resumeFilename: row.resume_filename,
     resumeOriginalName: row.resume_original_name,
+    archivedAt: row.archived_at,
+    archiveCategory: row.archive_category,
     createdBy: row.created_by,
     createdByUsername: row.created_by_username,
     createdAt: row.created_at,
     updatedAt: row.updated_at
-  }));
+  };
 }
 
-function getCandidateById(candidateId, userId) {
+function getCandidateById(candidateId, userId, includeArchived = false) {
   const teamId = getUserTeamId(userId);
+  const archivedFilter = includeArchived ? '' : 'AND c.archived_at IS NULL';
 
   let candidate;
   if (teamId) {
@@ -1369,14 +1376,14 @@ function getCandidateById(candidateId, userId) {
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.id = ? AND c.team_id = ?
+      WHERE c.id = ? AND c.team_id = ? ${archivedFilter}
     `).get(candidateId, teamId);
   } else {
     candidate = db.prepare(`
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.id = ? AND c.created_by = ? AND c.team_id IS NULL
+      WHERE c.id = ? AND c.created_by = ? AND c.team_id IS NULL ${archivedFilter}
     `).get(candidateId, userId);
   }
 
@@ -1390,19 +1397,23 @@ function getCandidateById(candidateId, userId) {
     ORDER BY cc.created_at DESC
   `).all(candidateId);
 
+  const files = db.prepare(`
+    SELECT * FROM candidate_files
+    WHERE candidate_id = ?
+    ORDER BY uploaded_at ASC
+  `).all(candidateId);
+
   return {
-    id: candidate.id,
-    name: candidate.name,
-    email: candidate.email,
-    phone: candidate.phone,
-    role: candidate.role,
-    skills: candidate.skills,
-    resumeFilename: candidate.resume_filename,
-    resumeOriginalName: candidate.resume_original_name,
-    createdBy: candidate.created_by,
-    createdByUsername: candidate.created_by_username,
-    createdAt: candidate.created_at,
-    updatedAt: candidate.updated_at,
+    ...formatCandidateRow(candidate),
+    files: files.map(f => ({
+      id: f.id,
+      filename: f.filename,
+      originalName: f.original_name,
+      fileSize: f.file_size,
+      mimeType: f.mime_type,
+      uploadedAt: f.uploaded_at,
+      uploadedBy: f.uploaded_by
+    })),
     comments: comments.map(c => ({
       id: c.id,
       content: c.content,
@@ -1470,17 +1481,157 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, resume
 }
 
 function deleteCandidate(candidateId, userId) {
-  // Verify access
-  const candidate = getCandidateById(candidateId, userId);
+  // Redirect to archive with 'declined' as default category
+  return archiveCandidate(candidateId, 'declined', userId);
+}
+
+function archiveCandidate(candidateId, category, userId) {
+  const candidate = getCandidateById(candidateId, userId, true);
   if (!candidate) return { error: 'Candidate not found' };
 
   const role = getUserRole(userId);
   if (role === 'member' && candidate.createdBy !== userId) {
-    return { error: 'Permission denied. You can only delete candidates you created.' };
+    return { error: 'Permission denied. You can only archive candidates you created.' };
   }
 
-  const result = db.prepare('DELETE FROM candidates WHERE id = ?').run(candidateId);
-  return result.changes > 0 ? { success: true } : { error: 'Delete failed' };
+  const now = getTimestamp();
+  db.prepare(`
+    UPDATE candidates SET archived_at = ?, archive_category = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now, category, now, candidateId);
+
+  return { success: true };
+}
+
+function restoreCandidate(candidateId, userId) {
+  const candidate = getCandidateById(candidateId, userId, true);
+  if (!candidate) return { error: 'Candidate not found' };
+  if (!candidate.archivedAt) return { error: 'Candidate is not archived' };
+
+  const role = getUserRole(userId);
+  if (role === 'member' && candidate.createdBy !== userId) {
+    return { error: 'Permission denied. You can only restore candidates you created.' };
+  }
+
+  const now = getTimestamp();
+  db.prepare(`
+    UPDATE candidates SET archived_at = NULL, archive_category = NULL, updated_at = ?
+    WHERE id = ?
+  `).run(now, candidateId);
+
+  return { success: true };
+}
+
+function getArchivedCandidates(userId, category) {
+  const teamId = getUserTeamId(userId);
+  const categoryFilter = category ? 'AND c.archive_category = ?' : '';
+  const params = [];
+
+  let query;
+  if (teamId) {
+    query = `
+      SELECT c.*, u.username as created_by_username
+      FROM candidates c
+      LEFT JOIN users u ON u.id = c.created_by
+      WHERE c.team_id = ? AND c.archived_at IS NOT NULL ${categoryFilter}
+      ORDER BY c.archived_at DESC
+    `;
+    params.push(teamId);
+  } else {
+    query = `
+      SELECT c.*, u.username as created_by_username
+      FROM candidates c
+      LEFT JOIN users u ON u.id = c.created_by
+      WHERE c.created_by = ? AND c.team_id IS NULL AND c.archived_at IS NOT NULL ${categoryFilter}
+      ORDER BY c.archived_at DESC
+    `;
+    params.push(userId);
+  }
+
+  if (category) params.push(category);
+
+  return db.prepare(query).all(...params).map(row => formatCandidateRow(row));
+}
+
+function getCandidateFiles(candidateId) {
+  return db.prepare(`
+    SELECT * FROM candidate_files
+    WHERE candidate_id = ?
+    ORDER BY uploaded_at ASC
+  `).all(candidateId).map(f => ({
+    id: f.id,
+    filename: f.filename,
+    originalName: f.original_name,
+    fileSize: f.file_size,
+    mimeType: f.mime_type,
+    uploadedAt: f.uploaded_at,
+    uploadedBy: f.uploaded_by
+  }));
+}
+
+function addCandidateFile(candidateId, { filename, originalName, fileSize, mimeType }, userId) {
+  // Check 5 file limit
+  const count = db.prepare('SELECT COUNT(*) as cnt FROM candidate_files WHERE candidate_id = ?').get(candidateId).cnt;
+  if (count >= 5) {
+    return { error: 'Maximum 5 files per candidate' };
+  }
+
+  const id = generateId();
+  const now = getTimestamp();
+
+  db.prepare(`
+    INSERT INTO candidate_files (id, candidate_id, filename, original_name, file_size, mime_type, uploaded_at, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, candidateId, filename, originalName, fileSize || 0, mimeType || '', now, userId);
+
+  db.prepare('UPDATE candidates SET updated_at = ? WHERE id = ?').run(now, candidateId);
+
+  return {
+    id,
+    filename,
+    originalName,
+    fileSize: fileSize || 0,
+    mimeType: mimeType || '',
+    uploadedAt: now,
+    uploadedBy: userId
+  };
+}
+
+function deleteCandidateFile(candidateId, fileId, userId) {
+  const candidate = getCandidateById(candidateId, userId, true);
+  if (!candidate) return { error: 'Candidate not found' };
+
+  const file = db.prepare('SELECT * FROM candidate_files WHERE id = ? AND candidate_id = ?').get(fileId, candidateId);
+  if (!file) return { error: 'File not found' };
+
+  const role = getUserRole(userId);
+  if (role === 'member' && file.uploaded_by !== userId) {
+    return { error: 'Permission denied. You can only delete files you uploaded.' };
+  }
+
+  db.prepare('DELETE FROM candidate_files WHERE id = ?').run(fileId);
+  const now = getTimestamp();
+  db.prepare('UPDATE candidates SET updated_at = ? WHERE id = ?').run(now, candidateId);
+
+  return { success: true, filename: file.filename };
+}
+
+function getCandidateFileById(candidateId, fileId, userId) {
+  const candidate = getCandidateById(candidateId, userId, true);
+  if (!candidate) return null;
+
+  const file = db.prepare('SELECT * FROM candidate_files WHERE id = ? AND candidate_id = ?').get(fileId, candidateId);
+  if (!file) return null;
+
+  return {
+    id: file.id,
+    filename: file.filename,
+    originalName: file.original_name,
+    fileSize: file.file_size,
+    mimeType: file.mime_type,
+    uploadedAt: file.uploaded_at,
+    uploadedBy: file.uploaded_by
+  };
 }
 
 function createCandidateComment(candidateId, content, userId) {
@@ -1608,9 +1759,18 @@ module.exports = {
   createCandidate,
   updateCandidate,
   deleteCandidate,
+  archiveCandidate,
+  restoreCandidate,
+  getArchivedCandidates,
   createCandidateComment,
   updateCandidateComment,
   deleteCandidateComment,
+
+  // Candidate Files
+  getCandidateFiles,
+  addCandidateFile,
+  deleteCandidateFile,
+  getCandidateFileById,
 
   // Team & Access Control
   getUserTeamId,

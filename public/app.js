@@ -2196,6 +2196,15 @@ const views = {
 
   // ============ Candidate Views ============
 
+  // Archive category labels
+  _archiveCategories: {
+    declined: 'Declined',
+    not_qualified: 'Not Qualified',
+    contact_later: 'Contact Later',
+    hired: 'Hired',
+    in_progress: 'In Progress'
+  },
+
   // Candidate List View
   async candidateList(container) {
     const candidates = await api.get('/api/candidates');
@@ -2235,7 +2244,7 @@ const views = {
                 Skills <span id="sort-candidate-skills"></span>
               </th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                Resume
+                Files
               </th>
             </tr>
           </thead>
@@ -2318,6 +2327,8 @@ const views = {
   // Candidate Detail View
   async candidateDetail(container, id) {
     const candidate = await api.get(`/api/candidates/${id}`);
+    const files = candidate.files || [];
+    const fileCount = files.length;
 
     container.innerHTML = `
       <div class="mb-6">
@@ -2337,9 +2348,9 @@ const views = {
                     class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium">
               Edit
             </button>
-            <button onclick="views.deleteCandidate('${candidate.id}')"
-                    class="bg-red-50 text-red-600 px-4 py-2 rounded-lg hover:bg-red-100 transition-colors font-medium">
-              Delete
+            <button onclick="views.showArchiveMenu('${candidate.id}')"
+                    class="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium">
+              Archive
             </button>
           </div>
         </div>
@@ -2356,22 +2367,47 @@ const views = {
           </div>
         ` : ''}
 
-        ${candidate.resumeFilename ? `
-          <div class="mt-4 pt-4 border-t border-slate-200">
-            <h3 class="text-sm font-medium text-slate-500 mb-2">Resume</h3>
-            <a href="/api/candidates/${candidate.id}/resume"
-               class="inline-flex items-center text-rose-600 hover:text-rose-700 font-medium"
-               download>
-              <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-              </svg>
-              ${this.escapeHtml(candidate.resumeOriginalName)}
-            </a>
+        <div class="mt-4 pt-4 border-t border-slate-200">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-sm font-medium text-slate-500">Files (${fileCount}/5)</h3>
+            ${fileCount < 5 ? `
+              <label class="inline-flex items-center text-rose-600 hover:text-rose-700 font-medium text-sm cursor-pointer">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                Upload File
+                <input type="file" accept=".pdf,.doc,.docx" class="hidden" onchange="views.uploadCandidateFile('${candidate.id}', this)">
+              </label>
+            ` : ''}
           </div>
-        ` : ''}
+          ${files.length > 0 ? `
+            <div class="space-y-2">
+              ${files.map(f => `
+                <div class="flex items-center justify-between py-1.5 px-3 bg-slate-50 rounded-lg">
+                  <a href="/api/candidates/${candidate.id}/files/${f.id}"
+                     class="inline-flex items-center text-rose-600 hover:text-rose-700 font-medium text-sm"
+                     download>
+                    <svg class="w-4 h-4 mr-1.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    ${this.escapeHtml(f.originalName)}
+                  </a>
+                  <div class="flex items-center gap-2">
+                    ${f.mimeType === 'application/pdf' ? `
+                      <button onclick="views.previewCandidateFile('${candidate.id}', '${f.id}')"
+                              class="text-slate-400 hover:text-slate-600 text-xs">Preview</button>
+                    ` : ''}
+                    <button onclick="views.deleteCandidateFile('${candidate.id}', '${f.id}')"
+                            class="text-red-400 hover:text-red-600 text-xs">Remove</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : '<p class="text-sm text-slate-400">No files uploaded</p>'}
+        </div>
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
+      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
         <h3 class="text-lg font-semibold text-slate-800 mb-4">Comments</h3>
 
         <form onsubmit="views.addCandidateComment(event, '${candidate.id}')" class="mb-6">
@@ -2388,9 +2424,148 @@ const views = {
           ${this.renderCandidateComments(candidate.comments, candidate.id)}
         </div>
       </div>
+
+      <div id="pdf-preview-container"></div>
     `;
 
     this._currentCandidate = candidate;
+
+    // Lazy-load PDF preview for the first PDF file
+    const firstPdf = files.find(f => f.mimeType === 'application/pdf');
+    if (firstPdf) {
+      requestAnimationFrame(() => {
+        this.loadPdfPreview(candidate.id, firstPdf.id, firstPdf.originalName);
+      });
+    }
+  },
+
+  loadPdfPreview(candidateId, fileId, fileName) {
+    const container = document.getElementById('pdf-preview-container');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
+        <h3 class="text-lg font-semibold text-slate-800 mb-4">PDF Preview: ${this.escapeHtml(fileName)}</h3>
+        <div id="pdf-loading" class="flex items-center justify-center py-8 text-slate-400">
+          <svg class="animate-spin h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          Loading preview...
+        </div>
+        <iframe id="pdf-iframe"
+                src="/api/candidates/${candidateId}/files/${fileId}?inline=true"
+                class="w-full border border-slate-200 rounded-lg hidden"
+                style="height: 800px;"
+                onload="views.onPdfLoaded()"
+                onerror="views.onPdfError()">
+        </iframe>
+        <div id="pdf-error" class="hidden text-center py-8 text-slate-400">
+          Preview not available. <a href="/api/candidates/${candidateId}/files/${fileId}" download class="text-rose-600 hover:text-rose-700">Download instead</a>
+        </div>
+      </div>
+    `;
+  },
+
+  onPdfLoaded() {
+    const loading = document.getElementById('pdf-loading');
+    const iframe = document.getElementById('pdf-iframe');
+    if (loading) loading.classList.add('hidden');
+    if (iframe) iframe.classList.remove('hidden');
+  },
+
+  onPdfError() {
+    const loading = document.getElementById('pdf-loading');
+    const errorDiv = document.getElementById('pdf-error');
+    if (loading) loading.classList.add('hidden');
+    if (errorDiv) errorDiv.classList.remove('hidden');
+  },
+
+  previewCandidateFile(candidateId, fileId) {
+    const file = this._currentCandidate.files.find(f => f.id === fileId);
+    if (!file) return;
+    this.loadPdfPreview(candidateId, fileId, file.originalName);
+    document.getElementById('pdf-preview-container').scrollIntoView({ behavior: 'smooth' });
+  },
+
+  showArchiveMenu(candidateId) {
+    const categories = this._archiveCategories;
+    modal.show(`
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Archive Candidate</h3>
+      <p class="text-slate-600 mb-4">Select a category for this candidate:</p>
+      <div class="space-y-2">
+        ${Object.entries(categories).map(([key, label]) => `
+          <button onclick="views.archiveCandidate('${candidateId}', '${key}')"
+                  class="w-full text-left px-4 py-3 rounded-lg border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+            <span class="font-medium text-slate-700">${label}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div class="flex justify-end mt-4">
+        <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
+      </div>
+    `);
+  },
+
+  async archiveCandidate(id, category) {
+    try {
+      await api.put(`/api/candidates/${id}/archive`, { category });
+      modal.hide();
+      router.navigate('candidates');
+    } catch (err) {
+      console.error('Error archiving candidate:', err);
+      alert('Failed to archive candidate: ' + err.message);
+    }
+  },
+
+  async restoreCandidate(id) {
+    try {
+      await api.post(`/api/candidates/${id}/restore`);
+      router.navigate('archive');
+    } catch (err) {
+      console.error('Error restoring candidate:', err);
+      alert('Failed to restore candidate: ' + err.message);
+    }
+  },
+
+  async uploadCandidateFile(candidateId, input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`/api/candidates/${candidateId}/files`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.status === 401) {
+        auth.showLoginModal();
+        return;
+      }
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to upload file');
+      }
+
+      router.navigate('candidate-detail', { id: candidateId });
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  },
+
+  async deleteCandidateFile(candidateId, fileId) {
+    if (!confirm('Remove this file?')) return;
+    try {
+      await api.delete(`/api/candidates/${candidateId}/files/${fileId}`);
+      router.navigate('candidate-detail', { id: candidateId });
+    } catch (err) {
+      console.error('Error deleting file:', err);
+      alert('Failed to delete file: ' + err.message);
+    }
   },
 
   renderCandidateComments(comments, candidateId) {
@@ -2450,24 +2625,15 @@ const views = {
     router.navigate('candidate-detail', { id: candidateId });
   },
 
-  async deleteCandidate(id) {
-    if (!confirm('Delete this candidate?')) return;
-    try {
-      await api.delete(`/api/candidates/${id}`);
-      router.navigate('candidates');
-    } catch (err) {
-      console.error('Error deleting candidate:', err);
-      alert('Failed to delete candidate: ' + err.message);
-    }
-  },
-
   // Candidate Form View
   async candidateForm(container, id) {
-    let candidate = { name: '', email: '', phone: '', role: '', skills: '', resumeOriginalName: '' };
+    let candidate = { name: '', email: '', phone: '', role: '', skills: '', files: [] };
 
     if (id) {
       candidate = await api.get(`/api/candidates/${id}`);
     }
+
+    const files = candidate.files || [];
 
     container.innerHTML = `
       <div class="mb-6">
@@ -2514,12 +2680,20 @@ const views = {
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1.5">Resume (PDF, DOC, DOCX - max 10MB)</label>
-            ${candidate.resumeOriginalName ? `
-              <p class="text-sm text-slate-500 mb-2">Current: ${this.escapeHtml(candidate.resumeOriginalName)}</p>
+            <label class="block text-sm font-medium text-slate-700 mb-1.5">File (PDF, DOC, DOCX - max 10MB)</label>
+            ${files.length > 0 ? `
+              <div class="mb-2 space-y-1">
+                ${files.map(f => `
+                  <div class="text-sm text-slate-500 flex items-center gap-2">
+                    <span>${this.escapeHtml(f.originalName)}</span>
+                  </div>
+                `).join('')}
+              </div>
             ` : ''}
-            <input type="file" id="candidate-resume" accept=".pdf,.doc,.docx"
-                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100">
+            ${files.length < 5 ? `
+              <input type="file" id="candidate-resume" accept=".pdf,.doc,.docx"
+                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100">
+            ` : '<p class="text-sm text-amber-600">Maximum 5 files reached. Remove files from the detail view to upload more.</p>'}
           </div>
 
           <div class="flex justify-end gap-4 pt-4">
@@ -2543,9 +2717,9 @@ const views = {
     formData.append('role', document.getElementById('candidate-role').value);
     formData.append('skills', document.getElementById('candidate-skills').value);
 
-    const resumeFile = document.getElementById('candidate-resume').files[0];
-    if (resumeFile) {
-      formData.append('resume', resumeFile);
+    const resumeInput = document.getElementById('candidate-resume');
+    if (resumeInput && resumeInput.files[0]) {
+      formData.append('resume', resumeInput.files[0]);
     }
 
     try {
@@ -2968,10 +3142,13 @@ const views = {
 
   // Archive View - shows archived companies and contacts
   async archiveView(container) {
-    const [companies, contacts] = await Promise.all([
+    const [companies, contacts, candidates] = await Promise.all([
       api.get('/api/archive/companies'),
-      api.get('/api/archive/contacts')
+      api.get('/api/archive/contacts'),
+      api.get('/api/archive/candidates')
     ]);
+
+    const categoryLabels = this._archiveCategories;
 
     container.innerHTML = `
       <div class="mb-6">
@@ -3020,7 +3197,7 @@ const views = {
         `}
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
+      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
         <h2 class="text-lg font-semibold text-slate-800 mb-4">Archived Contacts (${contacts.length})</h2>
         ${contacts.length === 0 ? `
           <p class="text-slate-500">No archived contacts</p>
@@ -3057,7 +3234,95 @@ const views = {
           </div>
         `}
       </div>
+
+      <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
+        <h2 class="text-lg font-semibold text-slate-800 mb-4">Archived Candidates (${candidates.length})</h2>
+        ${candidates.length === 0 ? `
+          <p class="text-slate-500">No archived candidates</p>
+        ` : `
+          <div class="flex flex-wrap gap-2 mb-4">
+            <button onclick="views.filterArchivedCandidates(null)"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium bg-rose-100 text-rose-700 hover:bg-rose-200 transition-colors"
+                    id="archive-cat-all">
+              All (${candidates.length})
+            </button>
+            ${Object.entries(categoryLabels).map(([key, label]) => {
+              const count = candidates.filter(c => c.archiveCategory === key).length;
+              return count > 0 ? `
+                <button onclick="views.filterArchivedCandidates('${key}')"
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                        id="archive-cat-${key}">
+                  ${label} (${count})
+                </button>
+              ` : '';
+            }).join('')}
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="text-left text-sm text-slate-500 border-b border-slate-200">
+                  <th class="pb-3 font-medium">Candidate</th>
+                  <th class="pb-3 font-medium">Role</th>
+                  <th class="pb-3 font-medium">Category</th>
+                  <th class="pb-3 font-medium">Archived</th>
+                  <th class="pb-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="archived-candidates-table">
+                ${this.renderArchivedCandidateRows(candidates, categoryLabels)}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </div>
     `;
+
+    this._archivedCandidates = candidates;
+  },
+
+  renderArchivedCandidateRows(candidates, categoryLabels) {
+    return candidates.map(c => `
+      <tr class="border-b border-slate-100">
+        <td class="py-3">
+          <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
+          ${c.email ? `<div class="text-sm text-slate-500">${this.escapeHtml(c.email)}</div>` : ''}
+        </td>
+        <td class="py-3 text-slate-600">${this.escapeHtml(c.role || '-')}</td>
+        <td class="py-3">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+            ${categoryLabels[c.archiveCategory] || c.archiveCategory || 'Unknown'}
+          </span>
+        </td>
+        <td class="py-3 text-sm text-slate-500">${new Date(c.archivedAt).toLocaleDateString()}</td>
+        <td class="py-3">
+          <button onclick="views.restoreCandidate('${c.id}')"
+                  class="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors text-sm font-medium">
+            Restore
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  },
+
+  filterArchivedCandidates(category) {
+    const categoryLabels = this._archiveCategories;
+    const filtered = category
+      ? this._archivedCandidates.filter(c => c.archiveCategory === category)
+      : this._archivedCandidates;
+
+    document.getElementById('archived-candidates-table').innerHTML =
+      this.renderArchivedCandidateRows(filtered, categoryLabels);
+
+    // Update active tab styling
+    const allButtons = document.querySelectorAll('[id^="archive-cat-"]');
+    allButtons.forEach(btn => {
+      btn.className = btn.className.replace('bg-rose-100 text-rose-700', 'bg-slate-100 text-slate-600');
+    });
+    const activeId = category ? `archive-cat-${category}` : 'archive-cat-all';
+    const activeBtn = document.getElementById(activeId);
+    if (activeBtn) {
+      activeBtn.className = activeBtn.className.replace('bg-slate-100 text-slate-600', 'bg-rose-100 text-rose-700');
+    }
   },
 
   // Utility

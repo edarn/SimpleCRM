@@ -218,6 +218,8 @@ function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_team_invitations_email ON team_invitations(email);
       CREATE INDEX IF NOT EXISTS idx_team_invitations_status ON team_invitations(status);
       CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);
+      CREATE INDEX IF NOT EXISTS idx_candidate_files_candidate_id ON candidate_files(candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_candidates_archived_at ON candidates(archived_at);
     `);
   } catch (err) {
     console.log('Some indexes already exist or columns not yet migrated:', err.message);
@@ -269,6 +271,48 @@ function migrateExistingData() {
 
   // Add logo_filename column for teams (team logo feature)
   addColumnIfNotExists('teams', 'logo_filename', 'TEXT');
+
+  // Add archive columns for candidates
+  addColumnIfNotExists('candidates', 'archived_at', 'TEXT');
+  addColumnIfNotExists('candidates', 'archive_category', 'TEXT');
+
+  // Create candidate_files table for multi-file uploads
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS candidate_files (
+      id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      file_size INTEGER DEFAULT 0,
+      mime_type TEXT DEFAULT '',
+      uploaded_at TEXT NOT NULL,
+      uploaded_by TEXT,
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    )
+  `);
+
+  // Migrate existing resume data from candidates table to candidate_files table
+  const candidatesWithResumes = db.prepare(`
+    SELECT id, resume_filename, resume_original_name, created_by, created_at
+    FROM candidates
+    WHERE resume_filename IS NOT NULL AND resume_filename != ''
+  `).all();
+
+  const existingFiles = db.prepare('SELECT candidate_id FROM candidate_files').all();
+  const existingCandidateIds = new Set(existingFiles.map(f => f.candidate_id));
+
+  for (const c of candidatesWithResumes) {
+    if (!existingCandidateIds.has(c.id)) {
+      const fileId = require('crypto').randomUUID().replace(/-/g, '').slice(0, 20);
+      const ext = require('path').extname(c.resume_original_name || '').toLowerCase();
+      const mimeType = ext === '.pdf' ? 'application/pdf' : ext === '.doc' ? 'application/msword' : ext === '.docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : '';
+      db.prepare(`
+        INSERT INTO candidate_files (id, candidate_id, filename, original_name, file_size, mime_type, uploaded_at, uploaded_by)
+        VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+      `).run(fileId, c.id, c.resume_filename, c.resume_original_name, mimeType, c.created_at, c.created_by);
+    }
+  }
 
   // Find the first user to assign orphaned data to
   const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
