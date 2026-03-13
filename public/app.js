@@ -147,6 +147,10 @@ function toggleUserMenu() {
   dropdown.classList.toggle('hidden');
 }
 
+function toggleMobileMenu() {
+  document.getElementById('mobile-nav').classList.toggle('hidden');
+}
+
 // Close dropdown when clicking outside
 document.addEventListener('click', (e) => {
   const dropdown = document.getElementById('user-menu-dropdown');
@@ -180,7 +184,9 @@ const auth = {
   showLoggedInUI() {
     document.getElementById('landing-page').classList.add('hidden');
     document.getElementById('main-content').classList.remove('hidden');
-    document.getElementById('nav-links').classList.remove('hidden');
+    const navLinks = document.getElementById('nav-links');
+    navLinks.className = 'ml-10 hidden md:flex space-x-2';
+    document.getElementById('mobile-menu-button').classList.remove('hidden');
     document.getElementById('user-section').classList.remove('hidden');
     document.getElementById('current-user').textContent = this.currentUser.username;
     document.getElementById('auth-modal').classList.add('hidden');
@@ -264,7 +270,9 @@ const auth = {
   },
 
   showLandingPage() {
-    document.getElementById('nav-links').classList.add('hidden');
+    document.getElementById('nav-links').className = 'ml-10 hidden space-x-2';
+    document.getElementById('mobile-menu-button').classList.add('hidden');
+    document.getElementById('mobile-nav').classList.add('hidden');
     document.getElementById('user-section').classList.add('hidden');
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('landing-page').classList.remove('hidden');
@@ -840,7 +848,7 @@ const views = {
     } else {
       // Full-width mode (no selection or mobile)
       container.innerHTML = `
-        <div class="mb-6 flex justify-between items-center">
+        <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
             <h2 class="text-2xl font-bold text-slate-800">Contacts</h2>
             <p class="text-slate-500">${contacts.length} contacts</p>
@@ -858,7 +866,7 @@ const views = {
         </div>
 
         <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
-          <table class="min-w-full divide-y divide-slate-200">
+          <table class="min-w-full divide-y divide-slate-200 responsive-table">
             <thead class="bg-gradient-to-r from-slate-50 to-slate-100">
               <tr>
                 <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
@@ -977,7 +985,7 @@ const views = {
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${contact.role ? `<div><span class="text-slate-500">Role:</span> <span class="text-slate-700">${this.escapeHtml(contact.role)}</span></div>` : ''}
           ${contact.department ? `<div><span class="text-slate-500">Department:</span> <span class="text-slate-700">${this.escapeHtml(contact.department)}</span></div>` : ''}
           ${contact.email ? `<div><span class="text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(contact.email)}" class="text-sky-600 hover:text-sky-700">${this.escapeHtml(contact.email)}</a></div>` : ''}
@@ -1055,8 +1063,8 @@ const views = {
           <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
           ${c.role ? `<div class="text-sm text-slate-500">${this.escapeHtml(c.role)}</div>` : ''}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-slate-600">${this.escapeHtml(c.companyName || '-')}</td>
-        <td class="px-6 py-4 whitespace-nowrap text-slate-500">${formatDateTime(c.lastNoteDate)}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Company">${this.escapeHtml(c.companyName || '-')}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-slate-500" data-label="Last Note">${formatDateTime(c.lastNoteDate)}</td>
       </tr>
     `).join('');
   },
@@ -1124,26 +1132,26 @@ const views = {
         </a>
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
-        <div class="flex justify-between items-start mb-4">
+      <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6 mb-6 border border-slate-200">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
           <div>
-            <h2 class="text-2xl font-bold text-slate-800">${this.escapeHtml(contact.name)}</h2>
+            <h2 class="text-xl sm:text-2xl font-bold text-slate-800">${this.escapeHtml(contact.name)}</h2>
             <a href="#" onclick="router.navigate('company-detail', {id: '${contact.companyId}'}); return false;"
                class="text-sky-600 hover:text-sky-700 font-medium">${this.escapeHtml(contact.companyName)}</a>
           </div>
           <div class="flex gap-2">
             <button onclick="router.navigate('contact-form', {id: '${contact.id}'})"
-                    class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium">
+                    class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm">
               Edit
             </button>
             <button onclick="views.archiveContact('${contact.id}')"
-                    class="bg-amber-50 text-amber-600 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium">
+                    class="bg-amber-50 text-amber-600 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium text-sm">
               Archive
             </button>
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${contact.role ? `<div><span class="text-slate-500">Role:</span> <span class="text-slate-700">${this.escapeHtml(contact.role)}</span></div>` : ''}
           ${contact.department ? `<div><span class="text-slate-500">Department:</span> <span class="text-slate-700">${this.escapeHtml(contact.department)}</span></div>` : ''}
           ${contact.email ? `<div><span class="text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(contact.email)}" class="text-sky-600 hover:text-sky-700">${this.escapeHtml(contact.email)}</a></div>` : ''}
@@ -1448,7 +1456,7 @@ const views = {
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
               <input type="text" id="contact-role" value="${this.escapeHtml(contact.role || '')}"
@@ -1467,7 +1475,7 @@ const views = {
                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">${this.escapeHtml(contact.description || '')}</textarea>
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
               <input type="email" id="contact-email" value="${this.escapeHtml(contact.email || '')}"
@@ -1548,7 +1556,7 @@ const views = {
     const companies = await api.get('/api/companies');
 
     container.innerHTML = `
-      <div class="mb-6 flex justify-between items-center">
+      <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h2 class="text-2xl font-bold text-slate-800">Companies</h2>
           <p class="text-slate-500">${companies.length} companies</p>
@@ -1560,7 +1568,7 @@ const views = {
       </div>
 
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
-        <table class="min-w-full divide-y divide-slate-200">
+        <table class="min-w-full divide-y divide-slate-200 responsive-table">
           <thead class="bg-gradient-to-r from-slate-50 to-slate-100">
             <tr>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Name</th>
@@ -1574,8 +1582,8 @@ const views = {
             ` : companies.map(c => `
               <tr class="hover:bg-violet-50/50 cursor-pointer transition-colors" onclick="router.navigate('company-detail', {id: '${c.id}'})">
                 <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-800">${this.escapeHtml(c.name)}</td>
-                <td class="px-6 py-4 text-slate-600">${this.escapeHtml(c.technologies || '-')}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-slate-500">${c.contactCount}</td>
+                <td class="px-6 py-4 text-slate-600" data-label="Technologies">${this.escapeHtml(c.technologies || '-')}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-slate-500" data-label="Contacts">${c.contactCount}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1599,35 +1607,35 @@ const views = {
         </a>
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
-        <div class="flex justify-between items-start mb-4">
+      <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6 mb-6 border border-slate-200">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
           <div>
-            <h2 class="text-2xl font-bold text-slate-800">${this.escapeHtml(company.name)}</h2>
+            <h2 class="text-xl sm:text-2xl font-bold text-slate-800">${this.escapeHtml(company.name)}</h2>
             ${company.technologies ? `<p class="text-slate-600 mt-1">${this.escapeHtml(company.technologies)}</p>` : ''}
           </div>
           <div class="flex gap-2">
             <button onclick="router.navigate('company-form', {id: '${company.id}'})"
-                    class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium">
+                    class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm">
               Edit
             </button>
             <button onclick="views.archiveCompany('${company.id}')"
-                    class="bg-amber-50 text-amber-600 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium">
+                    class="bg-amber-50 text-amber-600 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium text-sm">
               Archive
             </button>
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${company.organizationNumber ? `<div><span class="text-slate-500">Org.nr:</span> <span class="text-slate-700">${this.escapeHtml(company.organizationNumber)}</span></div>` : ''}
           ${company.address ? `<div><span class="text-slate-500">Adress:</span> <span class="text-slate-700">${this.escapeHtml(company.address)}</span></div>` : ''}
         </div>
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
-        <div class="flex justify-between items-center mb-4">
+      <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6 mb-6 border border-slate-200">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
           <h3 class="text-lg font-semibold text-slate-800">Contacts (${company.contacts.length})</h3>
           <button onclick="router.navigate('contact-form', {companyId: '${company.id}'})"
-                  class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-4 py-2 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-medium shadow-sm">
+                  class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-4 py-2 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-medium shadow-sm text-sm">
             + Add Contact
           </button>
         </div>
@@ -1836,7 +1844,7 @@ const views = {
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition-colors">
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Organisationsnr</label>
               <input type="text" id="company-orgnum" value="${this.escapeHtml(company.organizationNumber || '')}"
@@ -1891,7 +1899,7 @@ const views = {
     const todos = await api.get('/api/todos');
 
     container.innerHTML = `
-      <div class="mb-6 flex justify-between items-center">
+      <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h2 class="text-2xl font-bold text-slate-800">ToDos</h2>
           <p class="text-slate-500">${todos.filter(t => !t.completed).length} active, ${todos.filter(t => t.completed).length} completed</p>
@@ -1924,11 +1932,11 @@ const views = {
       return `<div class="px-6 py-8 text-center text-slate-500">No ToDos found</div>`;
     }
     return todos.map(t => `
-      <div class="flex items-start px-6 py-4 ${t.completed ? 'bg-slate-50' : 'hover:bg-emerald-50/30'} transition-colors" data-todo-id="${t.id}">
+      <div class="flex flex-wrap items-start px-4 sm:px-6 py-4 ${t.completed ? 'bg-slate-50' : 'hover:bg-emerald-50/30'} transition-colors" data-todo-id="${t.id}">
         <input type="checkbox" ${t.completed ? 'checked' : ''}
                onchange="views.toggleTodo('${t.id}', this.checked)"
                class="h-5 w-5 mt-1 text-emerald-600 rounded border-slate-300 cursor-pointer focus:ring-emerald-500">
-        <div class="ml-4 flex-1 ${t.completed ? 'opacity-50' : ''}">
+        <div class="ml-4 flex-1 min-w-0 ${t.completed ? 'opacity-50' : ''}">
           <div class="font-medium text-slate-800 ${t.completed ? 'line-through' : ''}">${this.escapeHtml(t.title)}</div>
           ${t.description ? `<div class="text-sm text-slate-600 mt-1">${this.escapeHtml(t.description)}</div>` : ''}
           <div class="text-sm text-slate-500 mt-1">
@@ -1936,7 +1944,7 @@ const views = {
             <span class="text-slate-400">Due: ${formatDateTime(t.dueDate)}</span>
           </div>
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 ml-9 sm:ml-0 mt-2 sm:mt-0">
           <button onclick="views.navigateToLinked('${t.linkedType}', '${t.linkedId}')" class="text-emerald-600 hover:text-emerald-700 text-sm font-medium">View</button>
           <button onclick="views.editTodo('${t.id}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
           <button onclick="views.deleteTodo('${t.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
@@ -2210,7 +2218,7 @@ const views = {
     const candidates = await api.get('/api/candidates');
 
     container.innerHTML = `
-      <div class="mb-6 flex justify-between items-center">
+      <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h2 class="text-2xl font-bold text-slate-800">Candidates</h2>
           <p class="text-slate-500">${candidates.length} candidates</p>
@@ -2228,7 +2236,14 @@ const views = {
       </div>
 
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
-        <table class="min-w-full divide-y divide-slate-200">
+        <!-- Mobile sort controls -->
+        <div class="md:hidden px-4 py-2 bg-slate-50 border-b border-slate-200 flex gap-2 flex-wrap">
+          <span class="text-xs text-slate-500 self-center">Sort:</span>
+          <button onclick="views.sortCandidates('name')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Name <span id="sort-candidate-name-m" class="text-rose-600"></span></button>
+          <button onclick="views.sortCandidates('role')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Role <span id="sort-candidate-role-m"></span></button>
+          <button onclick="views.sortCandidates('skills')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Skills <span id="sort-candidate-skills-m"></span></button>
+        </div>
+        <table class="min-w-full divide-y divide-slate-200 responsive-table">
           <thead class="bg-gradient-to-r from-slate-50 to-slate-100">
             <tr>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
@@ -2271,9 +2286,9 @@ const views = {
           <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
           ${c.email ? `<div class="text-sm text-slate-500">${this.escapeHtml(c.email)}</div>` : ''}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-slate-600">${this.escapeHtml(c.role || '-')}</td>
-        <td class="px-6 py-4 text-slate-600">${this.escapeHtml(c.skills || '-')}</td>
-        <td class="px-6 py-4 whitespace-nowrap text-slate-500">
+        <td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Role">${this.escapeHtml(c.role || '-')}</td>
+        <td class="px-6 py-4 text-slate-600" data-label="Skills">${this.escapeHtml(c.skills || '-')}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-slate-500" data-label="Files">
           ${c.resumeFilename ? '<span class="text-emerald-600 font-medium">Uploaded</span>' : '-'}
         </td>
       </tr>
@@ -2300,9 +2315,11 @@ const views = {
       this._candidateSortAsc = true;
     }
 
-    // Clear sort indicators
+    // Clear sort indicators (desktop + mobile)
     ['name', 'role', 'skills'].forEach(f => {
       document.getElementById(`sort-candidate-${f}`).textContent = '';
+      const mEl = document.getElementById(`sort-candidate-${f}-m`);
+      if (mEl) mEl.textContent = '';
     });
 
     const sorted = [...this._candidates].sort((a, b) => {
@@ -2320,7 +2337,10 @@ const views = {
       return this._candidateSortAsc ? result : -result;
     });
 
-    document.getElementById(`sort-candidate-${field}`).textContent = this._candidateSortAsc ? '↑' : '↓';
+    const arrow = this._candidateSortAsc ? '↑' : '↓';
+    document.getElementById(`sort-candidate-${field}`).textContent = arrow;
+    const mEl = document.getElementById(`sort-candidate-${field}-m`);
+    if (mEl) mEl.textContent = arrow;
     document.getElementById('candidates-table').innerHTML = this.renderCandidateRows(sorted);
   },
 
@@ -2337,25 +2357,25 @@ const views = {
         </a>
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
-        <div class="flex justify-between items-start mb-4">
+      <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6 mb-6 border border-slate-200">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
           <div>
-            <h2 class="text-2xl font-bold text-slate-800">${this.escapeHtml(candidate.name)}</h2>
+            <h2 class="text-xl sm:text-2xl font-bold text-slate-800">${this.escapeHtml(candidate.name)}</h2>
             ${candidate.role ? `<p class="text-slate-600">${this.escapeHtml(candidate.role)}</p>` : ''}
           </div>
           <div class="flex gap-2">
             <button onclick="router.navigate('candidate-form', {id: '${candidate.id}'})"
-                    class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium">
+                    class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm">
               Edit
             </button>
             <button onclick="views.showArchiveMenu('${candidate.id}')"
-                    class="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium">
+                    class="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium text-sm">
               Archive
             </button>
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${candidate.email ? `<div><span class="text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(candidate.email)}" class="text-rose-600 hover:text-rose-700">${this.escapeHtml(candidate.email)}</a></div>` : ''}
           ${candidate.phone ? `<div><span class="text-slate-500">Phone:</span> <span class="text-slate-700">${this.escapeHtml(candidate.phone)}</span></div>` : ''}
         </div>
@@ -2652,7 +2672,7 @@ const views = {
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
               <input type="email" id="candidate-email" value="${this.escapeHtml(candidate.email || '')}"

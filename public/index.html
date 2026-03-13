@@ -28,6 +28,30 @@
     .nav-gradient {
       background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 50%, #3b7ab8 100%);
     }
+    /* Mobile card layout for tables */
+    @media (max-width: 767px) {
+      .responsive-table thead { display: none; }
+      .responsive-table tbody tr {
+        display: block;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .responsive-table tbody td {
+        display: block;
+        padding: 0.15rem 0;
+        white-space: normal !important;
+      }
+      .responsive-table tbody td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        font-size: 0.7rem;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: block;
+      }
+      .responsive-table tbody td:first-child::before { content: none; }
+    }
   </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -37,7 +61,8 @@
       <div class="flex justify-between h-16">
         <div class="flex items-center">
           <h1 class="text-xl font-bold text-white tracking-wide">Simple CRM</h1>
-          <div id="nav-links" class="ml-10 flex space-x-2 hidden">
+          <!-- Desktop nav -->
+          <div id="nav-links" class="ml-10 hidden space-x-2">
             <a href="#" onclick="router.navigate('contacts'); return false;"
                class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
                data-route="contacts">
@@ -59,6 +84,12 @@
               ToDos
             </a>
           </div>
+          <!-- Mobile hamburger button -->
+          <button id="mobile-menu-button" class="md:hidden ml-4 text-white hidden" onclick="toggleMobileMenu()">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+          </button>
         </div>
         <!-- Team Logo -->
         <div id="team-logo-container" class="hidden flex items-center h-full py-1">
@@ -67,7 +98,7 @@
         <div id="user-section" class="flex items-center hidden relative">
           <div class="relative">
             <button id="user-menu-button" onclick="toggleUserMenu()" class="flex items-center text-sm text-blue-100 hover:text-white transition-colors">
-              <span id="current-user" class="mr-2 font-medium"></span>
+              <span id="current-user" class="mr-2 font-medium truncate max-w-[100px] sm:max-w-none"></span>
               <span id="user-role-badge" class="hidden px-2 py-0.5 text-xs rounded-full mr-2"></span>
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
@@ -85,6 +116,24 @@
       </div>
     </div>
   </nav>
+
+  <!-- Mobile Navigation Dropdown -->
+  <div id="mobile-nav" class="hidden nav-gradient md:hidden border-t border-white/20">
+    <div class="max-w-7xl mx-auto px-4 py-2 flex flex-col space-y-1">
+      <a href="#" onclick="router.navigate('contacts'); toggleMobileMenu(); return false;"
+         class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+         data-route="contacts">Contacts</a>
+      <a href="#" onclick="router.navigate('companies'); toggleMobileMenu(); return false;"
+         class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+         data-route="companies">Companies</a>
+      <a href="#" onclick="router.navigate('candidates'); toggleMobileMenu(); return false;"
+         class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+         data-route="candidates">Candidates</a>
+      <a href="#" onclick="router.navigate('todos'); toggleMobileMenu(); return false;"
+         class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+         data-route="todos">ToDos</a>
+    </div>
+  </div>
 
   <!-- Invitation Banner -->
   <div id="invitation-banner" class="hidden bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200">
