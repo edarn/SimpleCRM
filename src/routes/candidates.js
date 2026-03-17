@@ -45,7 +45,7 @@ router.get('/:id', (req, res) => {
 router.post('/', upload.single('resume'), (req, res) => {
   try {
     const userId = req.session.userId;
-    const { name, email, phone, role, skills } = req.body;
+    const { name, email, phone, role, skills, category } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Candidate name is required' });
@@ -65,6 +65,7 @@ router.post('/', upload.single('resume'), (req, res) => {
       phone,
       role,
       skills,
+      category,
       resumeFilename,
       resumeOriginalName
     }, userId);
@@ -93,7 +94,7 @@ router.post('/', upload.single('resume'), (req, res) => {
 router.put('/:id', upload.single('resume'), (req, res) => {
   try {
     const userId = req.session.userId;
-    const { name, email, phone, role, skills } = req.body;
+    const { name, email, phone, role, skills, category } = req.body;
 
     if (name !== undefined && !name.trim()) {
       return res.status(400).json({ error: 'Candidate name cannot be empty' });
@@ -126,6 +127,7 @@ router.put('/:id', upload.single('resume'), (req, res) => {
       phone,
       role,
       skills,
+      category,
       resumeFilename,
       resumeOriginalName
     }, userId);

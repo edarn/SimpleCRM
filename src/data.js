@@ -1355,6 +1355,7 @@ function formatCandidateRow(row) {
     phone: row.phone,
     role: row.role,
     skills: row.skills,
+    category: row.category || '',
     resumeFilename: row.resume_filename,
     resumeOriginalName: row.resume_original_name,
     archivedAt: row.archived_at,
@@ -1425,16 +1426,16 @@ function getCandidateById(candidateId, userId, includeArchived = false) {
   };
 }
 
-function createCandidate({ name, email, phone, role, skills, resumeFilename, resumeOriginalName }, userId) {
+function createCandidate({ name, email, phone, role, skills, category, resumeFilename, resumeOriginalName }, userId) {
   const teamId = getUserTeamId(userId);
   const id = generateId();
   const now = getTimestamp();
   const username = getUsernameById(userId);
 
   db.prepare(`
-    INSERT INTO candidates (id, name, email, phone, role, skills, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, email || '', phone || '', role || '', skills || '', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
+    INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, email || '', phone || '', role || '', skills || '', category || '', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
 
   return {
     id,
@@ -1443,6 +1444,7 @@ function createCandidate({ name, email, phone, role, skills, resumeFilename, res
     phone: phone || '',
     role: role || '',
     skills: skills || '',
+    category: category || '',
     resumeFilename: resumeFilename || '',
     resumeOriginalName: resumeOriginalName || '',
     createdBy: userId,
@@ -1453,7 +1455,7 @@ function createCandidate({ name, email, phone, role, skills, resumeFilename, res
   };
 }
 
-function updateCandidate(candidateId, { name, email, phone, role, skills, resumeFilename, resumeOriginalName }, userId) {
+function updateCandidate(candidateId, { name, email, phone, role, skills, category, resumeFilename, resumeOriginalName }, userId) {
   // Verify access
   const candidate = getCandidateById(candidateId, userId);
   if (!candidate) return null;
@@ -1463,7 +1465,7 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, resume
 
   db.prepare(`
     UPDATE candidates
-    SET name = ?, email = ?, phone = ?, role = ?, skills = ?, resume_filename = ?, resume_original_name = ?, updated_at = ?
+    SET name = ?, email = ?, phone = ?, role = ?, skills = ?, category = ?, resume_filename = ?, resume_original_name = ?, updated_at = ?
     WHERE id = ?
   `).run(
     name !== undefined ? name : existing.name,
@@ -1471,6 +1473,7 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, resume
     phone !== undefined ? phone : existing.phone,
     role !== undefined ? role : existing.role,
     skills !== undefined ? skills : existing.skills,
+    category !== undefined ? category : (existing.category || ''),
     resumeFilename !== undefined ? resumeFilename : existing.resume_filename,
     resumeOriginalName !== undefined ? resumeOriginalName : existing.resume_original_name,
     now,

@@ -276,6 +276,9 @@ function migrateExistingData() {
   addColumnIfNotExists('candidates', 'archived_at', 'TEXT');
   addColumnIfNotExists('candidates', 'archive_category', 'TEXT');
 
+  // Add category column for active candidates
+  addColumnIfNotExists('candidates', 'category', "TEXT DEFAULT ''");
+
   // Create candidate_files table for multi-file uploads
   db.exec(`
     CREATE TABLE IF NOT EXISTS candidate_files (

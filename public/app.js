@@ -2204,6 +2204,15 @@ const views = {
 
   // ============ Candidate Views ============
 
+  // Candidate category labels (for active candidates)
+  _candidateCategories: {
+    new: 'New',
+    in_progress: 'In Progress',
+    interview: 'Interview',
+    offer: 'Offer',
+    on_hold: 'On Hold'
+  },
+
   // Archive category labels
   _archiveCategories: {
     declined: 'Declined',
@@ -2216,6 +2225,7 @@ const views = {
   // Candidate List View
   async candidateList(container) {
     const candidates = await api.get('/api/candidates');
+    const categoryLabels = this._candidateCategories;
 
     container.innerHTML = `
       <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -2229,10 +2239,19 @@ const views = {
         </button>
       </div>
 
-      <div class="mb-4">
-        <input type="text" id="candidate-search-input" placeholder="Search candidates (name, email, role, skills)..."
-               class="w-full md:w-96 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"
+      <div class="mb-4 flex flex-col sm:flex-row gap-3">
+        <input type="text" id="candidate-search-input" placeholder="Search candidates..."
+               class="w-full sm:flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"
                oninput="views.filterCandidates()">
+        <select id="candidate-category-filter"
+                class="px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white text-slate-700"
+                onchange="views.filterCandidates()">
+          <option value="">All Categories</option>
+          <option value="_uncategorized">Uncategorized</option>
+          ${Object.entries(categoryLabels).map(([key, label]) =>
+            `<option value="${key}">${label}</option>`
+          ).join('')}
+        </select>
       </div>
 
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
@@ -2253,6 +2272,9 @@ const views = {
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
                   onclick="views.sortCandidates('role')">
                 Role <span id="sort-candidate-role"></span>
+              </th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                Category
               </th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
                   onclick="views.sortCandidates('skills')">
@@ -2276,9 +2298,21 @@ const views = {
     document.getElementById('sort-candidate-name').textContent = '↑';
   },
 
+  _categoryBadgeClass(category) {
+    const colors = {
+      new: 'bg-blue-100 text-blue-700',
+      in_progress: 'bg-amber-100 text-amber-700',
+      interview: 'bg-violet-100 text-violet-700',
+      offer: 'bg-emerald-100 text-emerald-700',
+      on_hold: 'bg-slate-100 text-slate-600'
+    };
+    return colors[category] || 'bg-slate-100 text-slate-500';
+  },
+
   renderCandidateRows(candidates) {
+    const categoryLabels = this._candidateCategories;
     if (candidates.length === 0) {
-      return `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
+      return `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
     }
     return candidates.map(c => `
       <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
@@ -2287,6 +2321,9 @@ const views = {
           ${c.email ? `<div class="text-sm text-slate-500">${this.escapeHtml(c.email)}</div>` : ''}
         </td>
         <td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Role">${this.escapeHtml(c.role || '-')}</td>
+        <td class="px-6 py-4 whitespace-nowrap" data-label="Category">
+          ${c.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(c.category)}">${this.escapeHtml(categoryLabels[c.category] || c.category)}</span>` : '<span class="text-slate-400">-</span>'}
+        </td>
         <td class="px-6 py-4 text-slate-600" data-label="Skills">${this.escapeHtml(c.skills || '-')}</td>
         <td class="px-6 py-4 whitespace-nowrap text-slate-500" data-label="Files">
           ${c.resumeFilename ? '<span class="text-emerald-600 font-medium">Uploaded</span>' : '-'}
@@ -2297,13 +2334,25 @@ const views = {
 
   filterCandidates() {
     const query = document.getElementById('candidate-search-input').value.toLowerCase();
-    const filtered = this._candidates.filter(c =>
-      c.name.toLowerCase().includes(query) ||
-      (c.email || '').toLowerCase().includes(query) ||
-      (c.phone || '').toLowerCase().includes(query) ||
-      (c.role || '').toLowerCase().includes(query) ||
-      (c.skills || '').toLowerCase().includes(query)
-    );
+    const categoryFilter = document.getElementById('candidate-category-filter').value;
+    let filtered = this._candidates;
+
+    if (categoryFilter === '_uncategorized') {
+      filtered = filtered.filter(c => !c.category);
+    } else if (categoryFilter) {
+      filtered = filtered.filter(c => c.category === categoryFilter);
+    }
+
+    if (query) {
+      filtered = filtered.filter(c =>
+        c.name.toLowerCase().includes(query) ||
+        (c.email || '').toLowerCase().includes(query) ||
+        (c.phone || '').toLowerCase().includes(query) ||
+        (c.role || '').toLowerCase().includes(query) ||
+        (c.skills || '').toLowerCase().includes(query)
+      );
+    }
+
     document.getElementById('candidates-table').innerHTML = this.renderCandidateRows(filtered);
   },
 
@@ -2362,6 +2411,7 @@ const views = {
           <div>
             <h2 class="text-xl sm:text-2xl font-bold text-slate-800">${this.escapeHtml(candidate.name)}</h2>
             ${candidate.role ? `<p class="text-slate-600">${this.escapeHtml(candidate.role)}</p>` : ''}
+            ${candidate.category ? `<span class="inline-block mt-1 px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(candidate.category)}">${this.escapeHtml(this._candidateCategories[candidate.category] || candidate.category)}</span>` : ''}
           </div>
           <div class="flex gap-2">
             <button onclick="router.navigate('candidate-form', {id: '${candidate.id}'})"
@@ -2685,11 +2735,23 @@ const views = {
             </div>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
-            <input type="text" id="candidate-role" value="${this.escapeHtml(candidate.role || '')}"
-                   placeholder="e.g., Senior Developer, Product Manager"
-                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
+              <input type="text" id="candidate-role" value="${this.escapeHtml(candidate.role || '')}"
+                     placeholder="e.g., Senior Developer, Product Manager"
+                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1.5">Category</label>
+              <select id="candidate-category"
+                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white">
+                <option value="">No Category</option>
+                ${Object.entries(this._candidateCategories).map(([key, label]) =>
+                  `<option value="${key}" ${candidate.category === key ? 'selected' : ''}>${label}</option>`
+                ).join('')}
+              </select>
+            </div>
           </div>
 
           <div>
@@ -2736,6 +2798,7 @@ const views = {
     formData.append('phone', document.getElementById('candidate-phone').value);
     formData.append('role', document.getElementById('candidate-role').value);
     formData.append('skills', document.getElementById('candidate-skills').value);
+    formData.append('category', document.getElementById('candidate-category').value);
 
     const resumeInput = document.getElementById('candidate-resume');
     if (resumeInput && resumeInput.files[0]) {
