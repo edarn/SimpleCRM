@@ -279,6 +279,18 @@ function migrateExistingData() {
   // Add category column for active candidates
   addColumnIfNotExists('candidates', 'category', "TEXT DEFAULT ''");
 
+  // Migrate: unify archive categories into main category field
+  // Move archive_category to category for archived candidates, then clear archived_at
+  db.prepare(`
+    UPDATE candidates SET category = archive_category, archived_at = NULL, archive_category = NULL
+    WHERE archived_at IS NOT NULL AND archive_category IS NOT NULL AND archive_category != ''
+  `).run();
+  // Set default category for any candidates without one
+  db.prepare(`
+    UPDATE candidates SET category = 'in_progress'
+    WHERE category IS NULL OR category = ''
+  `).run();
+
   // Create candidate_files table for multi-file uploads
   db.exec(`
     CREATE TABLE IF NOT EXISTS candidate_files (

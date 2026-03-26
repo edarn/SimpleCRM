@@ -1331,7 +1331,7 @@ function getAllCandidates(userId) {
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.team_id = ? AND c.archived_at IS NULL
+      WHERE c.team_id = ?
       ORDER BY c.name
     `).all(teamId);
   } else {
@@ -1339,7 +1339,7 @@ function getAllCandidates(userId) {
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.created_by = ? AND c.team_id IS NULL AND c.archived_at IS NULL
+      WHERE c.created_by = ? AND c.team_id IS NULL
       ORDER BY c.name
     `).all(userId);
   }
@@ -1367,9 +1367,8 @@ function formatCandidateRow(row) {
   };
 }
 
-function getCandidateById(candidateId, userId, includeArchived = false) {
+function getCandidateById(candidateId, userId) {
   const teamId = getUserTeamId(userId);
-  const archivedFilter = includeArchived ? '' : 'AND c.archived_at IS NULL';
 
   let candidate;
   if (teamId) {
@@ -1377,14 +1376,14 @@ function getCandidateById(candidateId, userId, includeArchived = false) {
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.id = ? AND c.team_id = ? ${archivedFilter}
+      WHERE c.id = ? AND c.team_id = ?
     `).get(candidateId, teamId);
   } else {
     candidate = db.prepare(`
       SELECT c.*, u.username as created_by_username
       FROM candidates c
       LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.id = ? AND c.created_by = ? AND c.team_id IS NULL ${archivedFilter}
+      WHERE c.id = ? AND c.created_by = ? AND c.team_id IS NULL
     `).get(candidateId, userId);
   }
 
@@ -1435,7 +1434,7 @@ function createCandidate({ name, email, phone, role, skills, category, resumeFil
   db.prepare(`
     INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, email || '', phone || '', role || '', skills || '', category || '', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
+  `).run(id, name, email || '', phone || '', role || '', skills || '', category || 'in_progress', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
 
   return {
     id,
@@ -1444,7 +1443,7 @@ function createCandidate({ name, email, phone, role, skills, category, resumeFil
     phone: phone || '',
     role: role || '',
     skills: skills || '',
-    category: category || '',
+    category: category || 'in_progress',
     resumeFilename: resumeFilename || '',
     resumeOriginalName: resumeOriginalName || '',
     createdBy: userId,
@@ -1484,76 +1483,19 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, catego
 }
 
 function deleteCandidate(candidateId, userId) {
-  // Redirect to archive with 'declined' as default category
-  return archiveCandidate(candidateId, 'declined', userId);
-}
-
-function archiveCandidate(candidateId, category, userId) {
-  const candidate = getCandidateById(candidateId, userId, true);
+  const candidate = getCandidateById(candidateId, userId);
   if (!candidate) return { error: 'Candidate not found' };
 
   const role = getUserRole(userId);
   if (role === 'member' && candidate.createdBy !== userId) {
-    return { error: 'Permission denied. You can only archive candidates you created.' };
+    return { error: 'Permission denied. You can only delete candidates you created.' };
   }
 
-  const now = getTimestamp();
-  db.prepare(`
-    UPDATE candidates SET archived_at = ?, archive_category = ?, updated_at = ?
-    WHERE id = ?
-  `).run(now, category, now, candidateId);
+  db.prepare('DELETE FROM candidate_comments WHERE candidate_id = ?').run(candidateId);
+  db.prepare('DELETE FROM candidate_files WHERE candidate_id = ?').run(candidateId);
+  db.prepare('DELETE FROM candidates WHERE id = ?').run(candidateId);
 
   return { success: true };
-}
-
-function restoreCandidate(candidateId, userId) {
-  const candidate = getCandidateById(candidateId, userId, true);
-  if (!candidate) return { error: 'Candidate not found' };
-  if (!candidate.archivedAt) return { error: 'Candidate is not archived' };
-
-  const role = getUserRole(userId);
-  if (role === 'member' && candidate.createdBy !== userId) {
-    return { error: 'Permission denied. You can only restore candidates you created.' };
-  }
-
-  const now = getTimestamp();
-  db.prepare(`
-    UPDATE candidates SET archived_at = NULL, archive_category = NULL, updated_at = ?
-    WHERE id = ?
-  `).run(now, candidateId);
-
-  return { success: true };
-}
-
-function getArchivedCandidates(userId, category) {
-  const teamId = getUserTeamId(userId);
-  const categoryFilter = category ? 'AND c.archive_category = ?' : '';
-  const params = [];
-
-  let query;
-  if (teamId) {
-    query = `
-      SELECT c.*, u.username as created_by_username
-      FROM candidates c
-      LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.team_id = ? AND c.archived_at IS NOT NULL ${categoryFilter}
-      ORDER BY c.archived_at DESC
-    `;
-    params.push(teamId);
-  } else {
-    query = `
-      SELECT c.*, u.username as created_by_username
-      FROM candidates c
-      LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.created_by = ? AND c.team_id IS NULL AND c.archived_at IS NOT NULL ${categoryFilter}
-      ORDER BY c.archived_at DESC
-    `;
-    params.push(userId);
-  }
-
-  if (category) params.push(category);
-
-  return db.prepare(query).all(...params).map(row => formatCandidateRow(row));
 }
 
 function getCandidateFiles(candidateId) {
@@ -1601,7 +1543,7 @@ function addCandidateFile(candidateId, { filename, originalName, fileSize, mimeT
 }
 
 function deleteCandidateFile(candidateId, fileId, userId) {
-  const candidate = getCandidateById(candidateId, userId, true);
+  const candidate = getCandidateById(candidateId, userId);
   if (!candidate) return { error: 'Candidate not found' };
 
   const file = db.prepare('SELECT * FROM candidate_files WHERE id = ? AND candidate_id = ?').get(fileId, candidateId);
@@ -1620,7 +1562,7 @@ function deleteCandidateFile(candidateId, fileId, userId) {
 }
 
 function getCandidateFileById(candidateId, fileId, userId) {
-  const candidate = getCandidateById(candidateId, userId, true);
+  const candidate = getCandidateById(candidateId, userId);
   if (!candidate) return null;
 
   const file = db.prepare('SELECT * FROM candidate_files WHERE id = ? AND candidate_id = ?').get(fileId, candidateId);
@@ -1762,9 +1704,6 @@ module.exports = {
   createCandidate,
   updateCandidate,
   deleteCandidate,
-  archiveCandidate,
-  restoreCandidate,
-  getArchivedCandidates,
   createCandidateComment,
   updateCandidateComment,
   deleteCandidateComment,

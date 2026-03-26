@@ -139,54 +139,7 @@ router.put('/:id', upload.single('resume'), (req, res) => {
   }
 });
 
-// PUT /api/candidates/:id/archive - Archive candidate with category
-router.put('/:id/archive', (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const { category } = req.body;
-
-    const validCategories = ['declined', 'not_qualified', 'contact_later', 'hired', 'in_progress'];
-    if (!category || !validCategories.includes(category)) {
-      return res.status(400).json({ error: 'Invalid category. Must be one of: ' + validCategories.join(', ') });
-    }
-
-    const result = data.archiveCandidate(req.params.id, category, userId);
-
-    if (result.error) {
-      if (result.error === 'Candidate not found') {
-        return res.status(404).json({ error: result.error });
-      }
-      return res.status(403).json({ error: result.error });
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Error archiving candidate:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// POST /api/candidates/:id/restore - Restore archived candidate
-router.post('/:id/restore', (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const result = data.restoreCandidate(req.params.id, userId);
-
-    if (result.error) {
-      if (result.error === 'Candidate not found' || result.error === 'Candidate is not archived') {
-        return res.status(404).json({ error: result.error });
-      }
-      return res.status(403).json({ error: result.error });
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Error restoring candidate:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// DELETE /api/candidates/:id - Archive candidate (soft delete with 'declined' category)
+// DELETE /api/candidates/:id - Delete candidate
 router.delete('/:id', (req, res) => {
   try {
     const userId = req.session.userId;
@@ -319,7 +272,7 @@ router.delete('/:id/files/:fileId', (req, res) => {
 router.get('/:id/resume', (req, res) => {
   try {
     const userId = req.session.userId;
-    const candidate = data.getCandidateById(req.params.id, userId, true);
+    const candidate = data.getCandidateById(req.params.id, userId);
 
     if (!candidate) {
       return res.status(404).json({ error: 'Candidate not found' });

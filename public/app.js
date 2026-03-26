@@ -2204,22 +2204,13 @@ const views = {
 
   // ============ Candidate Views ============
 
-  // Candidate category labels (for active candidates)
+  // Candidate category labels
   _candidateCategories: {
-    new: 'New',
     in_progress: 'In Progress',
-    interview: 'Interview',
-    offer: 'Offer',
-    on_hold: 'On Hold'
-  },
-
-  // Archive category labels
-  _archiveCategories: {
     declined: 'Declined',
     not_qualified: 'Not Qualified',
     contact_later: 'Contact Later',
-    hired: 'Hired',
-    in_progress: 'In Progress'
+    hired: 'Hired'
   },
 
   // Candidate List View
@@ -2247,7 +2238,6 @@ const views = {
                 class="px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white text-slate-700"
                 onchange="views.filterCandidates()">
           <option value="">All Categories</option>
-          <option value="_uncategorized">Uncategorized</option>
           ${Object.entries(categoryLabels).map(([key, label]) =>
             `<option value="${key}">${label}</option>`
           ).join('')}
@@ -2300,11 +2290,11 @@ const views = {
 
   _categoryBadgeClass(category) {
     const colors = {
-      new: 'bg-blue-100 text-blue-700',
       in_progress: 'bg-amber-100 text-amber-700',
-      interview: 'bg-violet-100 text-violet-700',
-      offer: 'bg-emerald-100 text-emerald-700',
-      on_hold: 'bg-slate-100 text-slate-600'
+      declined: 'bg-red-100 text-red-700',
+      not_qualified: 'bg-slate-100 text-slate-600',
+      contact_later: 'bg-blue-100 text-blue-700',
+      hired: 'bg-emerald-100 text-emerald-700'
     };
     return colors[category] || 'bg-slate-100 text-slate-500';
   },
@@ -2337,9 +2327,7 @@ const views = {
     const categoryFilter = document.getElementById('candidate-category-filter').value;
     let filtered = this._candidates;
 
-    if (categoryFilter === '_uncategorized') {
-      filtered = filtered.filter(c => !c.category);
-    } else if (categoryFilter) {
+    if (categoryFilter) {
       filtered = filtered.filter(c => c.category === categoryFilter);
     }
 
@@ -2418,9 +2406,9 @@ const views = {
                     class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm">
               Edit
             </button>
-            <button onclick="views.showArchiveMenu('${candidate.id}')"
-                    class="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg hover:bg-amber-100 transition-colors font-medium text-sm">
-              Archive
+            <button onclick="views.deleteCandidate('${candidate.id}')"
+                    class="bg-red-50 text-red-700 px-4 py-2 rounded-lg hover:bg-red-100 transition-colors font-medium text-sm">
+              Delete
             </button>
           </div>
         </div>
@@ -2558,45 +2546,17 @@ const views = {
     document.getElementById('pdf-preview-container').scrollIntoView({ behavior: 'smooth' });
   },
 
-  showArchiveMenu(candidateId) {
-    const categories = this._archiveCategories;
-    modal.show(`
-      <h3 class="text-lg font-semibold text-slate-800 mb-4">Archive Candidate</h3>
-      <p class="text-slate-600 mb-4">Select a category for this candidate:</p>
-      <div class="space-y-2">
-        ${Object.entries(categories).map(([key, label]) => `
-          <button onclick="views.archiveCandidate('${candidateId}', '${key}')"
-                  class="w-full text-left px-4 py-3 rounded-lg border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors">
-            <span class="font-medium text-slate-700">${label}</span>
-          </button>
-        `).join('')}
-      </div>
-      <div class="flex justify-end mt-4">
-        <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
-      </div>
-    `);
-  },
-
-  async archiveCandidate(id, category) {
+  async deleteCandidate(id) {
+    if (!confirm('Delete this candidate? This cannot be undone.')) return;
     try {
-      await api.put(`/api/candidates/${id}/archive`, { category });
-      modal.hide();
+      await api.delete(`/api/candidates/${id}`);
       router.navigate('candidates');
     } catch (err) {
-      console.error('Error archiving candidate:', err);
-      alert('Failed to archive candidate: ' + err.message);
+      console.error('Error deleting candidate:', err);
+      alert('Failed to delete candidate: ' + err.message);
     }
   },
 
-  async restoreCandidate(id) {
-    try {
-      await api.post(`/api/candidates/${id}/restore`);
-      router.navigate('archive');
-    } catch (err) {
-      console.error('Error restoring candidate:', err);
-      alert('Failed to restore candidate: ' + err.message);
-    }
-  },
 
   async uploadCandidateFile(candidateId, input) {
     const file = input.files[0];
@@ -2746,9 +2706,8 @@ const views = {
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Category</label>
               <select id="candidate-category"
                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white">
-                <option value="">No Category</option>
                 ${Object.entries(this._candidateCategories).map(([key, label]) =>
-                  `<option value="${key}" ${candidate.category === key ? 'selected' : ''}>${label}</option>`
+                  `<option value="${key}" ${(candidate.category || 'in_progress') === key ? 'selected' : ''}>${label}</option>`
                 ).join('')}
               </select>
             </div>
@@ -3225,13 +3184,10 @@ const views = {
 
   // Archive View - shows archived companies and contacts
   async archiveView(container) {
-    const [companies, contacts, candidates] = await Promise.all([
+    const [companies, contacts] = await Promise.all([
       api.get('/api/archive/companies'),
-      api.get('/api/archive/contacts'),
-      api.get('/api/archive/candidates')
+      api.get('/api/archive/contacts')
     ]);
-
-    const categoryLabels = this._archiveCategories;
 
     container.innerHTML = `
       <div class="mb-6">
@@ -3317,95 +3273,7 @@ const views = {
           </div>
         `}
       </div>
-
-      <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
-        <h2 class="text-lg font-semibold text-slate-800 mb-4">Archived Candidates (${candidates.length})</h2>
-        ${candidates.length === 0 ? `
-          <p class="text-slate-500">No archived candidates</p>
-        ` : `
-          <div class="flex flex-wrap gap-2 mb-4">
-            <button onclick="views.filterArchivedCandidates(null)"
-                    class="px-3 py-1.5 rounded-lg text-sm font-medium bg-rose-100 text-rose-700 hover:bg-rose-200 transition-colors"
-                    id="archive-cat-all">
-              All (${candidates.length})
-            </button>
-            ${Object.entries(categoryLabels).map(([key, label]) => {
-              const count = candidates.filter(c => c.archiveCategory === key).length;
-              return count > 0 ? `
-                <button onclick="views.filterArchivedCandidates('${key}')"
-                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
-                        id="archive-cat-${key}">
-                  ${label} (${count})
-                </button>
-              ` : '';
-            }).join('')}
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="text-left text-sm text-slate-500 border-b border-slate-200">
-                  <th class="pb-3 font-medium">Candidate</th>
-                  <th class="pb-3 font-medium">Role</th>
-                  <th class="pb-3 font-medium">Category</th>
-                  <th class="pb-3 font-medium">Archived</th>
-                  <th class="pb-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="archived-candidates-table">
-                ${this.renderArchivedCandidateRows(candidates, categoryLabels)}
-              </tbody>
-            </table>
-          </div>
-        `}
-      </div>
     `;
-
-    this._archivedCandidates = candidates;
-  },
-
-  renderArchivedCandidateRows(candidates, categoryLabels) {
-    return candidates.map(c => `
-      <tr class="border-b border-slate-100">
-        <td class="py-3">
-          <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
-          ${c.email ? `<div class="text-sm text-slate-500">${this.escapeHtml(c.email)}</div>` : ''}
-        </td>
-        <td class="py-3 text-slate-600">${this.escapeHtml(c.role || '-')}</td>
-        <td class="py-3">
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-            ${categoryLabels[c.archiveCategory] || c.archiveCategory || 'Unknown'}
-          </span>
-        </td>
-        <td class="py-3 text-sm text-slate-500">${new Date(c.archivedAt).toLocaleDateString()}</td>
-        <td class="py-3">
-          <button onclick="views.restoreCandidate('${c.id}')"
-                  class="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors text-sm font-medium">
-            Restore
-          </button>
-        </td>
-      </tr>
-    `).join('');
-  },
-
-  filterArchivedCandidates(category) {
-    const categoryLabels = this._archiveCategories;
-    const filtered = category
-      ? this._archivedCandidates.filter(c => c.archiveCategory === category)
-      : this._archivedCandidates;
-
-    document.getElementById('archived-candidates-table').innerHTML =
-      this.renderArchivedCandidateRows(filtered, categoryLabels);
-
-    // Update active tab styling
-    const allButtons = document.querySelectorAll('[id^="archive-cat-"]');
-    allButtons.forEach(btn => {
-      btn.className = btn.className.replace('bg-rose-100 text-rose-700', 'bg-slate-100 text-slate-600');
-    });
-    const activeId = category ? `archive-cat-${category}` : 'archive-cat-all';
-    const activeBtn = document.getElementById(activeId);
-    if (activeBtn) {
-      activeBtn.className = activeBtn.className.replace('bg-slate-100 text-slate-600', 'bg-rose-100 text-rose-700');
-    }
   },
 
   // Utility
