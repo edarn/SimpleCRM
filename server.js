@@ -139,7 +139,7 @@ app.use('/uploads', express.static(uploadsDir));
 app.use('/api/archive', requireAuth, require('./src/routes/archive'));
 
 // Backup routes (export/import)
-app.use('/api/backup', requireAuth, require('./src/routes/backup'));
+app.use('/api/backup', requireAuth, require('./src/routes/backup')(uploadsDir));
 
 // Serve index.html for SPA routes
 app.get('/{*splat}', (req, res) => {
