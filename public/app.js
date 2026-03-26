@@ -2239,7 +2239,7 @@ const views = {
                 onchange="views.filterCandidates()">
           <option value="">All Categories</option>
           ${Object.entries(categoryLabels).map(([key, label]) =>
-            `<option value="${key}">${label}</option>`
+            `<option value="${key}" ${key === 'in_progress' ? 'selected' : ''}>${label}</option>`
           ).join('')}
         </select>
       </div>
@@ -2286,6 +2286,8 @@ const views = {
     this._candidateSort = 'name';
     this._candidateSortAsc = true;
     document.getElementById('sort-candidate-name').textContent = '↑';
+    // Apply default filter
+    this.filterCandidates();
   },
 
   _categoryBadgeClass(category) {

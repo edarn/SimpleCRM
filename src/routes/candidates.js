@@ -139,10 +139,14 @@ router.put('/:id', upload.single('resume'), (req, res) => {
   }
 });
 
-// DELETE /api/candidates/:id - Delete candidate
+// DELETE /api/candidates/:id - Delete candidate and associated files
 router.delete('/:id', (req, res) => {
   try {
     const userId = req.session.userId;
+
+    // Get file list before deleting DB records
+    const files = data.getCandidateFiles(req.params.id);
+
     const result = data.deleteCandidate(req.params.id, userId);
 
     if (result.error) {
@@ -150,6 +154,20 @@ router.delete('/:id', (req, res) => {
         return res.status(404).json({ error: result.error });
       }
       return res.status(403).json({ error: result.error });
+    }
+
+    // Delete files from disk
+    if (uploadsDir) {
+      for (const file of files) {
+        const filePath = path.join(uploadsDir, file.filename);
+        try {
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        } catch (err) {
+          console.error('Warning: Could not delete file:', err.message);
+        }
+      }
     }
 
     res.status(204).send();
