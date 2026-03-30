@@ -2624,8 +2624,14 @@ const views = {
     const content = document.getElementById('new-candidate-comment').value.trim();
     if (!content) return;
 
-    await api.post(`/api/candidates/${candidateId}/comments`, { content });
-    router.navigate('candidate-detail', { id: candidateId });
+    try {
+      await api.post(`/api/candidates/${candidateId}/comments`, { content });
+      router.navigate('candidate-detail', { id: candidateId });
+    } catch (err) {
+      if (err.message !== 'Authentication required') {
+        alert('Error saving comment: ' + err.message);
+      }
+    }
   },
 
   async editCandidateComment(candidateId, commentId) {

@@ -285,6 +285,9 @@ function migrateExistingData() {
     UPDATE candidates SET category = archive_category, archived_at = NULL, archive_category = NULL
     WHERE archived_at IS NOT NULL AND archive_category IS NOT NULL AND archive_category != ''
   `).run();
+  // Migrate old category values to new unified categories
+  db.prepare(`UPDATE candidates SET category = 'in_progress' WHERE category IN ('new', 'interview', 'offer')`).run();
+  db.prepare(`UPDATE candidates SET category = 'contact_later' WHERE category = 'on_hold'`).run();
   // Set default category for any candidates without one
   db.prepare(`
     UPDATE candidates SET category = 'in_progress'
