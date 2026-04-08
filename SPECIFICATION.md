@@ -85,11 +85,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Checklists**: Reusable step-by-step checklist templates that can be attached to ToDos
      - When creating a ToDo, optionally select a checklist from a dropdown
      - Default is "No checklist" (ToDo behaves as before)
-     - Selected checklist adds interactive checkboxes inside the ToDo
+     - Selected checklist copies items into the ToDo (no ongoing link to template)
      - Each checklist item can be individually checked/unchecked
      - Progress shown as "Checklist (X/Y)" counter
+     - Click any checklist item text to edit it inline (saves on blur/Enter)
+     - Click + to add custom ad-hoc steps directly in the ToDo (inline input, no popup)
+     - Click x to remove individual items (visible on hover)
+     - Multi-column layout on larger screens (1/2/3 columns responsive)
      - Checklist management: create, edit, and delete checklist templates
      - Only the creator or team owner/admin can edit or delete a checklist
+   - **Full Edit**: Edit modal supports all fields (title, linked entity, checklist, due date, description)
 
 8. **Archive & Data Protection**
    - Companies and contacts are archived instead of permanently deleted
