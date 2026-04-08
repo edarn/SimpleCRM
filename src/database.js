@@ -396,13 +396,6 @@ function migrateExistingData() {
     }
   }
 
-  // One-time cleanup: remove all test todos (2026-03-30)
-  const todoCount = db.prepare('SELECT COUNT(*) as n FROM todos').get().n;
-  if (todoCount > 0) {
-    db.prepare('DELETE FROM todos').run();
-    console.log(`Cleared ${todoCount} test todos`);
-  }
-
   // Find the first user to assign orphaned data to
   const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
 
