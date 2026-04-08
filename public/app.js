@@ -1301,16 +1301,18 @@ const views = {
                   ${item.checklistItemsState && item.checklistItemsState.length > 0 ? `
                   <div class="mt-2">
                     <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
-                    <div class="space-y-1">
+                    <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
                       ${item.checklistItemsState.map((ci, idx) => `
-                        <label class="flex items-center gap-2 cursor-pointer">
+                        <label class="flex items-center gap-2 cursor-pointer group break-inside-avoid mb-1">
                           <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
                                  onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, '${entityType}', '${entityId}')"
-                                 class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500">
+                                 class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
                           <span class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'}">${this.escapeHtml(ci.text)}</span>
+                          ${!item.completed ? `<button onclick="event.preventDefault();views.removeChecklistItemInline('${item.id}', ${idx}, '${entityType}', '${entityId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
                         </label>
                       `).join('')}
                     </div>
+                    ${!item.completed ? `<button onclick="views.addCustomChecklistItemInline('${item.id}', '${entityType}', '${entityId}')" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
                   </div>` : ''}
                   <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
                 </div>
@@ -1774,16 +1776,18 @@ const views = {
               ${item.checklistItemsState && item.checklistItemsState.length > 0 ? `
               <div class="mt-2">
                 <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
-                <div class="space-y-1">
+                <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
                   ${item.checklistItemsState.map((ci, idx) => `
-                    <label class="flex items-center gap-2 cursor-pointer">
+                    <label class="flex items-center gap-2 cursor-pointer group break-inside-avoid mb-1">
                       <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
                              onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, 'company', '${companyId}')"
-                             class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500">
+                             class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
                       <span class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'}">${this.escapeHtml(ci.text)}</span>
+                      ${!item.completed ? `<button onclick="event.preventDefault();views.removeChecklistItemInline('${item.id}', ${idx}, 'company', '${companyId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
                     </label>
                   `).join('')}
                 </div>
+                ${!item.completed ? `<button onclick="views.addCustomChecklistItemInline('${item.id}', 'company', '${companyId}')" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
               </div>` : ''}
               <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
             </div>
@@ -1980,17 +1984,21 @@ const views = {
           ${hasChecklist ? `
           <div class="mt-2 ml-1">
             <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${checkedCount}/${totalCount})</div>
-            <div class="space-y-1">
+            <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
               ${t.checklistItemsState.map((item, idx) => `
-                <label class="flex items-center gap-2 cursor-pointer group">
+                <label class="flex items-center gap-2 cursor-pointer group break-inside-avoid mb-1">
                   <input type="checkbox" ${item.checked ? 'checked' : ''} ${t.completed ? 'disabled' : ''}
                          onchange="views.toggleChecklistItem('${t.id}', ${idx}, this.checked)"
-                         class="h-4 w-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500">
+                         class="h-4 w-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
                   <span class="text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}">${this.escapeHtml(item.text)}</span>
+                  ${!t.completed ? `<button onclick="event.preventDefault();views.removeChecklistItem('${t.id}', ${idx})" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
                 </label>
               `).join('')}
             </div>
-          </div>` : ''}
+            ${!t.completed ? `<button onclick="views.addCustomChecklistItem('${t.id}')" class="text-emerald-500 hover:text-emerald-700 text-sm mt-1 flex items-center gap-1"><span class="text-lg leading-none">+</span></button>` : ''}
+          </div>` : `
+          ${!t.completed ? `<button onclick="views.addCustomChecklistItem('${t.id}')" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span> <span>Add checklist</span></button>` : ''}
+          `}
           <div class="text-sm text-slate-500 mt-1">
             <span class="mr-3">${linkedLabel}</span>
             <span class="text-slate-400">Due: ${formatDateTime(t.dueDate)}</span>
@@ -2215,6 +2223,31 @@ const views = {
     router.navigate('todos');
   },
 
+  async addCustomChecklistItem(todoId) {
+    const text = prompt('Enter step name:');
+    if (!text || !text.trim()) return;
+
+    const todo = this._todos.find(t => t.id === todoId);
+    if (!todo) return;
+
+    const updatedItems = [...(todo.checklistItemsState || []), { text: text.trim(), checked: false }];
+    todo.checklistItemsState = updatedItems;
+
+    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+    router.navigate('todos');
+  },
+
+  async removeChecklistItem(todoId, itemIndex) {
+    const todo = this._todos.find(t => t.id === todoId);
+    if (!todo) return;
+
+    const updatedItems = todo.checklistItemsState.filter((_, idx) => idx !== itemIndex);
+    todo.checklistItemsState = updatedItems;
+
+    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+    router.navigate('todos');
+  },
+
   async toggleChecklistItem(todoId, itemIndex, checked) {
     const todo = this._todos.find(t => t.id === todoId);
     if (!todo) return;
@@ -2227,6 +2260,15 @@ const views = {
   },
 
   async showChecklistManager() {
+    // Save current form state before switching to manager
+    this._todoFormState = {
+      title: document.getElementById('todo-title')?.value || '',
+      description: document.getElementById('todo-description')?.value || '',
+      dueDate: document.getElementById('todo-due-date')?.value || '',
+      linkedType: document.getElementById('todo-linked-type')?.value || 'contact',
+      linkedId: document.getElementById('todo-linked-id')?.value || '',
+      checklistId: document.getElementById('todo-checklist-id')?.value || ''
+    };
     modal.hide();
     const checklists = await api.get('/api/checklists');
     this._managedChecklists = checklists;
@@ -2369,8 +2411,56 @@ const views = {
 
   async closeChecklistManager() {
     modal.hide();
-    // Re-open the add todo modal
-    this.showAddTodoModal();
+    const state = this._todoFormState;
+    // Re-open the add todo modal with preserved linked type/id
+    await this.showAddTodoModal(state?.linkedType || null, state?.linkedId || null);
+    // Restore all form fields after modal is shown
+    if (state) {
+      const titleEl = document.getElementById('todo-title');
+      const descEl = document.getElementById('todo-description');
+      const dateEl = document.getElementById('todo-due-date');
+      const checklistEl = document.getElementById('todo-checklist-id');
+      if (titleEl) titleEl.value = state.title;
+      if (descEl) descEl.value = state.description;
+      if (dateEl) dateEl.value = state.dueDate;
+      if (checklistEl) checklistEl.value = state.checklistId;
+      this._todoFormState = null;
+    }
+  },
+
+  async addCustomChecklistItemInline(todoId, linkedType, linkedId) {
+    const text = prompt('Enter step name:');
+    if (!text || !text.trim()) return;
+
+    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todo = todos?.find(t => t.id === todoId);
+    if (!todo) return;
+
+    const updatedItems = [...(todo.checklistItemsState || []), { text: text.trim(), checked: false }];
+    todo.checklistItemsState = updatedItems;
+
+    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+    if (linkedType === 'contact') {
+      router.navigate('contact-detail', { id: linkedId });
+    } else {
+      router.navigate('company-detail', { id: linkedId });
+    }
+  },
+
+  async removeChecklistItemInline(todoId, itemIndex, linkedType, linkedId) {
+    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todo = todos?.find(t => t.id === todoId);
+    if (!todo) return;
+
+    const updatedItems = todo.checklistItemsState.filter((_, idx) => idx !== itemIndex);
+    todo.checklistItemsState = updatedItems;
+
+    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+    if (linkedType === 'contact') {
+      router.navigate('contact-detail', { id: linkedId });
+    } else {
+      router.navigate('company-detail', { id: linkedId });
+    }
   },
 
   async toggleChecklistItemInline(todoId, itemIndex, checked, linkedType, linkedId) {
