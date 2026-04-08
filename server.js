@@ -124,6 +124,7 @@ app.use('/api/contacts', requireAuth, require('./src/routes/contacts'));
 app.use('/api/contacts', requireAuth, require('./src/routes/notes'));
 app.use('/api/search', requireAuth, require('./src/routes/search'));
 app.use('/api/todos', requireAuth, require('./src/routes/todos'));
+app.use('/api/checklists', requireAuth, require('./src/routes/checklists'));
 
 // Candidates routes with file upload middleware
 app.use('/api/candidates', requireAuth, require('./src/routes/candidates')(upload, uploadsDir));

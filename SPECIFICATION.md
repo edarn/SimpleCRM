@@ -73,15 +73,23 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 
 7. **ToDo Management**
    - ToDos view accessible from main navigation
-   - Add ToDos linked to a Company or a Contact
+   - Add ToDos linked to a Company, Contact, or Candidate
    - ToDos can be added from:
      - The ToDos list view
      - Contact detail view (via "Make this a ToDo" checkbox)
      - Company detail view
-   - ToDo fields: title, description, dueDate, completed status, linked entity
+   - ToDo fields: title, description, dueDate, completed status, linked entity, optional checklist
    - Checkbox to mark ToDo as completed
    - Completed ToDos shown greyed out with strikethrough
    - View all ToDos in a central list with filters (All / Active / Completed)
+   - **Checklists**: Reusable step-by-step checklist templates that can be attached to ToDos
+     - When creating a ToDo, optionally select a checklist from a dropdown
+     - Default is "No checklist" (ToDo behaves as before)
+     - Selected checklist adds interactive checkboxes inside the ToDo
+     - Each checklist item can be individually checked/unchecked
+     - Progress shown as "Checklist (X/Y)" counter
+     - Checklist management: create, edit, and delete checklist templates
+     - Only the creator or team owner/admin can edit or delete a checklist
 
 8. **Archive & Data Protection**
    - Companies and contacts are archived instead of permanently deleted
@@ -248,8 +256,25 @@ CREATE TABLE todos (
   due_date TEXT,
   completed INTEGER DEFAULT 0,
   completed_at TEXT,
-  linked_type TEXT NOT NULL CHECK (linked_type IN ('contact', 'company')),
+  linked_type TEXT NOT NULL CHECK (linked_type IN ('contact', 'company', 'candidate')),
   linked_id TEXT NOT NULL,
+  checklist_id TEXT,
+  checklist_items_state TEXT DEFAULT '[]',
+  team_id TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+)
+```
+
+#### Checklists Table
+```sql
+CREATE TABLE checklists (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  items TEXT NOT NULL DEFAULT '[]',
   team_id TEXT,
   created_by TEXT,
   created_at TEXT NOT NULL,
@@ -471,6 +496,7 @@ VibeCodingProject/
 │       ├── notes.js       # Notes API routes
 │       ├── search.js      # Search API routes
 │       ├── todos.js       # ToDo API routes
+│       ├── checklists.js  # Checklist API routes
 │       ├── candidates.js  # Candidate API routes
 │       ├── team.js        # Team management routes
 │       ├── invitations.js # Invitation routes
@@ -569,6 +595,16 @@ VibeCodingProject/
 | POST | /api/todos | Create new ToDo |
 | PUT | /api/todos/:id | Update ToDo |
 | DELETE | /api/todos/:id | Delete ToDo |
+
+### Checklists (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/checklists | List all checklists |
+| GET | /api/checklists/:id | Get single checklist |
+| POST | /api/checklists | Create new checklist |
+| PUT | /api/checklists/:id | Update checklist |
+| DELETE | /api/checklists/:id | Delete checklist |
 
 ### Candidates (Protected)
 

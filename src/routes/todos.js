@@ -36,14 +36,14 @@ router.get('/:id', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const userId = req.session.userId;
-    const { title, description, dueDate, linkedType, linkedId } = req.body;
+    const { title, description, dueDate, linkedType, linkedId, checklistId } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'ToDo title is required' });
     }
 
-    if (!linkedType || !['contact', 'company'].includes(linkedType)) {
-      return res.status(400).json({ error: 'linkedType must be "contact" or "company"' });
+    if (!linkedType || !['contact', 'company', 'candidate'].includes(linkedType)) {
+      return res.status(400).json({ error: 'linkedType must be "contact", "company", or "candidate"' });
     }
 
     if (!linkedId) {
@@ -55,7 +55,8 @@ router.post('/', (req, res) => {
       description,
       dueDate,
       linkedType,
-      linkedId
+      linkedId,
+      checklistId: checklistId || null
     }, userId);
 
     res.status(201).json(newTodo);
@@ -69,7 +70,7 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const userId = req.session.userId;
-    const { title, description, dueDate, completed } = req.body;
+    const { title, description, dueDate, completed, checklistItemsState } = req.body;
 
     if (title !== undefined && !title.trim()) {
       return res.status(400).json({ error: 'ToDo title cannot be empty' });
@@ -79,7 +80,8 @@ router.put('/:id', (req, res) => {
       title: title?.trim(),
       description,
       dueDate,
-      completed
+      completed,
+      checklistItemsState
     }, userId);
 
     if (!updated) {

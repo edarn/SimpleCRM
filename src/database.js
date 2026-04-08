@@ -220,6 +220,9 @@ function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);
       CREATE INDEX IF NOT EXISTS idx_candidate_files_candidate_id ON candidate_files(candidate_id);
       CREATE INDEX IF NOT EXISTS idx_candidates_archived_at ON candidates(archived_at);
+      CREATE INDEX IF NOT EXISTS idx_checklists_team_id ON checklists(team_id);
+      CREATE INDEX IF NOT EXISTS idx_checklists_created_by ON checklists(created_by);
+      CREATE INDEX IF NOT EXISTS idx_todos_checklist_id ON todos(checklist_id);
     `);
   } catch (err) {
     console.log('Some indexes already exist or columns not yet migrated:', err.message);
@@ -247,6 +250,45 @@ function addColumnIfNotExists(tableName, columnName, columnDef) {
     }
   }
   return false;
+}
+
+// Migrate todos table to allow 'candidate' in linked_type CHECK constraint
+function migrateTodosLinkedType() {
+  // Check if the current CHECK constraint already allows 'candidate'
+  const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='todos'").get();
+  if (!tableInfo || !tableInfo.sql) return;
+  if (tableInfo.sql.includes("'candidate'")) return; // Already migrated
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS todos_new (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        due_date TEXT,
+        completed INTEGER DEFAULT 0,
+        completed_at TEXT,
+        linked_type TEXT NOT NULL CHECK (linked_type IN ('contact', 'company', 'candidate')),
+        linked_id TEXT NOT NULL,
+        checklist_id TEXT,
+        checklist_items_state TEXT DEFAULT '[]',
+        team_id TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id)
+      )
+    `);
+    db.exec(`INSERT INTO todos_new SELECT id, title, description, due_date, completed, completed_at, linked_type, linked_id, checklist_id, checklist_items_state, team_id, created_by, created_at, updated_at FROM todos`);
+    db.exec(`DROP TABLE todos`);
+    db.exec(`ALTER TABLE todos_new RENAME TO todos`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_todos_linked ON todos(linked_type, linked_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed)`);
+    console.log('Migrated todos table to support candidate linked_type');
+  } catch (err) {
+    console.error('Error migrating todos linked_type:', err.message);
+  }
 }
 
 // Migration function to add new columns to existing tables and assign existing data to the first user
@@ -278,6 +320,28 @@ function migrateExistingData() {
 
   // Add category column for active candidates
   addColumnIfNotExists('candidates', 'category', "TEXT DEFAULT ''");
+
+  // Create checklists table for todo checklist templates
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS checklists (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      items TEXT NOT NULL DEFAULT '[]',
+      team_id TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )
+  `);
+
+  // Add checklist columns to todos
+  addColumnIfNotExists('todos', 'checklist_id', 'TEXT');
+  addColumnIfNotExists('todos', 'checklist_items_state', "TEXT DEFAULT '[]'");
+
+  // Migrate todos linked_type CHECK constraint to allow 'candidate'
+  migrateTodosLinkedType();
 
   // Migrate: unify archive categories into main category field
   // Move archive_category to category for archived candidates, then clear archived_at

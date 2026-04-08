@@ -27,7 +27,7 @@ router.get('/export', (req, res) => {
     const teamId = data.getUserTeamId(userId);
 
     // Get all data
-    let companies, contacts, notes, todos, candidates, candidateComments, candidateFiles;
+    let companies, contacts, notes, todos, candidates, candidateComments, candidateFiles, checklists;
 
     if (teamId) {
       companies = db.prepare('SELECT * FROM companies WHERE team_id = ?').all(teamId);
@@ -36,6 +36,7 @@ router.get('/export', (req, res) => {
       todos = db.prepare('SELECT * FROM todos WHERE team_id = ?').all(teamId);
       candidates = db.prepare('SELECT * FROM candidates WHERE team_id = ?').all(teamId);
       candidateComments = db.prepare('SELECT * FROM candidate_comments WHERE team_id = ?').all(teamId);
+      checklists = db.prepare('SELECT * FROM checklists WHERE team_id = ?').all(teamId);
     } else {
       companies = db.prepare('SELECT * FROM companies WHERE created_by = ? AND team_id IS NULL').all(userId);
       contacts = db.prepare('SELECT * FROM contacts WHERE created_by = ? AND team_id IS NULL').all(userId);
@@ -43,6 +44,7 @@ router.get('/export', (req, res) => {
       todos = db.prepare('SELECT * FROM todos WHERE created_by = ? AND team_id IS NULL').all(userId);
       candidates = db.prepare('SELECT * FROM candidates WHERE created_by = ? AND team_id IS NULL').all(userId);
       candidateComments = db.prepare('SELECT * FROM candidate_comments WHERE created_by = ? AND team_id IS NULL').all(userId);
+      checklists = db.prepare('SELECT * FROM checklists WHERE created_by = ? AND team_id IS NULL').all(userId);
     }
 
     // Get candidate files from DB
@@ -62,7 +64,8 @@ router.get('/export', (req, res) => {
         todos,
         candidates,
         candidateComments,
-        candidateFiles
+        candidateFiles,
+        checklists
       }
     };
 
@@ -129,6 +132,7 @@ router.post('/import', (req, res) => {
     const companyIdMap = new Map();
     const contactIdMap = new Map();
     const candidateIdMap = new Map();
+    const checklistIdMap = new Map();
 
     // Use a transaction for atomicity
     const importTransaction = db.transaction(() => {
@@ -204,38 +208,17 @@ router.post('/import', (req, res) => {
         );
       }
 
-      // Import todos (need to map linked_id for contacts/companies)
-      for (const todo of importData.data.todos || []) {
-        let newLinkedId;
-        if (todo.linked_type === 'company') {
-          newLinkedId = companyIdMap.get(todo.linked_id);
-        } else if (todo.linked_type === 'contact') {
-          newLinkedId = contactIdMap.get(todo.linked_id);
-        }
-        if (!newLinkedId) continue; // Skip if linked entity wasn't imported
-
+      // Import checklists
+      for (const checklist of importData.data.checklists || []) {
         const newId = data.generateId();
-
+        checklistIdMap.set(checklist.id, newId);
         db.prepare(`
-          INSERT INTO todos (id, title, description, due_date, completed, completed_at, linked_type, linked_id, team_id, created_by, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          newId,
-          todo.title,
-          todo.description || '',
-          todo.due_date,
-          todo.completed || 0,
-          todo.completed_at,
-          todo.linked_type,
-          newLinkedId,
-          teamId,
-          userId,
-          todo.created_at || now,
-          now
-        );
+          INSERT INTO checklists (id, name, items, team_id, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(newId, checklist.name, checklist.items, teamId, userId, checklist.created_at || now, now);
       }
 
-      // Import candidates
+      // Import candidates (before todos, so candidate-linked todos can resolve)
       for (const candidate of importData.data.candidates || []) {
         const newId = data.generateId();
         candidateIdMap.set(candidate.id, newId);
@@ -256,6 +239,42 @@ router.post('/import', (req, res) => {
           teamId,
           userId,
           candidate.created_at || now,
+          now
+        );
+      }
+
+      // Import todos (need to map linked_id for contacts/companies/candidates)
+      for (const todo of importData.data.todos || []) {
+        let newLinkedId;
+        if (todo.linked_type === 'company') {
+          newLinkedId = companyIdMap.get(todo.linked_id);
+        } else if (todo.linked_type === 'contact') {
+          newLinkedId = contactIdMap.get(todo.linked_id);
+        } else if (todo.linked_type === 'candidate') {
+          newLinkedId = candidateIdMap.get(todo.linked_id);
+        }
+        if (!newLinkedId) continue; // Skip if linked entity wasn't imported
+
+        const newId = data.generateId();
+        const newChecklistId = todo.checklist_id ? (checklistIdMap.get(todo.checklist_id) || null) : null;
+
+        db.prepare(`
+          INSERT INTO todos (id, title, description, due_date, completed, completed_at, linked_type, linked_id, checklist_id, checklist_items_state, team_id, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          newId,
+          todo.title,
+          todo.description || '',
+          todo.due_date,
+          todo.completed || 0,
+          todo.completed_at,
+          todo.linked_type,
+          newLinkedId,
+          newChecklistId,
+          todo.checklist_items_state || '[]',
+          teamId,
+          userId,
+          todo.created_at || now,
           now
         );
       }
@@ -355,6 +374,7 @@ router.post('/import-zip', backupUpload.single('backup'), async (req, res) => {
     const companyIdMap = new Map();
     const contactIdMap = new Map();
     const candidateIdMap = new Map();
+    const checklistIdMap = new Map();
     const fileNameMap = new Map(); // old filename -> new filename
 
     const importTransaction = db.transaction(() => {
@@ -391,20 +411,17 @@ router.post('/import-zip', backupUpload.single('backup'), async (req, res) => {
         `).run(newId, newContactId, note.content, note.deleted_at || null, teamId, userId, note.created_at || now, now);
       }
 
-      // Import todos
-      for (const todo of importData.data.todos || []) {
-        let newLinkedId;
-        if (todo.linked_type === 'company') newLinkedId = companyIdMap.get(todo.linked_id);
-        else if (todo.linked_type === 'contact') newLinkedId = contactIdMap.get(todo.linked_id);
-        if (!newLinkedId) continue;
+      // Import checklists
+      for (const checklist of importData.data.checklists || []) {
         const newId = data.generateId();
+        checklistIdMap.set(checklist.id, newId);
         db.prepare(`
-          INSERT INTO todos (id, title, description, due_date, completed, completed_at, linked_type, linked_id, team_id, created_by, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(newId, todo.title, todo.description || '', todo.due_date, todo.completed || 0, todo.completed_at, todo.linked_type, newLinkedId, teamId, userId, todo.created_at || now, now);
+          INSERT INTO checklists (id, name, items, team_id, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(newId, checklist.name, checklist.items, teamId, userId, checklist.created_at || now, now);
       }
 
-      // Import candidates
+      // Import candidates (before todos, so candidate-linked todos can resolve)
       for (const candidate of importData.data.candidates || []) {
         const newId = data.generateId();
         candidateIdMap.set(candidate.id, newId);
@@ -412,6 +429,21 @@ router.post('/import-zip', backupUpload.single('backup'), async (req, res) => {
           INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(newId, candidate.name, candidate.email || '', candidate.phone || '', candidate.role || '', candidate.skills || '', candidate.category || 'in_progress', candidate.resume_filename || '', candidate.resume_original_name || '', teamId, userId, candidate.created_at || now, now);
+      }
+
+      // Import todos
+      for (const todo of importData.data.todos || []) {
+        let newLinkedId;
+        if (todo.linked_type === 'company') newLinkedId = companyIdMap.get(todo.linked_id);
+        else if (todo.linked_type === 'contact') newLinkedId = contactIdMap.get(todo.linked_id);
+        else if (todo.linked_type === 'candidate') newLinkedId = candidateIdMap.get(todo.linked_id);
+        if (!newLinkedId) continue;
+        const newId = data.generateId();
+        const newChecklistId = todo.checklist_id ? (checklistIdMap.get(todo.checklist_id) || null) : null;
+        db.prepare(`
+          INSERT INTO todos (id, title, description, due_date, completed, completed_at, linked_type, linked_id, checklist_id, checklist_items_state, team_id, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(newId, todo.title, todo.description || '', todo.due_date, todo.completed || 0, todo.completed_at, todo.linked_type, newLinkedId, newChecklistId, todo.checklist_items_state || '[]', teamId, userId, todo.created_at || now, now);
       }
 
       // Import candidate comments

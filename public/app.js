@@ -1246,7 +1246,8 @@ const views = {
         description: todo.description,
         dueDate: todo.dueDate,
         createdAt: todo.createdAt,
-        completed: todo.completed
+        completed: todo.completed,
+        checklistItemsState: todo.checklistItemsState || []
       });
     });
 
@@ -1293,10 +1294,24 @@ const views = {
                 <input type="checkbox" ${item.completed ? 'checked' : ''}
                        onchange="views.toggleTodoInline('${item.id}', this.checked, '${entityType}', '${entityId}')"
                        class="h-4 w-4 mt-1 text-emerald-600 rounded border-slate-300 cursor-pointer focus:ring-emerald-500">
-                <div class="ml-2">
+                <div class="ml-2 flex-1">
                   <span class="inline-block px-2 py-0.5 text-xs rounded-full ${item.completed ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'} font-medium mb-1">ToDo</span>
                   <p class="text-slate-700 ${item.completed ? 'line-through' : ''}">${this.escapeHtml(item.content)}</p>
                   ${item.description ? `<p class="text-sm text-slate-500 mt-1">${this.escapeHtml(item.description)}</p>` : ''}
+                  ${item.checklistItemsState && item.checklistItemsState.length > 0 ? `
+                  <div class="mt-2">
+                    <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
+                    <div class="space-y-1">
+                      ${item.checklistItemsState.map((ci, idx) => `
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
+                                 onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, '${entityType}', '${entityId}')"
+                                 class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500">
+                          <span class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'}">${this.escapeHtml(ci.text)}</span>
+                        </label>
+                      `).join('')}
+                    </div>
+                  </div>` : ''}
                   <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
                 </div>
               </div>
@@ -1723,7 +1738,8 @@ const views = {
       description: todo.description,
       dueDate: todo.dueDate,
       createdAt: todo.createdAt,
-      completed: todo.completed
+      completed: todo.completed,
+      checklistItemsState: todo.checklistItemsState || []
     }));
 
     if (items.length === 0) {
@@ -1751,10 +1767,24 @@ const views = {
             <input type="checkbox" ${item.completed ? 'checked' : ''}
                    onchange="views.toggleTodoInline('${item.id}', this.checked, 'company', '${companyId}')"
                    class="h-4 w-4 mt-1 text-emerald-600 rounded border-slate-300 cursor-pointer focus:ring-emerald-500">
-            <div class="ml-2">
+            <div class="ml-2 flex-1">
               <span class="inline-block px-2 py-0.5 text-xs rounded-full ${item.completed ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'} font-medium mb-1">ToDo</span>
               <p class="text-slate-700 ${item.completed ? 'line-through' : ''}">${this.escapeHtml(item.content)}</p>
               ${item.description ? `<p class="text-sm text-slate-500 mt-1">${this.escapeHtml(item.description)}</p>` : ''}
+              ${item.checklistItemsState && item.checklistItemsState.length > 0 ? `
+              <div class="mt-2">
+                <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
+                <div class="space-y-1">
+                  ${item.checklistItemsState.map((ci, idx) => `
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
+                             onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, 'company', '${companyId}')"
+                             class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500">
+                      <span class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'}">${this.escapeHtml(ci.text)}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              </div>` : ''}
               <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
             </div>
           </div>
@@ -1931,7 +1961,15 @@ const views = {
     if (todos.length === 0) {
       return `<div class="px-6 py-8 text-center text-slate-500">No ToDos found</div>`;
     }
-    return todos.map(t => `
+    return todos.map(t => {
+      const linkedLabel = t.linkedType === 'contact' ? `${this.escapeHtml(t.linkedName)} @ ${this.escapeHtml(t.linkedCompanyName || '')}` :
+                          t.linkedType === 'candidate' ? `${this.escapeHtml(t.linkedName)} (Candidate)` :
+                          this.escapeHtml(t.linkedName);
+      const hasChecklist = t.checklistItemsState && t.checklistItemsState.length > 0;
+      const checkedCount = hasChecklist ? t.checklistItemsState.filter(i => i.checked).length : 0;
+      const totalCount = hasChecklist ? t.checklistItemsState.length : 0;
+
+      return `
       <div class="flex flex-wrap items-start px-4 sm:px-6 py-4 ${t.completed ? 'bg-slate-50' : 'hover:bg-emerald-50/30'} transition-colors" data-todo-id="${t.id}">
         <input type="checkbox" ${t.completed ? 'checked' : ''}
                onchange="views.toggleTodo('${t.id}', this.checked)"
@@ -1939,8 +1977,22 @@ const views = {
         <div class="ml-4 flex-1 min-w-0 ${t.completed ? 'opacity-50' : ''}">
           <div class="font-medium text-slate-800 ${t.completed ? 'line-through' : ''}">${this.escapeHtml(t.title)}</div>
           ${t.description ? `<div class="text-sm text-slate-600 mt-1">${this.escapeHtml(t.description)}</div>` : ''}
+          ${hasChecklist ? `
+          <div class="mt-2 ml-1">
+            <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${checkedCount}/${totalCount})</div>
+            <div class="space-y-1">
+              ${t.checklistItemsState.map((item, idx) => `
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <input type="checkbox" ${item.checked ? 'checked' : ''} ${t.completed ? 'disabled' : ''}
+                         onchange="views.toggleChecklistItem('${t.id}', ${idx}, this.checked)"
+                         class="h-4 w-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500">
+                  <span class="text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}">${this.escapeHtml(item.text)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>` : ''}
           <div class="text-sm text-slate-500 mt-1">
-            <span class="mr-3">${t.linkedType === 'contact' ? `${this.escapeHtml(t.linkedName)} @ ${this.escapeHtml(t.linkedCompanyName || '')}` : this.escapeHtml(t.linkedName)}</span>
+            <span class="mr-3">${linkedLabel}</span>
             <span class="text-slate-400">Due: ${formatDateTime(t.dueDate)}</span>
           </div>
         </div>
@@ -1949,8 +2001,8 @@ const views = {
           <button onclick="views.editTodo('${t.id}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
           <button onclick="views.deleteTodo('${t.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   },
 
   async filterTodos(filter) {
@@ -1985,14 +2037,20 @@ const views = {
   navigateToLinked(type, id) {
     if (type === 'contact') {
       router.navigate('contact-detail', { id });
+    } else if (type === 'candidate') {
+      router.navigate('candidate-detail', { id });
     } else {
       router.navigate('company-detail', { id });
     }
   },
 
   async showAddTodoModal(linkedType = null, linkedId = null) {
-    const companies = await api.get('/api/companies');
-    const contacts = await api.get('/api/contacts');
+    const [companies, contacts, candidates, checklists] = await Promise.all([
+      api.get('/api/companies'),
+      api.get('/api/contacts'),
+      api.get('/api/candidates'),
+      api.get('/api/checklists')
+    ]);
 
     modal.show(`
       <h3 class="text-lg font-semibold text-slate-800 mb-4">Add ToDo</h3>
@@ -2009,6 +2067,7 @@ const views = {
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
             <option value="contact" ${linkedType === 'contact' ? 'selected' : ''}>Contact</option>
             <option value="company" ${linkedType === 'company' ? 'selected' : ''}>Company</option>
+            <option value="candidate" ${linkedType === 'candidate' ? 'selected' : ''}>Candidate</option>
           </select>
         </div>
 
@@ -2018,9 +2077,26 @@ const views = {
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
             ${linkedType === 'company' ?
               companies.map(c => `<option value="${c.id}" ${c.id === linkedId ? 'selected' : ''}>${this.escapeHtml(c.name)}</option>`).join('') :
+              linkedType === 'candidate' ?
+              candidates.map(c => `<option value="${c.id}" ${c.id === linkedId ? 'selected' : ''}>${this.escapeHtml(c.name)}${c.role ? ' - ' + this.escapeHtml(c.role) : ''}</option>`).join('') :
               contacts.map(c => `<option value="${c.id}" ${c.id === linkedId ? 'selected' : ''}>${this.escapeHtml(c.name)} @ ${this.escapeHtml(c.companyName)}</option>`).join('')
             }
           </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Checklist</label>
+          <div class="flex gap-2">
+            <select id="todo-checklist-id"
+                    class="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+              <option value="">No checklist</option>
+              ${checklists.map(cl => `<option value="${cl.id}">${this.escapeHtml(cl.name)} (${cl.items.length} items)</option>`).join('')}
+            </select>
+            <button type="button" onclick="views.showChecklistManager()"
+                    class="px-3 py-2.5 text-sm bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors" title="Manage checklists">
+              Manage
+            </button>
+          </div>
         </div>
 
         <div class="mb-4">
@@ -2045,6 +2121,8 @@ const views = {
     // Store data for updateLinkedOptions
     this._modalCompanies = companies;
     this._modalContacts = contacts;
+    this._modalCandidates = candidates;
+    this._modalChecklists = checklists;
   },
 
   updateLinkedOptions() {
@@ -2054,6 +2132,10 @@ const views = {
     if (type === 'company') {
       select.innerHTML = this._modalCompanies.map(c =>
         `<option value="${c.id}">${this.escapeHtml(c.name)}</option>`
+      ).join('');
+    } else if (type === 'candidate') {
+      select.innerHTML = this._modalCandidates.map(c =>
+        `<option value="${c.id}">${this.escapeHtml(c.name)}${c.role ? ' - ' + this.escapeHtml(c.role) : ''}</option>`
       ).join('');
     } else {
       select.innerHTML = this._modalContacts.map(c =>
@@ -2066,12 +2148,14 @@ const views = {
     event.preventDefault();
 
     const dueDateInput = document.getElementById('todo-due-date').value;
+    const checklistId = document.getElementById('todo-checklist-id').value;
     const data = {
       title: document.getElementById('todo-title').value,
       description: document.getElementById('todo-description').value,
       dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : new Date().toISOString(),
       linkedType: document.getElementById('todo-linked-type').value,
-      linkedId: document.getElementById('todo-linked-id').value
+      linkedId: document.getElementById('todo-linked-id').value,
+      checklistId: checklistId || null
     };
 
     await api.post('/api/todos', data);
@@ -2131,6 +2215,180 @@ const views = {
     router.navigate('todos');
   },
 
+  async toggleChecklistItem(todoId, itemIndex, checked) {
+    const todo = this._todos.find(t => t.id === todoId);
+    if (!todo) return;
+
+    const updatedItems = [...todo.checklistItemsState];
+    updatedItems[itemIndex] = { ...updatedItems[itemIndex], checked };
+    todo.checklistItemsState = updatedItems;
+
+    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+  },
+
+  async showChecklistManager() {
+    modal.hide();
+    const checklists = await api.get('/api/checklists');
+    this._managedChecklists = checklists;
+
+    modal.show(`
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Manage Checklists</h3>
+      <div id="checklist-manager-list" class="mb-4 max-h-64 overflow-y-auto">
+        ${this.renderChecklistManagerList(checklists)}
+      </div>
+      <div class="border-t border-slate-200 pt-4">
+        <h4 class="text-sm font-medium text-slate-700 mb-2">Create New Checklist</h4>
+        <div class="mb-3">
+          <input type="text" id="new-checklist-name" placeholder="Checklist name..."
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm">
+        </div>
+        <div id="new-checklist-items" class="mb-3 space-y-2">
+          <div class="flex gap-2">
+            <input type="text" placeholder="Step 1..." class="checklist-item-input flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+            <button type="button" onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 text-sm px-2">Remove</button>
+          </div>
+        </div>
+        <div class="flex gap-2 mb-3">
+          <button type="button" onclick="views.addChecklistItemInput()"
+                  class="text-sm text-emerald-600 hover:text-emerald-700 font-medium">+ Add Step</button>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="views.closeChecklistManager()"
+                  class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Back</button>
+          <button type="button" onclick="views.saveNewChecklist()"
+                  class="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-700 font-medium shadow-sm text-sm">Create Checklist</button>
+        </div>
+      </div>
+    `);
+  },
+
+  renderChecklistManagerList(checklists) {
+    if (checklists.length === 0) {
+      return '<p class="text-sm text-slate-500 py-2">No checklists yet. Create one below.</p>';
+    }
+    return checklists.map(cl => `
+      <div class="flex items-start justify-between py-2 border-b border-slate-100 last:border-0">
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-sm text-slate-800">${this.escapeHtml(cl.name)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">${cl.items.length} steps - by ${this.escapeHtml(cl.createdByUsername || 'unknown')}</div>
+          <div class="text-xs text-slate-400 mt-0.5">${cl.items.map(i => this.escapeHtml(i)).join(', ')}</div>
+        </div>
+        <div class="flex gap-1 ml-2">
+          <button onclick="views.editChecklist('${cl.id}')" class="text-slate-400 hover:text-slate-600 text-xs px-1">Edit</button>
+          <button onclick="views.deleteChecklist('${cl.id}')" class="text-red-400 hover:text-red-600 text-xs px-1">Delete</button>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  addChecklistItemInput() {
+    const container = document.getElementById('new-checklist-items') || document.getElementById('edit-checklist-items');
+    const count = container.querySelectorAll('.checklist-item-input').length + 1;
+    const div = document.createElement('div');
+    div.className = 'flex gap-2';
+    div.innerHTML = `
+      <input type="text" placeholder="Step ${count}..." class="checklist-item-input flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+      <button type="button" onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 text-sm px-2">Remove</button>
+    `;
+    container.appendChild(div);
+  },
+
+  async saveNewChecklist() {
+    const name = document.getElementById('new-checklist-name').value.trim();
+    if (!name) return alert('Please enter a checklist name');
+
+    const inputs = document.querySelectorAll('#new-checklist-items .checklist-item-input');
+    const items = Array.from(inputs).map(i => i.value.trim()).filter(i => i);
+    if (items.length === 0) return alert('Please add at least one step');
+
+    await api.post('/api/checklists', { name, items });
+    this.showChecklistManager();
+  },
+
+  async editChecklist(id) {
+    const checklists = await api.get('/api/checklists');
+    const cl = checklists.find(c => c.id === id);
+    if (!cl) return;
+
+    modal.show(`
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Edit Checklist</h3>
+      <div class="mb-3">
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+        <input type="text" id="edit-checklist-name" value="${this.escapeHtml(cl.name)}"
+               class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm">
+      </div>
+      <div class="mb-3">
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Steps</label>
+        <div id="edit-checklist-items" class="space-y-2">
+          ${cl.items.map((item, idx) => `
+            <div class="flex gap-2">
+              <input type="text" value="${this.escapeHtml(item)}" class="checklist-item-input flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+              <button type="button" onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 text-sm px-2">Remove</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="mb-3">
+        <button type="button" onclick="views.addChecklistItemInput()"
+                class="text-sm text-emerald-600 hover:text-emerald-700 font-medium">+ Add Step</button>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="views.showChecklistManager()"
+                class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Back</button>
+        <button type="button" onclick="views.saveEditChecklist('${id}')"
+                class="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-700 font-medium shadow-sm text-sm">Save</button>
+      </div>
+    `);
+  },
+
+  async saveEditChecklist(id) {
+    const name = document.getElementById('edit-checklist-name').value.trim();
+    if (!name) return alert('Please enter a checklist name');
+
+    const inputs = document.querySelectorAll('#edit-checklist-items .checklist-item-input');
+    const items = Array.from(inputs).map(i => i.value.trim()).filter(i => i);
+    if (items.length === 0) return alert('Please add at least one step');
+
+    try {
+      await api.put(`/api/checklists/${id}`, { name, items });
+      this.showChecklistManager();
+    } catch (err) {
+      alert(err.message || 'Failed to update checklist');
+    }
+  },
+
+  async deleteChecklist(id) {
+    if (!confirm('Delete this checklist? Existing ToDos using it will keep their current steps.')) return;
+    try {
+      await api.delete(`/api/checklists/${id}`);
+      this.showChecklistManager();
+    } catch (err) {
+      alert(err.message || 'Failed to delete checklist');
+    }
+  },
+
+  async closeChecklistManager() {
+    modal.hide();
+    // Re-open the add todo modal
+    this.showAddTodoModal();
+  },
+
+  async toggleChecklistItemInline(todoId, itemIndex, checked, linkedType, linkedId) {
+    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todo = todos?.find(t => t.id === todoId);
+    if (!todo) return;
+
+    const updatedItems = [...todo.checklistItemsState];
+    updatedItems[itemIndex] = { ...updatedItems[itemIndex], checked };
+    todo.checklistItemsState = updatedItems;
+
+    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+    if (linkedType === 'contact') {
+      router.navigate('contact-detail', { id: linkedId });
+    } else {
+      router.navigate('company-detail', { id: linkedId });
+    }
+  },
 
   async toggleTodoInline(todoId, completed, linkedType, linkedId) {
     await api.put(`/api/todos/${todoId}`, { completed });

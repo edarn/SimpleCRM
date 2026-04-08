@@ -1039,6 +1039,8 @@ function getAllTodos(userId, filter = 'all') {
       linkedId: row.linked_id,
       linkedName: entityInfo?.name || 'Unknown',
       linkedCompanyName: entityInfo?.companyName || null,
+      checklistId: row.checklist_id,
+      checklistItemsState: row.checklist_items_state ? JSON.parse(row.checklist_items_state) : [],
       createdBy: row.created_by,
       createdByUsername: row.created_by_username,
       createdAt: row.created_at,
@@ -1078,6 +1080,8 @@ function getTodoById(todoId, userId) {
     completedAt: row.completed_at,
     linkedType: row.linked_type,
     linkedId: row.linked_id,
+    checklistId: row.checklist_id,
+    checklistItemsState: row.checklist_items_state ? JSON.parse(row.checklist_items_state) : [],
     createdBy: row.created_by,
     createdByUsername: row.created_by_username,
     createdAt: row.created_at,
@@ -1085,16 +1089,26 @@ function getTodoById(todoId, userId) {
   };
 }
 
-function createTodo({ title, description, dueDate, linkedType, linkedId }, userId) {
+function createTodo({ title, description, dueDate, linkedType, linkedId, checklistId }, userId) {
   const teamId = getUserTeamId(userId);
   const id = generateId();
   const now = getTimestamp();
   const username = getUsernameById(userId);
 
+  // Build initial checklist items state from the template
+  let checklistItemsState = '[]';
+  if (checklistId) {
+    const checklist = db.prepare('SELECT items FROM checklists WHERE id = ?').get(checklistId);
+    if (checklist) {
+      const items = JSON.parse(checklist.items);
+      checklistItemsState = JSON.stringify(items.map(item => ({ text: item, checked: false })));
+    }
+  }
+
   db.prepare(`
-    INSERT INTO todos (id, title, description, due_date, completed, completed_at, linked_type, linked_id, team_id, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?)
-  `).run(id, title, description || '', dueDate || now, linkedType, linkedId, teamId, userId, now, now);
+    INSERT INTO todos (id, title, description, due_date, completed, completed_at, linked_type, linked_id, checklist_id, checklist_items_state, team_id, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, title, description || '', dueDate || now, linkedType, linkedId, checklistId || null, checklistItemsState, teamId, userId, now, now);
 
   return {
     id,
@@ -1105,6 +1119,8 @@ function createTodo({ title, description, dueDate, linkedType, linkedId }, userI
     completedAt: null,
     linkedType,
     linkedId,
+    checklistId: checklistId || null,
+    checklistItemsState: JSON.parse(checklistItemsState),
     createdBy: userId,
     createdByUsername: username,
     createdAt: now,
@@ -1112,7 +1128,7 @@ function createTodo({ title, description, dueDate, linkedType, linkedId }, userI
   };
 }
 
-function updateTodo(todoId, { title, description, dueDate, completed }, userId) {
+function updateTodo(todoId, { title, description, dueDate, completed, checklistItemsState }, userId) {
   // Verify access
   const todo = getTodoById(todoId, userId);
   if (!todo) return null;
@@ -1136,7 +1152,7 @@ function updateTodo(todoId, { title, description, dueDate, completed }, userId) 
 
   db.prepare(`
     UPDATE todos
-    SET title = ?, description = ?, due_date = ?, completed = ?, completed_at = ?, updated_at = ?
+    SET title = ?, description = ?, due_date = ?, completed = ?, completed_at = ?, checklist_items_state = ?, updated_at = ?
     WHERE id = ?
   `).run(
     title !== undefined ? title : existing.title,
@@ -1144,6 +1160,7 @@ function updateTodo(todoId, { title, description, dueDate, completed }, userId) 
     dueDate !== undefined ? dueDate : existing.due_date,
     newCompleted,
     completedAt,
+    checklistItemsState !== undefined ? JSON.stringify(checklistItemsState) : existing.checklist_items_state,
     now,
     todoId
   );
@@ -1165,6 +1182,128 @@ function deleteTodo(todoId, userId) {
   return result.changes > 0 ? { success: true } : { error: 'Delete failed' };
 }
 
+// ============ Checklist Functions ============
+
+function getAllChecklists(userId) {
+  const teamId = getUserTeamId(userId);
+
+  let rows;
+  if (teamId) {
+    rows = db.prepare(`
+      SELECT c.*, u.username as created_by_username
+      FROM checklists c
+      LEFT JOIN users u ON u.id = c.created_by
+      WHERE c.team_id = ?
+      ORDER BY c.name ASC
+    `).all(teamId);
+  } else {
+    rows = db.prepare(`
+      SELECT c.*, u.username as created_by_username
+      FROM checklists c
+      LEFT JOIN users u ON u.id = c.created_by
+      WHERE c.created_by = ? AND c.team_id IS NULL
+      ORDER BY c.name ASC
+    `).all(userId);
+  }
+
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    items: JSON.parse(row.items),
+    createdBy: row.created_by,
+    createdByUsername: row.created_by_username,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }));
+}
+
+function getChecklistById(checklistId, userId) {
+  const teamId = getUserTeamId(userId);
+
+  let row;
+  if (teamId) {
+    row = db.prepare(`
+      SELECT c.*, u.username as created_by_username
+      FROM checklists c
+      LEFT JOIN users u ON u.id = c.created_by
+      WHERE c.id = ? AND c.team_id = ?
+    `).get(checklistId, teamId);
+  } else {
+    row = db.prepare(`
+      SELECT c.*, u.username as created_by_username
+      FROM checklists c
+      LEFT JOIN users u ON u.id = c.created_by
+      WHERE c.id = ? AND c.created_by = ? AND c.team_id IS NULL
+    `).get(checklistId, userId);
+  }
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    items: JSON.parse(row.items),
+    createdBy: row.created_by,
+    createdByUsername: row.created_by_username,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function createChecklist({ name, items }, userId) {
+  const teamId = getUserTeamId(userId);
+  const id = generateId();
+  const now = getTimestamp();
+  const username = getUsernameById(userId);
+
+  db.prepare(`
+    INSERT INTO checklists (id, name, items, team_id, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, JSON.stringify(items), teamId, userId, now, now);
+
+  return {
+    id,
+    name,
+    items,
+    createdBy: userId,
+    createdByUsername: username,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function updateChecklist(checklistId, { name, items }, userId) {
+  const checklist = getChecklistById(checklistId, userId);
+  if (!checklist) return { error: 'Checklist not found' };
+
+  // Only creator or admin/owner can edit
+  const role = getUserRole(userId);
+  if (role === 'member' && checklist.createdBy !== userId) {
+    return { error: 'Permission denied. Only the creator or administrator can edit this checklist.' };
+  }
+
+  const now = getTimestamp();
+  db.prepare(`
+    UPDATE checklists SET name = ?, items = ?, updated_at = ? WHERE id = ?
+  `).run(name, JSON.stringify(items), now, checklistId);
+
+  return getChecklistById(checklistId, userId);
+}
+
+function deleteChecklist(checklistId, userId) {
+  const checklist = getChecklistById(checklistId, userId);
+  if (!checklist) return { error: 'Checklist not found' };
+
+  // Only creator or admin/owner can delete
+  const role = getUserRole(userId);
+  if (role === 'member' && checklist.createdBy !== userId) {
+    return { error: 'Permission denied. Only the creator or administrator can delete this checklist.' };
+  }
+
+  const result = db.prepare('DELETE FROM checklists WHERE id = ?').run(checklistId);
+  return result.changes > 0 ? { success: true } : { error: 'Delete failed' };
+}
+
 // Get linked entity name helper
 function getLinkedEntityName(linkedType, linkedId) {
   if (linkedType === 'company') {
@@ -1178,6 +1317,9 @@ function getLinkedEntityName(linkedType, linkedId) {
       WHERE c.id = ?
     `).get(linkedId);
     return result ? { name: result.name, companyName: result.company_name } : null;
+  } else if (linkedType === 'candidate') {
+    const candidate = db.prepare('SELECT name FROM candidates WHERE id = ?').get(linkedId);
+    return candidate ? { name: candidate.name, companyName: null } : null;
   }
   return null;
 }
@@ -1687,6 +1829,13 @@ module.exports = {
   createTodo,
   updateTodo,
   deleteTodo,
+
+  // Checklists
+  getAllChecklists,
+  getChecklistById,
+  createChecklist,
+  updateChecklist,
+  deleteChecklist,
 
   // Search
   search,
