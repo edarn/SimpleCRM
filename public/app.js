@@ -2175,44 +2175,129 @@ const views = {
     const todo = this._todos.find(t => t.id === id);
     if (!todo) return;
 
+    const [companies, contacts, candidates, checklists] = await Promise.all([
+      api.get('/api/companies'),
+      api.get('/api/contacts'),
+      api.get('/api/candidates'),
+      api.get('/api/checklists')
+    ]);
+
     const dueDateValue = todo.dueDate ? new Date(todo.dueDate).toISOString().slice(0, 16) : '';
+
+    const renderLinkedOptions = (type, selectedId) => {
+      if (type === 'company') {
+        return companies.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${this.escapeHtml(c.name)}</option>`).join('');
+      } else if (type === 'candidate') {
+        return candidates.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${this.escapeHtml(c.name)}${c.role ? ' - ' + this.escapeHtml(c.role) : ''}</option>`).join('');
+      }
+      return contacts.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${this.escapeHtml(c.name)} @ ${this.escapeHtml(c.companyName)}</option>`).join('');
+    };
 
     modal.show(`
       <h3 class="text-lg font-semibold text-slate-800 mb-4">Edit ToDo</h3>
-      <div class="mb-4">
-        <label class="block text-sm font-medium text-slate-700 mb-1.5">Title</label>
-        <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}"
-               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
-      </div>
-      <div class="mb-4">
-        <label class="block text-sm font-medium text-slate-700 mb-1.5">Due Date</label>
-        <input type="datetime-local" id="edit-todo-due-date" value="${dueDateValue}"
-               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
-      </div>
-      <div class="mb-4">
-        <label class="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
-        <textarea id="edit-todo-description" rows="3"
-                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">${this.escapeHtml(todo.description || '')}</textarea>
-      </div>
-      <div class="flex justify-end gap-2">
-        <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
-        <button onclick="views.updateTodo('${id}')" class="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-700 font-medium shadow-sm">Save</button>
-      </div>
+      <form onsubmit="views.updateTodo(event, '${id}')">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Title *</label>
+          <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}" required
+                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Link to *</label>
+          <select id="edit-todo-linked-type" onchange="views.updateEditLinkedOptions()"
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="contact" ${todo.linkedType === 'contact' ? 'selected' : ''}>Contact</option>
+            <option value="company" ${todo.linkedType === 'company' ? 'selected' : ''}>Company</option>
+            <option value="candidate" ${todo.linkedType === 'candidate' ? 'selected' : ''}>Candidate</option>
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select *</label>
+          <select id="edit-todo-linked-id" required
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            ${renderLinkedOptions(todo.linkedType, todo.linkedId)}
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Checklist</label>
+          <select id="edit-todo-checklist-id"
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="">No checklist</option>
+            ${checklists.map(cl => `<option value="${cl.id}" ${cl.id === todo.checklistId ? 'selected' : ''}>${this.escapeHtml(cl.name)} (${cl.items.length} items)</option>`).join('')}
+          </select>
+          <p class="text-xs text-slate-400 mt-1">Changing checklist will reset checklist progress</p>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Due Date</label>
+          <input type="datetime-local" id="edit-todo-due-date" value="${dueDateValue}"
+                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+          <textarea id="edit-todo-description" rows="3"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">${this.escapeHtml(todo.description || '')}</textarea>
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
+          <button type="submit" class="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-700 font-medium shadow-sm">Save</button>
+        </div>
+      </form>
     `);
+
+    this._editModalCompanies = companies;
+    this._editModalContacts = contacts;
+    this._editModalCandidates = candidates;
+    this._editTodoOriginal = todo;
   },
 
-  async updateTodo(id) {
+  updateEditLinkedOptions() {
+    const type = document.getElementById('edit-todo-linked-type').value;
+    const select = document.getElementById('edit-todo-linked-id');
+
+    if (type === 'company') {
+      select.innerHTML = this._editModalCompanies.map(c =>
+        `<option value="${c.id}">${this.escapeHtml(c.name)}</option>`
+      ).join('');
+    } else if (type === 'candidate') {
+      select.innerHTML = this._editModalCandidates.map(c =>
+        `<option value="${c.id}">${this.escapeHtml(c.name)}${c.role ? ' - ' + this.escapeHtml(c.role) : ''}</option>`
+      ).join('');
+    } else {
+      select.innerHTML = this._editModalContacts.map(c =>
+        `<option value="${c.id}">${this.escapeHtml(c.name)} @ ${this.escapeHtml(c.companyName)}</option>`
+      ).join('');
+    }
+  },
+
+  async updateTodo(event, id) {
+    event.preventDefault();
+
     const title = document.getElementById('edit-todo-title').value.trim();
     if (!title) return;
 
     const dueDateInput = document.getElementById('edit-todo-due-date').value;
-    const data = {
+    const newChecklistId = document.getElementById('edit-todo-checklist-id').value || null;
+    const original = this._editTodoOriginal;
+
+    const updateData = {
       title,
       description: document.getElementById('edit-todo-description').value,
-      dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : null
+      dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : null,
+      linkedType: document.getElementById('edit-todo-linked-type').value,
+      linkedId: document.getElementById('edit-todo-linked-id').value
     };
 
-    await api.put(`/api/todos/${id}`, data);
+    // Only send checklistId if it changed (to trigger rebuild of items)
+    if (newChecklistId !== (original?.checklistId || null)) {
+      updateData.checklistId = newChecklistId;
+    }
+
+    await api.put(`/api/todos/${id}`, updateData);
     modal.hide();
     router.navigate('todos');
   },
@@ -2494,49 +2579,117 @@ const views = {
     const todo = todos?.find(t => t.id === todoId);
     if (!todo) return;
 
+    const [companies, contacts, candidates, checklists] = await Promise.all([
+      api.get('/api/companies'),
+      api.get('/api/contacts'),
+      api.get('/api/candidates'),
+      api.get('/api/checklists')
+    ]);
+
     const dueDateValue = todo.dueDate ? new Date(todo.dueDate).toISOString().slice(0, 16) : '';
+
+    const renderLinkedOptions = (type, selectedId) => {
+      if (type === 'company') {
+        return companies.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${this.escapeHtml(c.name)}</option>`).join('');
+      } else if (type === 'candidate') {
+        return candidates.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${this.escapeHtml(c.name)}${c.role ? ' - ' + this.escapeHtml(c.role) : ''}</option>`).join('');
+      }
+      return contacts.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${this.escapeHtml(c.name)} @ ${this.escapeHtml(c.companyName)}</option>`).join('');
+    };
 
     modal.show(`
       <h3 class="text-lg font-semibold text-slate-800 mb-4">Edit ToDo</h3>
-      <div class="mb-4">
-        <label class="block text-sm font-medium text-slate-700 mb-1.5">Title</label>
-        <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}"
-               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
-      </div>
-      <div class="mb-4">
-        <label class="block text-sm font-medium text-slate-700 mb-1.5">Due Date</label>
-        <input type="datetime-local" id="edit-todo-due-date" value="${dueDateValue}"
-               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
-      </div>
-      <div class="mb-4">
-        <label class="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
-        <textarea id="edit-todo-description" rows="3"
-                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">${this.escapeHtml(todo.description || '')}</textarea>
-      </div>
-      <div class="flex justify-end gap-2">
-        <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
-        <button onclick="views.updateTodoInline('${todoId}', '${linkedType}', '${linkedId}')" class="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-700 font-medium shadow-sm">Save</button>
-      </div>
+      <form onsubmit="views.updateTodoInline(event, '${todoId}', '${linkedType}', '${linkedId}')">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Title *</label>
+          <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}" required
+                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Link to *</label>
+          <select id="edit-todo-linked-type" onchange="views.updateEditLinkedOptions()"
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="contact" ${todo.linkedType === 'contact' ? 'selected' : ''}>Contact</option>
+            <option value="company" ${todo.linkedType === 'company' ? 'selected' : ''}>Company</option>
+            <option value="candidate" ${todo.linkedType === 'candidate' ? 'selected' : ''}>Candidate</option>
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select *</label>
+          <select id="edit-todo-linked-id" required
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            ${renderLinkedOptions(todo.linkedType, todo.linkedId)}
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Checklist</label>
+          <select id="edit-todo-checklist-id"
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="">No checklist</option>
+            ${checklists.map(cl => `<option value="${cl.id}" ${cl.id === todo.checklistId ? 'selected' : ''}>${this.escapeHtml(cl.name)} (${cl.items.length} items)</option>`).join('')}
+          </select>
+          <p class="text-xs text-slate-400 mt-1">Changing checklist will reset checklist progress</p>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Due Date</label>
+          <input type="datetime-local" id="edit-todo-due-date" value="${dueDateValue}"
+                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+          <textarea id="edit-todo-description" rows="3"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">${this.escapeHtml(todo.description || '')}</textarea>
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
+          <button type="submit" class="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-700 font-medium shadow-sm">Save</button>
+        </div>
+      </form>
     `);
+
+    this._editModalCompanies = companies;
+    this._editModalContacts = contacts;
+    this._editModalCandidates = candidates;
+    this._editTodoOriginal = todo;
   },
 
-  async updateTodoInline(todoId, linkedType, linkedId) {
+  async updateTodoInline(event, todoId, origLinkedType, origLinkedId) {
+    event.preventDefault();
+
     const title = document.getElementById('edit-todo-title').value.trim();
     if (!title) return;
 
     const dueDateInput = document.getElementById('edit-todo-due-date').value;
-    const data = {
+    const newChecklistId = document.getElementById('edit-todo-checklist-id').value || null;
+    const original = this._editTodoOriginal;
+    const newLinkedType = document.getElementById('edit-todo-linked-type').value;
+    const newLinkedId = document.getElementById('edit-todo-linked-id').value;
+
+    const updateData = {
       title,
       description: document.getElementById('edit-todo-description').value,
-      dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : null
+      dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : null,
+      linkedType: newLinkedType,
+      linkedId: newLinkedId
     };
 
-    await api.put(`/api/todos/${todoId}`, data);
+    if (newChecklistId !== (original?.checklistId || null)) {
+      updateData.checklistId = newChecklistId;
+    }
+
+    await api.put(`/api/todos/${todoId}`, updateData);
     modal.hide();
-    if (linkedType === 'contact') {
-      router.navigate('contact-detail', { id: linkedId });
+    // Navigate back to whichever detail page we came from
+    if (origLinkedType === 'contact') {
+      router.navigate('contact-detail', { id: origLinkedId });
     } else {
-      router.navigate('company-detail', { id: linkedId });
+      router.navigate('company-detail', { id: origLinkedId });
     }
   },
 

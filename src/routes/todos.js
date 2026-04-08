@@ -70,10 +70,14 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const userId = req.session.userId;
-    const { title, description, dueDate, completed, checklistItemsState } = req.body;
+    const { title, description, dueDate, completed, checklistItemsState, linkedType, linkedId, checklistId } = req.body;
 
     if (title !== undefined && !title.trim()) {
       return res.status(400).json({ error: 'ToDo title cannot be empty' });
+    }
+
+    if (linkedType !== undefined && !['contact', 'company', 'candidate'].includes(linkedType)) {
+      return res.status(400).json({ error: 'linkedType must be "contact", "company", or "candidate"' });
     }
 
     const updated = data.updateTodo(req.params.id, {
@@ -81,7 +85,10 @@ router.put('/:id', (req, res) => {
       description,
       dueDate,
       completed,
-      checklistItemsState
+      checklistItemsState,
+      linkedType,
+      linkedId,
+      checklistId
     }, userId);
 
     if (!updated) {

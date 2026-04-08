@@ -1128,7 +1128,7 @@ function createTodo({ title, description, dueDate, linkedType, linkedId, checkli
   };
 }
 
-function updateTodo(todoId, { title, description, dueDate, completed, checklistItemsState }, userId) {
+function updateTodo(todoId, { title, description, dueDate, completed, checklistItemsState, linkedType, linkedId, checklistId }, userId) {
   // Verify access
   const todo = getTodoById(todoId, userId);
   if (!todo) return null;
@@ -1150,9 +1150,24 @@ function updateTodo(todoId, { title, description, dueDate, completed, checklistI
     }
   }
 
+  // If changing checklist template, rebuild items state from template
+  let newChecklistItemsState = checklistItemsState !== undefined ? JSON.stringify(checklistItemsState) : existing.checklist_items_state;
+  if (checklistId !== undefined && checklistId !== existing.checklist_id) {
+    if (checklistId) {
+      const checklist = db.prepare('SELECT items FROM checklists WHERE id = ?').get(checklistId);
+      if (checklist) {
+        const items = JSON.parse(checklist.items);
+        newChecklistItemsState = JSON.stringify(items.map(item => ({ text: item, checked: false })));
+      }
+    } else {
+      newChecklistItemsState = '[]';
+    }
+  }
+
   db.prepare(`
     UPDATE todos
-    SET title = ?, description = ?, due_date = ?, completed = ?, completed_at = ?, checklist_items_state = ?, updated_at = ?
+    SET title = ?, description = ?, due_date = ?, completed = ?, completed_at = ?,
+        linked_type = ?, linked_id = ?, checklist_id = ?, checklist_items_state = ?, updated_at = ?
     WHERE id = ?
   `).run(
     title !== undefined ? title : existing.title,
@@ -1160,7 +1175,10 @@ function updateTodo(todoId, { title, description, dueDate, completed, checklistI
     dueDate !== undefined ? dueDate : existing.due_date,
     newCompleted,
     completedAt,
-    checklistItemsState !== undefined ? JSON.stringify(checklistItemsState) : existing.checklist_items_state,
+    linkedType !== undefined ? linkedType : existing.linked_type,
+    linkedId !== undefined ? linkedId : existing.linked_id,
+    checklistId !== undefined ? (checklistId || null) : existing.checklist_id,
+    newChecklistItemsState,
     now,
     todoId
   );
