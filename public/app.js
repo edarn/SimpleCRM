@@ -1303,16 +1303,17 @@ const views = {
                     <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
                     <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
                       ${item.checklistItemsState.map((ci, idx) => `
-                        <label class="flex items-center gap-2 cursor-pointer group break-inside-avoid mb-1">
+                        <div class="flex items-center gap-2 group break-inside-avoid mb-1">
                           <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
                                  onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, '${entityType}', '${entityId}')"
                                  class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
-                          <span class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'}">${this.escapeHtml(ci.text)}</span>
-                          ${!item.completed ? `<button onclick="event.preventDefault();views.removeChecklistItemInline('${item.id}', ${idx}, '${entityType}', '${entityId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
-                        </label>
+                          <span onclick="views.startEditChecklistItemInline(this, '${item.id}', ${idx}, '${entityType}', '${entityId}')"
+                                class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'} ${!item.completed ? 'cursor-text hover:bg-emerald-50 rounded px-1 -mx-1' : ''}">${this.escapeHtml(ci.text)}</span>
+                          ${!item.completed ? `<button onclick="views.removeChecklistItemInline('${item.id}', ${idx}, '${entityType}', '${entityId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
+                        </div>
                       `).join('')}
                     </div>
-                    ${!item.completed ? `<button onclick="views.addCustomChecklistItemInline('${item.id}', '${entityType}', '${entityId}')" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
+                    ${!item.completed ? `<button onclick="views.addChecklistItemInPlaceInline('${item.id}', '${entityType}', '${entityId}', this)" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
                   </div>` : ''}
                   <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
                 </div>
@@ -1778,16 +1779,17 @@ const views = {
                 <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
                 <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
                   ${item.checklistItemsState.map((ci, idx) => `
-                    <label class="flex items-center gap-2 cursor-pointer group break-inside-avoid mb-1">
+                    <div class="flex items-center gap-2 group break-inside-avoid mb-1">
                       <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
                              onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, 'company', '${companyId}')"
                              class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
-                      <span class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'}">${this.escapeHtml(ci.text)}</span>
-                      ${!item.completed ? `<button onclick="event.preventDefault();views.removeChecklistItemInline('${item.id}', ${idx}, 'company', '${companyId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
-                    </label>
+                      <span onclick="views.startEditChecklistItemInline(this, '${item.id}', ${idx}, 'company', '${companyId}')"
+                            class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'} ${!item.completed ? 'cursor-text hover:bg-emerald-50 rounded px-1 -mx-1' : ''}">${this.escapeHtml(ci.text)}</span>
+                      ${!item.completed ? `<button onclick="views.removeChecklistItemInline('${item.id}', ${idx}, 'company', '${companyId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
+                    </div>
                   `).join('')}
                 </div>
-                ${!item.completed ? `<button onclick="views.addCustomChecklistItemInline('${item.id}', 'company', '${companyId}')" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
+                ${!item.completed ? `<button onclick="views.addChecklistItemInPlaceInline('${item.id}', 'company', '${companyId}', this)" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
               </div>` : ''}
               <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
             </div>
@@ -1986,18 +1988,19 @@ const views = {
             <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${checkedCount}/${totalCount})</div>
             <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
               ${t.checklistItemsState.map((item, idx) => `
-                <label class="flex items-center gap-2 cursor-pointer group break-inside-avoid mb-1">
+                <div class="flex items-center gap-2 group break-inside-avoid mb-1">
                   <input type="checkbox" ${item.checked ? 'checked' : ''} ${t.completed ? 'disabled' : ''}
                          onchange="views.toggleChecklistItem('${t.id}', ${idx}, this.checked)"
                          class="h-4 w-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
-                  <span class="text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}">${this.escapeHtml(item.text)}</span>
-                  ${!t.completed ? `<button onclick="event.preventDefault();views.removeChecklistItem('${t.id}', ${idx})" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
-                </label>
+                  <span onclick="views.startEditChecklistItem(this, '${t.id}', ${idx})"
+                        class="text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'} ${!t.completed ? 'cursor-text hover:bg-emerald-50 rounded px-1 -mx-1' : ''}">${this.escapeHtml(item.text)}</span>
+                  ${!t.completed ? `<button onclick="views.removeChecklistItem('${t.id}', ${idx})" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
+                </div>
               `).join('')}
             </div>
-            ${!t.completed ? `<button onclick="views.addCustomChecklistItem('${t.id}')" class="text-emerald-500 hover:text-emerald-700 text-sm mt-1 flex items-center gap-1"><span class="text-lg leading-none">+</span></button>` : ''}
+            ${!t.completed ? `<button onclick="views.addChecklistItemInPlace('${t.id}', this)" class="text-emerald-500 hover:text-emerald-700 text-sm mt-1 flex items-center gap-1"><span class="text-lg leading-none">+</span></button>` : ''}
           </div>` : `
-          ${!t.completed ? `<button onclick="views.addCustomChecklistItem('${t.id}')" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span> <span>Add checklist</span></button>` : ''}
+          ${!t.completed ? `<button onclick="views.addChecklistItemInPlace('${t.id}', this)" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span> <span>Add checklist</span></button>` : ''}
           `}
           <div class="text-sm text-slate-500 mt-1">
             <span class="mr-3">${linkedLabel}</span>
@@ -2308,18 +2311,73 @@ const views = {
     router.navigate('todos');
   },
 
-  async addCustomChecklistItem(todoId) {
-    const text = prompt('Enter step name:');
-    if (!text || !text.trim()) return;
+  addChecklistItemInPlace(todoId, btn) {
+    // Insert an inline input before the + button
+    const container = btn.closest('.ml-1') || btn.parentElement;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex items-center gap-2 mb-1 mt-1';
+    wrapper.innerHTML = `
+      <input type="checkbox" disabled class="h-4 w-4 text-emerald-600 rounded border-slate-300 shrink-0">
+      <input type="text" placeholder="New step..." autofocus
+             class="text-sm border border-emerald-300 rounded px-2 py-0.5 flex-1 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+    `;
+    btn.before(wrapper);
+    const input = wrapper.querySelector('input[type="text"]');
+    input.focus();
 
-    const todo = this._todos.find(t => t.id === todoId);
-    if (!todo) return;
+    const save = async () => {
+      const text = input.value.trim();
+      if (!text) { wrapper.remove(); return; }
+      const todo = this._todos.find(t => t.id === todoId);
+      if (!todo) return;
+      const updatedItems = [...(todo.checklistItemsState || []), { text, checked: false }];
+      todo.checklistItemsState = updatedItems;
+      await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+      router.navigate('todos');
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { wrapper.remove(); }
+    });
+  },
 
-    const updatedItems = [...(todo.checklistItemsState || []), { text: text.trim(), checked: false }];
-    todo.checklistItemsState = updatedItems;
+  startEditChecklistItem(span, todoId, itemIndex) {
+    const todo = this._todos?.find(t => t.id === todoId);
+    if (!todo || todo.completed) return;
 
-    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
-    router.navigate('todos');
+    const currentText = todo.checklistItemsState[itemIndex].text;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentText;
+    input.className = 'text-sm border border-emerald-300 rounded px-1 py-0 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none w-full';
+
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+      const newText = input.value.trim();
+      if (!newText || newText === currentText) {
+        // Restore original span
+        const newSpan = document.createElement('span');
+        newSpan.className = span.className;
+        newSpan.textContent = currentText;
+        newSpan.setAttribute('onclick', span.getAttribute('onclick'));
+        input.replaceWith(newSpan);
+        return;
+      }
+      const updatedItems = [...todo.checklistItemsState];
+      updatedItems[itemIndex] = { ...updatedItems[itemIndex], text: newText };
+      todo.checklistItemsState = updatedItems;
+      await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+      router.navigate('todos');
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = currentText; input.blur(); }
+    });
   },
 
   async removeChecklistItem(todoId, itemIndex) {
@@ -2513,23 +2571,81 @@ const views = {
     }
   },
 
-  async addCustomChecklistItemInline(todoId, linkedType, linkedId) {
-    const text = prompt('Enter step name:');
-    if (!text || !text.trim()) return;
+  addChecklistItemInPlaceInline(todoId, linkedType, linkedId, btn) {
+    const container = btn.parentElement;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex items-center gap-2 mb-1 mt-1';
+    wrapper.innerHTML = `
+      <input type="checkbox" disabled class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 shrink-0">
+      <input type="text" placeholder="New step..." autofocus
+             class="text-xs border border-emerald-300 rounded px-2 py-0.5 flex-1 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+    `;
+    btn.before(wrapper);
+    const input = wrapper.querySelector('input[type="text"]');
+    input.focus();
 
+    const save = async () => {
+      const text = input.value.trim();
+      if (!text) { wrapper.remove(); return; }
+      const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+      const todo = todos?.find(t => t.id === todoId);
+      if (!todo) return;
+      const updatedItems = [...(todo.checklistItemsState || []), { text, checked: false }];
+      todo.checklistItemsState = updatedItems;
+      await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+      if (linkedType === 'contact') {
+        router.navigate('contact-detail', { id: linkedId });
+      } else {
+        router.navigate('company-detail', { id: linkedId });
+      }
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { wrapper.remove(); }
+    });
+  },
+
+  startEditChecklistItemInline(span, todoId, itemIndex, linkedType, linkedId) {
     const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
     const todo = todos?.find(t => t.id === todoId);
-    if (!todo) return;
+    if (!todo || todo.completed) return;
 
-    const updatedItems = [...(todo.checklistItemsState || []), { text: text.trim(), checked: false }];
-    todo.checklistItemsState = updatedItems;
+    const currentText = todo.checklistItemsState[itemIndex].text;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentText;
+    input.className = 'text-xs border border-emerald-300 rounded px-1 py-0 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none w-full';
 
-    await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
-    if (linkedType === 'contact') {
-      router.navigate('contact-detail', { id: linkedId });
-    } else {
-      router.navigate('company-detail', { id: linkedId });
-    }
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+      const newText = input.value.trim();
+      if (!newText || newText === currentText) {
+        const newSpan = document.createElement('span');
+        newSpan.className = span.className;
+        newSpan.textContent = currentText;
+        newSpan.setAttribute('onclick', span.getAttribute('onclick'));
+        input.replaceWith(newSpan);
+        return;
+      }
+      const updatedItems = [...todo.checklistItemsState];
+      updatedItems[itemIndex] = { ...updatedItems[itemIndex], text: newText };
+      todo.checklistItemsState = updatedItems;
+      await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
+      if (linkedType === 'contact') {
+        router.navigate('contact-detail', { id: linkedId });
+      } else {
+        router.navigate('company-detail', { id: linkedId });
+      }
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = currentText; input.blur(); }
+    });
   },
 
   async removeChecklistItemInline(todoId, itemIndex, linkedType, linkedId) {
