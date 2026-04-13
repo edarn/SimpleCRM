@@ -57,8 +57,10 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Resume file upload (PDF, DOC, DOCX, max 10MB)
    - Resume download functionality
    - Comments system for candidate notes
+   - "Make this a ToDo" checkbox when adding a comment: if checked, creates a ToDo linked to the candidate (using comment text as title) instead of a comment
    - Full-text search across all candidate fields
    - Sort candidates by name, role, or skills
+   - **Owner filter (team users)**: On the candidates list, a dropdown lets a team user choose whose candidates to view — their own (default), any other team member's, or all team candidates. An "Added By" column is shown for team users. Solo users see their own candidates with no dropdown.
 
 6. **Notes & ToDos Management**
    - Notes and ToDos are displayed in a unified "Notes & ToDos" list
@@ -615,7 +617,7 @@ VibeCodingProject/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | /api/candidates | List all candidates |
+| GET | /api/candidates | List candidates (default: current user's; `?createdBy=<userId>` for a specific member, `?createdBy=all` for all team) |
 | GET | /api/candidates/:id | Get candidate with comments |
 | POST | /api/candidates | Create candidate (multipart/form-data) |
 | PUT | /api/candidates/:id | Update candidate (multipart/form-data) |

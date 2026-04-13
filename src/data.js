@@ -1482,18 +1482,37 @@ function createUser({ username, email, passwordHash }) {
 
 // ============ Candidate Functions ============
 
-function getAllCandidates(userId) {
+function getAllCandidates(userId, ownerFilter) {
   const teamId = getUserTeamId(userId);
 
   let rows;
   if (teamId) {
-    rows = db.prepare(`
-      SELECT c.*, u.username as created_by_username
-      FROM candidates c
-      LEFT JOIN users u ON u.id = c.created_by
-      WHERE c.team_id = ?
-      ORDER BY c.name
-    `).all(teamId);
+    // ownerFilter: undefined/null => current user, 'all' => all team, otherwise user id
+    if (!ownerFilter) {
+      rows = db.prepare(`
+        SELECT c.*, u.username as created_by_username
+        FROM candidates c
+        LEFT JOIN users u ON u.id = c.created_by
+        WHERE c.team_id = ? AND c.created_by = ?
+        ORDER BY c.name
+      `).all(teamId, userId);
+    } else if (ownerFilter === 'all') {
+      rows = db.prepare(`
+        SELECT c.*, u.username as created_by_username
+        FROM candidates c
+        LEFT JOIN users u ON u.id = c.created_by
+        WHERE c.team_id = ?
+        ORDER BY c.name
+      `).all(teamId);
+    } else {
+      rows = db.prepare(`
+        SELECT c.*, u.username as created_by_username
+        FROM candidates c
+        LEFT JOIN users u ON u.id = c.created_by
+        WHERE c.team_id = ? AND c.created_by = ?
+        ORDER BY c.name
+      `).all(teamId, ownerFilter);
+    }
   } else {
     rows = db.prepare(`
       SELECT c.*, u.username as created_by_username

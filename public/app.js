@@ -2848,8 +2848,36 @@ const views = {
 
   // Candidate List View
   async candidateList(container) {
-    const candidates = await api.get('/api/candidates');
+    // Initialize owner filter default = current user on first entry
+    if (this._candidateOwnerFilter === undefined) {
+      this._candidateOwnerFilter = auth.currentUser?.id || '';
+    }
+
+    const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
+    let teamMembers = [];
+    if (hasTeam) {
+      try {
+        const teamInfo = await api.get('/api/team');
+        teamMembers = teamInfo.members || [];
+      } catch (_) { /* ignore */ }
+    }
+
+    const ownerParam = this._candidateOwnerFilter;
+    const qs = ownerParam ? `?createdBy=${encodeURIComponent(ownerParam)}` : '';
+    const candidates = await api.get(`/api/candidates${qs}`);
     const categoryLabels = this._candidateCategories;
+
+    const ownerFilterHtml = hasTeam ? `
+        <select id="candidate-owner-filter"
+                class="px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white text-slate-700"
+                onchange="views.changeCandidateOwner(this.value)">
+          <option value="${auth.currentUser.id}" ${ownerParam === auth.currentUser.id ? 'selected' : ''}>My Candidates</option>
+          ${teamMembers.filter(m => m.id !== auth.currentUser.id).map(m =>
+            `<option value="${m.id}" ${ownerParam === m.id ? 'selected' : ''}>${this.escapeHtml(m.username)}</option>`
+          ).join('')}
+          <option value="all" ${ownerParam === 'all' ? 'selected' : ''}>All Candidates (Team)</option>
+        </select>
+    ` : '';
 
     container.innerHTML = `
       <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -2867,6 +2895,7 @@ const views = {
         <input type="text" id="candidate-search-input" placeholder="Search candidates..."
                class="w-full sm:flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"
                oninput="views.filterCandidates()">
+        ${ownerFilterHtml}
         <select id="candidate-category-filter"
                 class="px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white text-slate-700"
                 onchange="views.filterCandidates()">
@@ -2903,6 +2932,7 @@ const views = {
                   onclick="views.sortCandidates('skills')">
                 Skills <span id="sort-candidate-skills"></span>
               </th>
+              ${hasTeam ? `<th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Added By</th>` : ''}
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                 Files
               </th>
@@ -2936,8 +2966,10 @@ const views = {
 
   renderCandidateRows(candidates) {
     const categoryLabels = this._candidateCategories;
+    const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
+    const colspan = hasTeam ? 6 : 5;
     if (candidates.length === 0) {
-      return `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
+      return `<tr><td colspan="${colspan}" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
     }
     return candidates.map(c => `
       <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
@@ -2950,11 +2982,18 @@ const views = {
           ${c.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(c.category)}">${this.escapeHtml(categoryLabels[c.category] || c.category)}</span>` : '<span class="text-slate-400">-</span>'}
         </td>
         <td class="px-6 py-4 text-slate-600" data-label="Skills">${this.escapeHtml(c.skills || '-')}</td>
+        ${hasTeam ? `<td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Added By">${this.escapeHtml(c.createdByUsername || '-')}</td>` : ''}
         <td class="px-6 py-4 whitespace-nowrap text-slate-500" data-label="Files">
           ${c.resumeFilename ? '<span class="text-emerald-600 font-medium">Uploaded</span>' : '-'}
         </td>
       </tr>
     `).join('');
+  },
+
+  async changeCandidateOwner(value) {
+    this._candidateOwnerFilter = value;
+    const container = document.getElementById('app');
+    if (container) await this.candidateList(container);
   },
 
   filterCandidates() {
@@ -3106,7 +3145,11 @@ const views = {
         <form onsubmit="views.addCandidateComment(event, '${candidate.id}')" class="mb-6">
           <textarea id="new-candidate-comment" rows="3" placeholder="Add a comment..."
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"></textarea>
-          <div class="mt-2">
+          <div class="mt-2 flex items-center justify-between gap-3 flex-wrap">
+            <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input type="checkbox" id="candidate-make-todo" class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500">
+              Make this a ToDo
+            </label>
             <button type="submit" class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-4 py-2 rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all font-medium shadow-sm">
               Add Comment
             </button>
@@ -3257,8 +3300,20 @@ const views = {
     const content = document.getElementById('new-candidate-comment').value.trim();
     if (!content) return;
 
+    const makeTodo = document.getElementById('candidate-make-todo')?.checked;
+
     try {
-      await api.post(`/api/candidates/${candidateId}/comments`, { content });
+      if (makeTodo) {
+        await api.post('/api/todos', {
+          title: content,
+          description: '',
+          dueDate: new Date().toISOString(),
+          linkedType: 'candidate',
+          linkedId: candidateId
+        });
+      } else {
+        await api.post(`/api/candidates/${candidateId}/comments`, { content });
+      }
       router.navigate('candidate-detail', { id: candidateId });
     } catch (err) {
       if (err.message !== 'Authentication required') {

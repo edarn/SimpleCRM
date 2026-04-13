@@ -16,7 +16,7 @@ module.exports = function(upload, uploadsDir) {
 router.get('/', (req, res) => {
   try {
     const userId = req.session.userId;
-    const candidates = data.getAllCandidates(userId);
+    const candidates = data.getAllCandidates(userId, req.query.createdBy);
     res.json(candidates);
   } catch (err) {
     console.error('Error fetching candidates:', err);
