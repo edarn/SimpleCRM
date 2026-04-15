@@ -56,11 +56,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Candidate fields: name, email, phone, role, skills
    - Resume file upload (PDF, DOC, DOCX, max 10MB)
    - Resume download functionality
-   - Comments system for candidate notes
-   - "Make this a ToDo" checkbox when adding a comment: if checked, creates a ToDo linked to the candidate (using comment text as title) instead of a comment
+   - Comments & ToDos: unified list on the candidate detail page (same pattern as Contacts and Companies), sortable by date or type, showing comments (rose) and linked ToDos (emerald) inline with inline checklist/complete controls
+   - "Make this a ToDo" checkbox when adding a comment: if checked, creates a ToDo linked to the candidate (using comment text as title) instead of a comment; the ToDo appears in the candidate's Comments & ToDos list and in the global ToDos list
    - Full-text search across all candidate fields
    - Sort candidates by name, role, or skills
    - **Owner filter (team users)**: On the candidates list, a dropdown lets a team user choose whose candidates to view — their own (default), any other team member's, or all team candidates. An "Added By" column is shown for team users. Solo users see their own candidates with no dropdown.
+   - **Transfer between team members**: On the candidate detail page, team users see a "Transfer" button that opens a modal with a dropdown of other team members. Transferring reassigns the candidate's owner (`created_by`) so it appears in the new owner's list. Only the current candidate owner or the team owner can transfer; the target must be a member of the same team.
 
 6. **Notes & ToDos Management**
    - Notes and ToDos are displayed in a unified "Notes & ToDos" list
@@ -97,6 +98,7 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      - Checklist management: create, edit, and delete checklist templates
      - Only the creator or team owner/admin can edit or delete a checklist
    - **Full Edit**: Edit modal supports all fields (title, linked entity, checklist, due date, description)
+   - **Owner scoping**: The ToDos list defaults to the current user's own ToDos. Team users see an "Owner" dropdown to switch to another member or "All ToDos (Team)". On contact/company/candidate detail pages, all linked team ToDos are shown regardless of owner (so teammates see each other's work on shared entities). Checklist templates remain team-shared and usable by all members.
 
 8. **Archive & Data Protection**
    - Companies and contacts are archived instead of permanently deleted
@@ -391,6 +393,10 @@ CREATE TABLE candidate_comments (
 
 ## User Interface
 
+### Input Focus Behavior
+
+Every view/modal that presents a text input auto-focuses the topmost relevant field on open so the user can start typing immediately (login username, register username, list search boxes, form name fields, invite email, modal title fields, etc.). Detail pages that are primarily for viewing (contact/company/candidate detail) do not auto-focus their secondary note/comment inputs.
+
 ### Theme
 
 - Light, modern design with colorful accents
@@ -596,7 +602,7 @@ VibeCodingProject/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | /api/todos | List all ToDos |
+| GET | /api/todos | List ToDos (default: current user's; `?createdBy=<userId>` for a specific member, `?createdBy=all` for all team) |
 | GET | /api/todos?filter=active\|completed | Filter ToDos |
 | GET | /api/todos/:id | Get single ToDo |
 | POST | /api/todos | Create new ToDo |
@@ -622,6 +628,7 @@ VibeCodingProject/
 | POST | /api/candidates | Create candidate (multipart/form-data) |
 | PUT | /api/candidates/:id | Update candidate (multipart/form-data) |
 | DELETE | /api/candidates/:id | Delete candidate |
+| POST | /api/candidates/:id/transfer | Transfer candidate ownership to another team member (`{ newOwnerId }`) |
 | GET | /api/candidates/:id/resume | Download resume file |
 | POST | /api/candidates/:id/comments | Add comment |
 | PUT | /api/candidates/:id/comments/:commentId | Update comment |

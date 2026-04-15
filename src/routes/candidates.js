@@ -139,6 +139,32 @@ router.put('/:id', upload.single('resume'), (req, res) => {
   }
 });
 
+// POST /api/candidates/:id/transfer - Transfer candidate ownership to another team member
+router.post('/:id/transfer', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { newOwnerId } = req.body;
+
+    if (!newOwnerId) {
+      return res.status(400).json({ error: 'New owner ID is required' });
+    }
+
+    const result = data.transferCandidate(req.params.id, newOwnerId, userId);
+
+    if (result.error) {
+      if (result.error === 'Candidate not found') {
+        return res.status(404).json({ error: result.error });
+      }
+      return res.status(403).json({ error: result.error });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Error transferring candidate:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/candidates/:id - Delete candidate and associated files
 router.delete('/:id', (req, res) => {
   try {

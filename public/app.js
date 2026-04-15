@@ -321,7 +321,7 @@ const auth = {
         <form onsubmit="auth.login(event)">
           <div class="mb-4">
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
-            <input type="text" id="login-username" required autocomplete="username"
+            <input type="text" id="login-username" required autocomplete="username" autofocus
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
           </div>
 
@@ -343,6 +343,7 @@ const auth = {
         </p>
       </div>
     `;
+    focusAutofocus(document.getElementById('auth-modal-content'));
   },
 
   showRegisterForm() {
@@ -363,7 +364,7 @@ const auth = {
         <form onsubmit="auth.register(event)">
           <div class="mb-4">
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
-            <input type="text" id="register-username" required autocomplete="username"
+            <input type="text" id="register-username" required autocomplete="username" autofocus
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
           </div>
 
@@ -391,6 +392,7 @@ const auth = {
         </p>
       </div>
     `;
+    focusAutofocus(document.getElementById('auth-modal-content'));
   },
 
   showAuthError(message) {
@@ -608,14 +610,27 @@ const router = {
         app.innerHTML = `<div class="text-red-600">Error: ${err.message}</div>`;
       }
     }
+
+    // Auto-focus first element with [autofocus] after route render
+    focusAutofocus(app);
   }
 };
+
+// Find and focus the first element with the autofocus attribute within a container
+function focusAutofocus(container) {
+  if (!container) return;
+  const el = container.querySelector('[autofocus]');
+  if (el && typeof el.focus === 'function') {
+    setTimeout(() => el.focus(), 0);
+  }
+}
 
 // Modal helper
 const modal = {
   show(content) {
     document.getElementById('modal-content').innerHTML = content;
     document.getElementById('modal').classList.remove('hidden');
+    focusAutofocus(document.getElementById('modal-content'));
   },
   hide() {
     document.getElementById('modal').classList.add('hidden');
@@ -842,7 +857,7 @@ const views = {
             </div>
 
             <div class="mb-3">
-              <input type="text" id="search-input" placeholder="Search..."
+              <input type="text" id="search-input" placeholder="Search..." autofocus
                      class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors text-sm"
                      oninput="views.filterContactsCompact()">
             </div>
@@ -876,7 +891,7 @@ const views = {
         </div>
 
         <div class="mb-4">
-          <input type="text" id="search-input" placeholder="Search contacts..."
+          <input type="text" id="search-input" placeholder="Search contacts..." autofocus
                  class="w-full md:w-96 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors"
                  oninput="views.filterContacts()">
         </div>
@@ -970,7 +985,7 @@ const views = {
 
     const [contact, allTodos] = await Promise.all([
       api.get(`/api/contacts/${id}`),
-      api.get('/api/todos')
+      api.get('/api/todos?createdBy=all')
     ]);
     const todos = allTodos.filter(t => t.linkedType === 'contact' && t.linkedId === id);
 
@@ -1137,7 +1152,7 @@ const views = {
   async contactDetail(container, id) {
     const [contact, allTodos] = await Promise.all([
       api.get(`/api/contacts/${id}`),
-      api.get('/api/todos')
+      api.get('/api/todos?createdBy=all')
     ]);
     const todos = allTodos.filter(t => t.linkedType === 'contact' && t.linkedId === id);
 
@@ -1472,7 +1487,7 @@ const views = {
         <form onsubmit="views.saveContact(event, '${id || ''}')" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Name *</label>
-            <input type="text" id="contact-name" value="${this.escapeHtml(contact.name)}" required
+            <input type="text" id="contact-name" value="${this.escapeHtml(contact.name)}" required autofocus
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
           </div>
 
@@ -1630,7 +1645,7 @@ const views = {
   async companyDetail(container, id) {
     const [company, allTodos] = await Promise.all([
       api.get(`/api/companies/${id}`),
-      api.get('/api/todos')
+      api.get('/api/todos?createdBy=all')
     ]);
     const todos = allTodos.filter(t => t.linkedType === 'company' && t.linkedId === id);
 
@@ -1892,7 +1907,7 @@ const views = {
         <form onsubmit="views.saveCompany(event, '${id || ''}')" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Name *</label>
-            <input type="text" id="company-name" value="${this.escapeHtml(company.name)}" required
+            <input type="text" id="company-name" value="${this.escapeHtml(company.name)}" required autofocus
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition-colors">
           </div>
 
@@ -1948,7 +1963,34 @@ const views = {
 
   // ToDo List View
   async todoList(container) {
-    const todos = await api.get('/api/todos');
+    if (this._todoOwnerFilter === undefined) {
+      this._todoOwnerFilter = auth.currentUser?.id || '';
+    }
+
+    const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
+    let teamMembers = [];
+    if (hasTeam) {
+      try {
+        const teamInfo = await api.get('/api/team');
+        teamMembers = teamInfo.members || [];
+      } catch (_) { /* ignore */ }
+    }
+
+    const ownerParam = this._todoOwnerFilter;
+    const qs = ownerParam ? `?createdBy=${encodeURIComponent(ownerParam)}` : '';
+    const todos = await api.get(`/api/todos${qs}`);
+
+    const ownerFilterHtml = hasTeam ? `
+        <select id="todo-owner-filter"
+                class="ml-auto px-4 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors bg-white text-slate-700 text-sm"
+                onchange="views.changeTodoOwner(this.value)">
+          <option value="${auth.currentUser.id}" ${ownerParam === auth.currentUser.id ? 'selected' : ''}>My ToDos</option>
+          ${teamMembers.filter(m => m.id !== auth.currentUser.id).map(m =>
+            `<option value="${m.id}" ${ownerParam === m.id ? 'selected' : ''}>${this.escapeHtml(m.username)}</option>`
+          ).join('')}
+          <option value="all" ${ownerParam === 'all' ? 'selected' : ''}>All ToDos (Team)</option>
+        </select>
+    ` : '';
 
     container.innerHTML = `
       <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1962,10 +2004,11 @@ const views = {
         </button>
       </div>
 
-      <div class="mb-4 flex gap-2">
+      <div class="mb-4 flex gap-2 items-center flex-wrap">
         <button onclick="views.filterTodos('all')" class="todo-filter px-4 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 font-medium transition-colors" data-filter="all">All</button>
         <button onclick="views.filterTodos('active')" class="todo-filter px-4 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 font-medium transition-colors" data-filter="active">Active</button>
         <button onclick="views.filterTodos('completed')" class="todo-filter px-4 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 font-medium transition-colors" data-filter="completed">Completed</button>
+        ${ownerFilterHtml}
       </div>
 
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
@@ -2032,6 +2075,12 @@ const views = {
     }).join('');
   },
 
+  async changeTodoOwner(value) {
+    this._todoOwnerFilter = value;
+    const container = document.getElementById('app');
+    if (container) await this.todoList(container);
+  },
+
   async filterTodos(filter) {
     this._todoFilter = filter;
 
@@ -2084,7 +2133,7 @@ const views = {
       <form onsubmit="views.saveTodo(event)">
         <div class="mb-4">
           <label class="block text-sm font-medium text-slate-700 mb-1.5">Title *</label>
-          <input type="text" id="todo-title" required
+          <input type="text" id="todo-title" required autofocus
                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
         </div>
 
@@ -2217,7 +2266,7 @@ const views = {
       <form onsubmit="views.updateTodo(event, '${id}')">
         <div class="mb-4">
           <label class="block text-sm font-medium text-slate-700 mb-1.5">Title *</label>
-          <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}" required
+          <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}" required autofocus
                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
         </div>
 
@@ -2440,7 +2489,7 @@ const views = {
       <div class="border-t border-slate-200 pt-4">
         <h4 class="text-sm font-medium text-slate-700 mb-2">Create New Checklist</h4>
         <div class="mb-3">
-          <input type="text" id="new-checklist-name" placeholder="Checklist name..."
+          <input type="text" id="new-checklist-name" placeholder="Checklist name..." autofocus
                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm">
         </div>
         <div id="new-checklist-items" class="mb-3 space-y-2">
@@ -2515,7 +2564,7 @@ const views = {
       <h3 class="text-lg font-semibold text-slate-800 mb-4">Edit Checklist</h3>
       <div class="mb-3">
         <label class="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
-        <input type="text" id="edit-checklist-name" value="${this.escapeHtml(cl.name)}"
+        <input type="text" id="edit-checklist-name" value="${this.escapeHtml(cl.name)}" autofocus
                class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm">
       </div>
       <div class="mb-3">
@@ -2603,17 +2652,13 @@ const views = {
     const save = async () => {
       const text = input.value.trim();
       if (!text) { wrapper.remove(); return; }
-      const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+      const todos = this._todosCacheFor(linkedType);
       const todo = todos?.find(t => t.id === todoId);
       if (!todo) return;
       const updatedItems = [...(todo.checklistItemsState || []), { text, checked: false }];
       todo.checklistItemsState = updatedItems;
       await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
-      if (linkedType === 'contact') {
-        router.navigate('contact-detail', { id: linkedId });
-      } else {
-        router.navigate('company-detail', { id: linkedId });
-      }
+      this._navigateDetail(linkedType, linkedId);
     };
     input.addEventListener('blur', save);
     input.addEventListener('keydown', (e) => {
@@ -2622,8 +2667,20 @@ const views = {
     });
   },
 
+  _todosCacheFor(linkedType) {
+    if (linkedType === 'contact') return this._currentTodos;
+    if (linkedType === 'candidate') return this._candidateTodos;
+    return this._companyTodos;
+  },
+
+  _navigateDetail(linkedType, linkedId) {
+    if (linkedType === 'contact') router.navigate('contact-detail', { id: linkedId });
+    else if (linkedType === 'candidate') router.navigate('candidate-detail', { id: linkedId });
+    else router.navigate('company-detail', { id: linkedId });
+  },
+
   startEditChecklistItemInline(span, todoId, itemIndex, linkedType, linkedId) {
-    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todos = this._todosCacheFor(linkedType);
     const todo = todos?.find(t => t.id === todoId);
     if (!todo || todo.completed) return;
 
@@ -2651,11 +2708,7 @@ const views = {
       updatedItems[itemIndex] = { ...updatedItems[itemIndex], text: newText };
       todo.checklistItemsState = updatedItems;
       await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
-      if (linkedType === 'contact') {
-        router.navigate('contact-detail', { id: linkedId });
-      } else {
-        router.navigate('company-detail', { id: linkedId });
-      }
+      this._navigateDetail(linkedType, linkedId);
     };
     input.addEventListener('blur', save);
     input.addEventListener('keydown', (e) => {
@@ -2665,7 +2718,7 @@ const views = {
   },
 
   async removeChecklistItemInline(todoId, itemIndex, linkedType, linkedId) {
-    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todos = this._todosCacheFor(linkedType);
     const todo = todos?.find(t => t.id === todoId);
     if (!todo) return;
 
@@ -2673,15 +2726,11 @@ const views = {
     todo.checklistItemsState = updatedItems;
 
     await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
-    if (linkedType === 'contact') {
-      router.navigate('contact-detail', { id: linkedId });
-    } else {
-      router.navigate('company-detail', { id: linkedId });
-    }
+    this._navigateDetail(linkedType, linkedId);
   },
 
   async toggleChecklistItemInline(todoId, itemIndex, checked, linkedType, linkedId) {
-    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todos = this._todosCacheFor(linkedType);
     const todo = todos?.find(t => t.id === todoId);
     if (!todo) return;
 
@@ -2690,24 +2739,16 @@ const views = {
     todo.checklistItemsState = updatedItems;
 
     await api.put(`/api/todos/${todoId}`, { checklistItemsState: updatedItems });
-    if (linkedType === 'contact') {
-      router.navigate('contact-detail', { id: linkedId });
-    } else {
-      router.navigate('company-detail', { id: linkedId });
-    }
+    this._navigateDetail(linkedType, linkedId);
   },
 
   async toggleTodoInline(todoId, completed, linkedType, linkedId) {
     await api.put(`/api/todos/${todoId}`, { completed });
-    if (linkedType === 'contact') {
-      router.navigate('contact-detail', { id: linkedId });
-    } else {
-      router.navigate('company-detail', { id: linkedId });
-    }
+    this._navigateDetail(linkedType, linkedId);
   },
 
   async editTodoInline(todoId, linkedType, linkedId) {
-    const todos = linkedType === 'contact' ? this._currentTodos : this._companyTodos;
+    const todos = this._todosCacheFor(linkedType);
     const todo = todos?.find(t => t.id === todoId);
     if (!todo) return;
 
@@ -2734,7 +2775,7 @@ const views = {
       <form onsubmit="views.updateTodoInline(event, '${todoId}', '${linkedType}', '${linkedId}')">
         <div class="mb-4">
           <label class="block text-sm font-medium text-slate-700 mb-1.5">Title *</label>
-          <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}" required
+          <input type="text" id="edit-todo-title" value="${this.escapeHtml(todo.title)}" required autofocus
                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
         </div>
 
@@ -2817,22 +2858,13 @@ const views = {
 
     await api.put(`/api/todos/${todoId}`, updateData);
     modal.hide();
-    // Navigate back to whichever detail page we came from
-    if (origLinkedType === 'contact') {
-      router.navigate('contact-detail', { id: origLinkedId });
-    } else {
-      router.navigate('company-detail', { id: origLinkedId });
-    }
+    this._navigateDetail(origLinkedType, origLinkedId);
   },
 
   async deleteTodoInline(todoId, linkedType, linkedId) {
     if (!confirm('Delete this ToDo?')) return;
     await api.delete(`/api/todos/${todoId}`);
-    if (linkedType === 'contact') {
-      router.navigate('contact-detail', { id: linkedId });
-    } else {
-      router.navigate('company-detail', { id: linkedId });
-    }
+    this._navigateDetail(linkedType, linkedId);
   },
 
   // ============ Candidate Views ============
@@ -2892,7 +2924,7 @@ const views = {
       </div>
 
       <div class="mb-4 flex flex-col sm:flex-row gap-3">
-        <input type="text" id="candidate-search-input" placeholder="Search candidates..."
+        <input type="text" id="candidate-search-input" placeholder="Search candidates..." autofocus
                class="w-full sm:flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"
                oninput="views.filterCandidates()">
         ${ownerFilterHtml}
@@ -3057,7 +3089,11 @@ const views = {
 
   // Candidate Detail View
   async candidateDetail(container, id) {
-    const candidate = await api.get(`/api/candidates/${id}`);
+    const [candidate, allTodos] = await Promise.all([
+      api.get(`/api/candidates/${id}`),
+      api.get('/api/todos?createdBy=all')
+    ]);
+    const todos = allTodos.filter(t => t.linkedType === 'candidate' && t.linkedId === id);
     const files = candidate.files || [];
     const fileCount = files.length;
 
@@ -3080,12 +3116,18 @@ const views = {
                     class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm">
               Edit
             </button>
+            <button onclick="views.showTransferCandidateModal('${candidate.id}')"
+                    class="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg hover:bg-indigo-100 transition-colors font-medium text-sm">
+              Transfer
+            </button>
             <button onclick="views.deleteCandidate('${candidate.id}')"
                     class="bg-red-50 text-red-700 px-4 py-2 rounded-lg hover:bg-red-100 transition-colors font-medium text-sm">
               Delete
             </button>
           </div>
         </div>
+
+        ${candidate.createdByUsername ? `<p class="text-xs text-slate-500 mb-2">Owner: <span class="font-medium text-slate-700">${this.escapeHtml(candidate.createdByUsername)}</span></p>` : ''}
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${candidate.email ? `<div><span class="text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(candidate.email)}" class="text-rose-600 hover:text-rose-700">${this.escapeHtml(candidate.email)}</a></div>` : ''}
@@ -3140,7 +3182,7 @@ const views = {
       </div>
 
       <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
-        <h3 class="text-lg font-semibold text-slate-800 mb-4">Comments</h3>
+        <h3 class="text-lg font-semibold text-slate-800 mb-4">Comments & ToDos</h3>
 
         <form onsubmit="views.addCandidateComment(event, '${candidate.id}')" class="mb-6">
           <textarea id="new-candidate-comment" rows="3" placeholder="Add a comment..."
@@ -3156,8 +3198,14 @@ const views = {
           </div>
         </form>
 
-        <div id="candidate-comments-list" class="space-y-4">
-          ${this.renderCandidateComments(candidate.comments, candidate.id)}
+        <div class="mb-3 flex gap-2 text-sm">
+          <span class="text-slate-500">Sort by:</span>
+          <button onclick="views.sortCandidateActivity('date')" class="candidate-activity-sort text-rose-600 font-medium" data-sort="date">Date <span id="sort-candidate-activity-date">↓</span></button>
+          <button onclick="views.sortCandidateActivity('type')" class="candidate-activity-sort text-slate-600 hover:text-slate-800" data-sort="type">Type <span id="sort-candidate-activity-type"></span></button>
+        </div>
+
+        <div id="candidate-activity-list" class="space-y-4">
+          ${this.renderCandidateActivityList(candidate.comments, todos, candidate.id)}
         </div>
       </div>
 
@@ -3165,6 +3213,7 @@ const views = {
     `;
 
     this._currentCandidate = candidate;
+    this._candidateTodos = todos;
 
     // Lazy-load PDF preview for the first PDF file
     const firstPdf = files.find(f => f.mimeType === 'application/pdf');
@@ -3224,6 +3273,66 @@ const views = {
     document.getElementById('pdf-preview-container').scrollIntoView({ behavior: 'smooth' });
   },
 
+  _canTransferCandidate(candidate) {
+    const user = auth.currentUser;
+    if (!user) return false;
+    return user.role === 'owner' || user.role === 'member';
+  },
+
+  async showTransferCandidateModal(candidateId) {
+    const candidate = this._currentCandidate;
+    if (!candidate || candidate.id !== candidateId) return;
+
+    const user = auth.currentUser;
+    if (!user || (user.role !== 'owner' && user.role !== 'member')) {
+      alert('Transfer is only available for team users. Create a team in Team Settings to share candidates with teammates.');
+      return;
+    }
+
+    let members = [];
+    try {
+      const teamInfo = await api.get('/api/team');
+      members = (teamInfo.members || []).filter(m => m.id !== candidate.createdBy);
+    } catch (_) { /* ignore */ }
+
+    if (members.length === 0) {
+      alert('No other team members available to transfer to.');
+      return;
+    }
+
+    modal.show(`
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Transfer Candidate</h3>
+      <p class="text-sm text-slate-600 mb-4">Transfer <span class="font-medium">${this.escapeHtml(candidate.name)}</span> to another team member. The new owner will see this candidate in their list.</p>
+      <form onsubmit="views.submitTransferCandidate(event, '${candidate.id}')">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">New Owner *</label>
+          <select id="transfer-candidate-new-owner" required autofocus
+                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
+            ${members.map(m => `<option value="${m.id}">${this.escapeHtml(m.username)}${m.isOwner ? ' (team owner)' : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg font-medium">Cancel</button>
+          <button type="submit" class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white px-4 py-2 rounded-lg hover:from-indigo-600 hover:to-indigo-700 transition-all font-medium shadow-sm">Transfer</button>
+        </div>
+      </form>
+    `);
+  },
+
+  async submitTransferCandidate(event, candidateId) {
+    event.preventDefault();
+    const newOwnerId = document.getElementById('transfer-candidate-new-owner').value;
+    if (!newOwnerId) return;
+
+    try {
+      await api.post(`/api/candidates/${candidateId}/transfer`, { newOwnerId });
+      modal.hide();
+      router.navigate('candidates');
+    } catch (err) {
+      alert(`Transfer failed: ${err.message}`);
+    }
+  },
+
   async deleteCandidate(id) {
     if (!confirm('Delete this candidate? This cannot be undone.')) return;
     try {
@@ -3273,6 +3382,142 @@ const views = {
     } catch (err) {
       console.error('Error deleting file:', err);
       alert('Failed to delete file: ' + err.message);
+    }
+  },
+
+  renderCandidateActivityList(comments, todos, candidateId) {
+    const items = [];
+
+    (comments || []).forEach(c => {
+      items.push({
+        type: 'comment',
+        id: c.id,
+        content: c.content,
+        createdAt: c.createdAt,
+        completed: false
+      });
+    });
+
+    (todos || []).forEach(todo => {
+      items.push({
+        type: 'todo',
+        id: todo.id,
+        content: todo.title,
+        description: todo.description,
+        dueDate: todo.dueDate,
+        createdAt: todo.createdAt,
+        completed: todo.completed,
+        checklistItemsState: todo.checklistItemsState || []
+      });
+    });
+
+    if (items.length === 0) {
+      return '<p class="text-slate-500">No comments or ToDos yet</p>';
+    }
+
+    const sortField = this._candidateActivitySort || 'date';
+    const sortAsc = this._candidateActivitySortAsc !== undefined ? this._candidateActivitySortAsc : false;
+
+    items.sort((a, b) => {
+      let result;
+      if (sortField === 'type') {
+        result = a.type.localeCompare(b.type);
+      } else {
+        result = new Date(b.createdAt) - new Date(a.createdAt);
+      }
+      return sortAsc ? -result : result;
+    });
+
+    const entityType = 'candidate';
+    const entityId = candidateId;
+
+    return items.map(item => {
+      if (item.type === 'comment') {
+        return `
+          <div class="border-l-4 border-rose-300 pl-4 py-2 bg-rose-50/30 rounded-r-lg" data-comment-id="${item.id}">
+            <div class="flex justify-between items-start">
+              <div class="flex-1">
+                <span class="inline-block px-2 py-0.5 text-xs rounded-full bg-rose-100 text-rose-700 font-medium mb-1">Comment</span>
+                <p class="text-slate-700 whitespace-pre-wrap">${this.escapeHtml(item.content)}</p>
+              </div>
+              <div class="flex gap-2 ml-4">
+                <button onclick="views.editCandidateComment('${entityId}', '${item.id}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
+                <button onclick="views.deleteCandidateComment('${entityId}', '${item.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">${formatDateTime(item.createdAt)}</p>
+          </div>
+        `;
+      } else {
+        return `
+          <div class="border-l-4 ${item.completed ? 'border-slate-300 bg-slate-50/50' : 'border-emerald-400 bg-emerald-50/30'} pl-4 py-2 rounded-r-lg ${item.completed ? 'opacity-60' : ''}" data-todo-id="${item.id}">
+            <div class="flex justify-between items-start">
+              <div class="flex items-start flex-1">
+                <input type="checkbox" ${item.completed ? 'checked' : ''}
+                       onchange="views.toggleTodoInline('${item.id}', this.checked, '${entityType}', '${entityId}')"
+                       class="h-4 w-4 mt-1 text-emerald-600 rounded border-slate-300 cursor-pointer focus:ring-emerald-500">
+                <div class="ml-2 flex-1">
+                  <span class="inline-block px-2 py-0.5 text-xs rounded-full ${item.completed ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'} font-medium mb-1">ToDo</span>
+                  <p class="text-slate-700 ${item.completed ? 'line-through' : ''}">${this.escapeHtml(item.content)}</p>
+                  ${item.description ? `<p class="text-sm text-slate-500 mt-1">${this.escapeHtml(item.description)}</p>` : ''}
+                  ${item.checklistItemsState && item.checklistItemsState.length > 0 ? `
+                  <div class="mt-2">
+                    <div class="text-xs font-medium text-slate-500 mb-1">Checklist (${item.checklistItemsState.filter(ci => ci.checked).length}/${item.checklistItemsState.length})</div>
+                    <div class="checklist-grid columns-1 sm:columns-2 lg:columns-3 gap-x-4">
+                      ${item.checklistItemsState.map((ci, idx) => `
+                        <div class="flex items-center gap-2 group break-inside-avoid mb-1">
+                          <input type="checkbox" ${ci.checked ? 'checked' : ''} ${item.completed ? 'disabled' : ''}
+                                 onchange="views.toggleChecklistItemInline('${item.id}', ${idx}, this.checked, '${entityType}', '${entityId}')"
+                                 class="h-3.5 w-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 shrink-0">
+                          <span onclick="views.startEditChecklistItemInline(this, '${item.id}', ${idx}, '${entityType}', '${entityId}')"
+                                class="text-xs ${ci.checked ? 'line-through text-slate-400' : 'text-slate-600'} ${!item.completed ? 'cursor-text hover:bg-emerald-50 rounded px-1 -mx-1' : ''}">${this.escapeHtml(ci.text)}</span>
+                          ${!item.completed ? `<button onclick="views.removeChecklistItemInline('${item.id}', ${idx}, '${entityType}', '${entityId}')" class="text-red-300 hover:text-red-500 text-xs ml-auto opacity-0 group-hover:opacity-100 shrink-0" title="Remove">&times;</button>` : ''}
+                        </div>
+                      `).join('')}
+                    </div>
+                    ${!item.completed ? `<button onclick="views.addChecklistItemInPlaceInline('${item.id}', '${entityType}', '${entityId}', this)" class="text-emerald-500 hover:text-emerald-700 text-xs mt-1 flex items-center gap-1"><span class="text-base leading-none">+</span></button>` : ''}
+                  </div>` : ''}
+                  <p class="text-xs text-slate-400 mt-1">Due: ${formatDateTime(item.dueDate)} | Created: ${formatDateTime(item.createdAt)}</p>
+                </div>
+              </div>
+              <div class="flex gap-2 ml-4">
+                <button onclick="views.editTodoInline('${item.id}', '${entityType}', '${entityId}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
+                <button onclick="views.deleteTodoInline('${item.id}', '${entityType}', '${entityId}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }).join('');
+  },
+
+  sortCandidateActivity(field) {
+    if (this._candidateActivitySort === field) {
+      this._candidateActivitySortAsc = !this._candidateActivitySortAsc;
+    } else {
+      this._candidateActivitySort = field;
+      this._candidateActivitySortAsc = field === 'type' ? true : false;
+    }
+
+    document.querySelectorAll('.candidate-activity-sort').forEach(btn => {
+      const sortField = btn.dataset.sort;
+      const indicator = document.getElementById(`sort-candidate-activity-${sortField}`);
+      if (sortField === field) {
+        btn.classList.remove('text-slate-600');
+        btn.classList.add('text-rose-600', 'font-medium');
+        indicator.textContent = this._candidateActivitySortAsc ? '↑' : '↓';
+      } else {
+        btn.classList.remove('text-rose-600', 'font-medium');
+        btn.classList.add('text-slate-600');
+        indicator.textContent = '';
+      }
+    });
+
+    const candidate = this._currentCandidate;
+    const todos = this._candidateTodos;
+    if (candidate) {
+      document.getElementById('candidate-activity-list').innerHTML =
+        this.renderCandidateActivityList(candidate.comments, todos, candidate.id);
     }
   },
 
@@ -3374,7 +3619,7 @@ const views = {
         <form id="candidate-form" onsubmit="views.saveCandidate(event, '${id || ''}')" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Name *</label>
-            <input type="text" id="candidate-name" value="${this.escapeHtml(candidate.name)}" required
+            <input type="text" id="candidate-name" value="${this.escapeHtml(candidate.name)}" required autofocus
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
           </div>
 
@@ -3552,7 +3797,7 @@ const views = {
         <div class="mb-8">
           <h3 class="text-lg font-semibold text-slate-800 mb-4">Invite Team Member</h3>
           <form onsubmit="views.sendInvitation(event)" class="flex gap-2">
-            <input type="email" id="invite-email" placeholder="Enter email address" required
+            <input type="email" id="invite-email" placeholder="Enter email address" required autofocus
                    class="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
             <button type="submit" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-4 py-2 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-medium shadow-sm">
               Send Invitation

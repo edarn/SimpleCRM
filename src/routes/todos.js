@@ -7,7 +7,7 @@ router.get('/', (req, res) => {
   try {
     const userId = req.session.userId;
     const filter = req.query.filter || 'all';
-    const todos = data.getAllTodos(userId, filter);
+    const todos = data.getAllTodos(userId, filter, req.query.createdBy);
     res.json(todos);
   } catch (err) {
     console.error('Error fetching todos:', err);

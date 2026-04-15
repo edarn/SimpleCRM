@@ -1008,10 +1008,28 @@ function deleteNote(contactId, noteId, userId) {
 
 // ============ Todo Functions ============
 
-function getAllTodos(userId, filter = 'all') {
+function getAllTodos(userId, filter = 'all', ownerFilter) {
   const teamId = getUserTeamId(userId);
 
-  let whereClause = teamId ? 'WHERE t.team_id = ?' : 'WHERE t.created_by = ? AND t.team_id IS NULL';
+  let whereClause;
+  let params;
+  if (teamId) {
+    // Owner filter: undefined/null => current user (default), 'all' => whole team, else specific user id
+    if (!ownerFilter) {
+      whereClause = 'WHERE t.team_id = ? AND t.created_by = ?';
+      params = [teamId, userId];
+    } else if (ownerFilter === 'all') {
+      whereClause = 'WHERE t.team_id = ?';
+      params = [teamId];
+    } else {
+      whereClause = 'WHERE t.team_id = ? AND t.created_by = ?';
+      params = [teamId, ownerFilter];
+    }
+  } else {
+    whereClause = 'WHERE t.created_by = ? AND t.team_id IS NULL';
+    params = [userId];
+  }
+
   if (filter === 'active') {
     whereClause += ' AND t.completed = 0';
   } else if (filter === 'completed') {
@@ -1024,7 +1042,7 @@ function getAllTodos(userId, filter = 'all') {
     LEFT JOIN users u ON u.id = t.created_by
     ${whereClause}
     ORDER BY t.created_at DESC
-  `).all(teamId || userId);
+  `).all(...params);
 
   return rows.map(row => {
     const entityInfo = getLinkedEntityName(row.linked_type, row.linked_id);
@@ -1661,6 +1679,32 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, catego
   return getCandidateById(candidateId, userId);
 }
 
+function transferCandidate(candidateId, newOwnerId, userId) {
+  const candidate = getCandidateById(candidateId, userId);
+  if (!candidate) return { error: 'Candidate not found' };
+
+  const teamId = getUserTeamId(userId);
+  if (!teamId) return { error: 'Transfer is only available for team users' };
+
+  // Any team member can transfer a candidate (team members share full edit access)
+
+  // Verify target user is a member of the same team
+  const targetIsMember = db.prepare(`
+    SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ?
+  `).get(teamId, newOwnerId);
+  if (!targetIsMember) return { error: 'Target user is not a member of your team' };
+
+  if (newOwnerId === candidate.createdBy) {
+    return { error: 'Candidate is already owned by that user' };
+  }
+
+  const now = getTimestamp();
+  db.prepare('UPDATE candidates SET created_by = ?, updated_at = ? WHERE id = ?')
+    .run(newOwnerId, now, candidateId);
+
+  return { success: true, candidate: getCandidateById(candidateId, userId) };
+}
+
 function deleteCandidate(candidateId, userId) {
   const candidate = getCandidateById(candidateId, userId);
   if (!candidate) return { error: 'Candidate not found' };
@@ -1889,6 +1933,7 @@ module.exports = {
   getCandidateById,
   createCandidate,
   updateCandidate,
+  transferCandidate,
   deleteCandidate,
   createCandidateComment,
   updateCandidateComment,
