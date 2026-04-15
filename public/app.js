@@ -1528,6 +1528,7 @@ const views = {
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
               <input type="email" id="contact-email" value="${this.escapeHtml(contact.email || '')}"
+                     oninput="views.maybeGuessContactName(this.value)"
                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
             </div>
             <div>
@@ -3707,7 +3708,15 @@ const views = {
   },
 
   maybeGuessCandidateName(email) {
-    const nameInput = document.getElementById('candidate-name');
+    this._maybeGuessNameInto('candidate-name', email);
+  },
+
+  maybeGuessContactName(email) {
+    this._maybeGuessNameInto('contact-name', email);
+  },
+
+  _maybeGuessNameInto(inputId, email) {
+    const nameInput = document.getElementById(inputId);
     if (!nameInput || nameInput.value.trim() !== '') return;
     if (!email.includes('@')) return;
     const guess = this.guessNameFromEmail(email);
