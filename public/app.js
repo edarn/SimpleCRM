@@ -3627,6 +3627,7 @@ const views = {
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
               <input type="email" id="candidate-email" value="${this.escapeHtml(candidate.email || '')}"
+                     oninput="views.maybeGuessCandidateName(this.value)"
                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
             </div>
             <div>
@@ -3687,6 +3688,30 @@ const views = {
         </form>
       </div>
     `;
+  },
+
+  // Parse "firstname.lastname@domain" style emails into "Firstname Lastname"
+  guessNameFromEmail(email) {
+    if (!email || typeof email !== 'string') return '';
+    const at = email.indexOf('@');
+    if (at < 1) return '';
+    const local = email.slice(0, at).replace(/\+.*/, '');
+    const parts = local
+      .split(/[._\-]+/)
+      .map(p => p.replace(/\d+/g, '').trim())
+      .filter(p => p.length >= 2);
+    if (parts.length === 0) return '';
+    return parts
+      .map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+      .join(' ');
+  },
+
+  maybeGuessCandidateName(email) {
+    const nameInput = document.getElementById('candidate-name');
+    if (!nameInput || nameInput.value.trim() !== '') return;
+    if (!email.includes('@')) return;
+    const guess = this.guessNameFromEmail(email);
+    if (guess) nameInput.value = guess;
   },
 
   async saveCandidate(event, id) {
