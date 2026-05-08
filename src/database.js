@@ -374,6 +374,49 @@ function migrateExistingData() {
     )
   `);
 
+  // Candidate employment offers (one candidate can have multiple revisions)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS candidate_offers (
+      id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL,
+      contract_type TEXT NOT NULL CHECK (contract_type IN ('probationary', 'permanent')),
+      candidate_name TEXT NOT NULL,
+      personal_number TEXT DEFAULT '',
+      start_date TEXT DEFAULT '',
+      work_location TEXT DEFAULT '',
+      department TEXT DEFAULT '',
+      sign_location TEXT DEFAULT '',
+      sign_date TEXT DEFAULT '',
+      signer_name TEXT DEFAULT '',
+      signer_title TEXT DEFAULT '',
+      fixed_salary INTEGER NOT NULL DEFAULT 0,
+      expected_rate INTEGER NOT NULL DEFAULT 0,
+      variable_percentage REAL NOT NULL DEFAULT 0,
+      salary_year INTEGER NOT NULL DEFAULT 0,
+      calculation_json TEXT NOT NULL DEFAULT '{}',
+      contract_filename TEXT DEFAULT '',
+      contract_original_name TEXT DEFAULT '',
+      attachment_filename TEXT DEFAULT '',
+      attachment_original_name TEXT DEFAULT '',
+      email_subject TEXT DEFAULT '',
+      email_body TEXT DEFAULT '',
+      team_id TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+      FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )
+  `);
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_candidate_offers_candidate_id ON candidate_offers(candidate_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_candidate_offers_team_id ON candidate_offers(team_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_candidate_offers_created_by ON candidate_offers(created_by)`);
+  } catch (err) {
+    console.log('candidate_offers index error:', err.message);
+  }
+
   // Migrate existing resume data from candidates table to candidate_files table
   const candidatesWithResumes = db.prepare(`
     SELECT id, resume_filename, resume_original_name, created_by, created_at

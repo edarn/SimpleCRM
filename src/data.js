@@ -1874,6 +1874,139 @@ function deleteCandidateComment(candidateId, commentId, userId) {
   return { success: true };
 }
 
+// ----- Candidate offers (employment offer revisions) -----
+
+function formatOfferRow(row) {
+  return {
+    id: row.id,
+    candidateId: row.candidate_id,
+    contractType: row.contract_type,
+    candidateName: row.candidate_name,
+    personalNumber: row.personal_number || '',
+    startDate: row.start_date || '',
+    workLocation: row.work_location || '',
+    department: row.department || '',
+    signLocation: row.sign_location || '',
+    signDate: row.sign_date || '',
+    signerName: row.signer_name || '',
+    signerTitle: row.signer_title || '',
+    fixedSalary: row.fixed_salary,
+    expectedRate: row.expected_rate,
+    variablePercentage: row.variable_percentage,
+    salaryYear: row.salary_year,
+    calculation: row.calculation_json ? JSON.parse(row.calculation_json) : null,
+    contractFilename: row.contract_filename || '',
+    contractOriginalName: row.contract_original_name || '',
+    attachmentFilename: row.attachment_filename || '',
+    attachmentOriginalName: row.attachment_original_name || '',
+    emailSubject: row.email_subject || '',
+    emailBody: row.email_body || '',
+    createdBy: row.created_by,
+    createdByUsername: row.created_by_username || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function getOffersForCandidate(candidateId, userId) {
+  // Caller must have already verified access via getCandidateById.
+  const rows = db.prepare(`
+    SELECT o.*, u.username as created_by_username
+    FROM candidate_offers o
+    LEFT JOIN users u ON u.id = o.created_by
+    WHERE o.candidate_id = ?
+    ORDER BY o.created_at DESC
+  `).all(candidateId);
+  return rows.map(formatOfferRow);
+}
+
+function getOfferById(candidateId, offerId, userId) {
+  const candidate = getCandidateById(candidateId, userId);
+  if (!candidate) return null;
+  const row = db.prepare(`
+    SELECT o.*, u.username as created_by_username
+    FROM candidate_offers o
+    LEFT JOIN users u ON u.id = o.created_by
+    WHERE o.id = ? AND o.candidate_id = ?
+  `).get(offerId, candidateId);
+  if (!row) return null;
+  return formatOfferRow(row);
+}
+
+function createOffer(candidateId, payload, userId) {
+  const candidate = getCandidateById(candidateId, userId);
+  if (!candidate) return { error: 'Candidate not found' };
+
+  const teamId = getUserTeamId(userId);
+  const id = generateId();
+  const now = getTimestamp();
+
+  db.prepare(`
+    INSERT INTO candidate_offers (
+      id, candidate_id, contract_type, candidate_name, personal_number, start_date,
+      work_location, department, sign_location, sign_date, signer_name, signer_title,
+      fixed_salary, expected_rate, variable_percentage, salary_year, calculation_json,
+      contract_filename, contract_original_name, attachment_filename, attachment_original_name,
+      email_subject, email_body, team_id, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    candidateId,
+    payload.contractType,
+    payload.candidateName,
+    payload.personalNumber || '',
+    payload.startDate || '',
+    payload.workLocation || '',
+    payload.department || '',
+    payload.signLocation || '',
+    payload.signDate || '',
+    payload.signerName || '',
+    payload.signerTitle || '',
+    payload.fixedSalary || 0,
+    payload.expectedRate || 0,
+    payload.variablePercentage || 0,
+    payload.salaryYear || 0,
+    JSON.stringify(payload.calculation || {}),
+    payload.contractFilename || '',
+    payload.contractOriginalName || '',
+    payload.attachmentFilename || '',
+    payload.attachmentOriginalName || '',
+    payload.emailSubject || '',
+    payload.emailBody || '',
+    teamId,
+    userId,
+    now,
+    now
+  );
+
+  const row = db.prepare(`
+    SELECT o.*, u.username as created_by_username
+    FROM candidate_offers o
+    LEFT JOIN users u ON u.id = o.created_by
+    WHERE o.id = ?
+  `).get(id);
+  return formatOfferRow(row);
+}
+
+function deleteOffer(candidateId, offerId, userId) {
+  const offer = getOfferById(candidateId, offerId, userId);
+  if (!offer) return { error: 'Offer not found' };
+
+  // Permission: solo + creator can always delete; team owner can delete any;
+  // team members can delete their own only.
+  const role = getUserRole(userId);
+  if (role !== 'solo' && offer.createdBy !== userId && !isTeamOwner(userId)) {
+    return { error: 'Insufficient permissions' };
+  }
+
+  db.prepare('DELETE FROM candidate_offers WHERE id = ?').run(offerId);
+  return {
+    deleted: true,
+    contractFilename: offer.contractFilename,
+    attachmentFilename: offer.attachmentFilename,
+  };
+}
+
 module.exports = {
   // Utilities
   generateId,
@@ -1944,6 +2077,12 @@ module.exports = {
   addCandidateFile,
   deleteCandidateFile,
   getCandidateFileById,
+
+  // Candidate Offers
+  getOffersForCandidate,
+  getOfferById,
+  createOffer,
+  deleteOffer,
 
   // Team & Access Control
   getUserTeamId,

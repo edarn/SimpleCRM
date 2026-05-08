@@ -1491,6 +1491,20 @@ const views = {
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
           </div>
 
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+              <input type="email" id="contact-email" value="${this.escapeHtml(contact.email || '')}"
+                     oninput="views.maybeGuessContactName(this.value); views.maybeGuessContactCompany(this.value)"
+                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1.5">Phone</label>
+              <input type="tel" id="contact-phone" value="${this.escapeHtml(contact.phone || '')}"
+                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
+            </div>
+          </div>
+
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Company *</label>
             <select id="contact-company" onchange="views.toggleNewCompany()"
@@ -1522,20 +1536,6 @@ const views = {
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
             <textarea id="contact-description" rows="3"
                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">${this.escapeHtml(contact.description || '')}</textarea>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
-              <input type="email" id="contact-email" value="${this.escapeHtml(contact.email || '')}"
-                     oninput="views.maybeGuessContactName(this.value)"
-                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1.5">Phone</label>
-              <input type="tel" id="contact-phone" value="${this.escapeHtml(contact.phone || '')}"
-                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
-            </div>
           </div>
 
           <div class="flex justify-end gap-4 pt-4">
@@ -2896,7 +2896,8 @@ const views = {
     }
 
     const ownerParam = this._candidateOwnerFilter;
-    const qs = ownerParam ? `?createdBy=${encodeURIComponent(ownerParam)}` : '';
+    // Always fetch the broadest set so search can fall back to "all candidates / all categories"
+    const qs = hasTeam ? '?createdBy=all' : '';
     const candidates = await api.get(`/api/candidates${qs}`);
     const categoryLabels = this._candidateCategories;
 
@@ -2967,7 +2968,7 @@ const views = {
               </th>
               ${hasTeam ? `<th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Added By</th>` : ''}
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                Files
+                Status
               </th>
             </tr>
           </thead>
@@ -3004,7 +3005,13 @@ const views = {
     if (candidates.length === 0) {
       return `<tr><td colspan="${colspan}" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
     }
-    return candidates.map(c => `
+    const currentUserId = auth.currentUser?.id;
+    return candidates.map(c => {
+      const ownerLabel = c.createdBy === currentUserId
+        ? 'My Candidates'
+        : (c.createdByUsername || '-');
+      const categoryLabel = c.category ? (categoryLabels[c.category] || c.category) : '-';
+      return `
       <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
         <td class="px-6 py-4 whitespace-nowrap">
           <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
@@ -3016,11 +3023,31 @@ const views = {
         </td>
         <td class="px-6 py-4 text-slate-600" data-label="Skills">${this.escapeHtml(c.skills || '-')}</td>
         ${hasTeam ? `<td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Added By">${this.escapeHtml(c.createdByUsername || '-')}</td>` : ''}
-        <td class="px-6 py-4 whitespace-nowrap text-slate-500" data-label="Files">
-          ${c.resumeFilename ? '<span class="text-emerald-600 font-medium">Uploaded</span>' : '-'}
+        <td class="px-6 py-4 whitespace-nowrap" data-label="Status">
+          <div class="text-xs text-slate-700 leading-tight">${this.escapeHtml(ownerLabel)}</div>
+          <div class="text-xs text-slate-500 leading-tight">${this.escapeHtml(categoryLabel)}</div>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
+  },
+
+  _candidateMatchesQuery(c, query) {
+    return c.name.toLowerCase().includes(query) ||
+      (c.email || '').toLowerCase().includes(query) ||
+      (c.phone || '').toLowerCase().includes(query) ||
+      (c.role || '').toLowerCase().includes(query) ||
+      (c.skills || '').toLowerCase().includes(query);
+  },
+
+  renderCandidateSeparatorRow(count) {
+    const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
+    const colspan = hasTeam ? 6 : 5;
+    return `<tr class="bg-slate-50">
+      <td colspan="${colspan}" class="px-6 py-2 text-xs text-slate-500 italic border-t border-slate-200">
+        Other matches across all candidates and categories (${count})
+      </td>
+    </tr>`;
   },
 
   async changeCandidateOwner(value) {
@@ -3032,23 +3059,36 @@ const views = {
   filterCandidates() {
     const query = document.getElementById('candidate-search-input').value.toLowerCase();
     const categoryFilter = document.getElementById('candidate-category-filter').value;
-    let filtered = this._candidates;
+    const ownerFilter = this._candidateOwnerFilter; // user id, 'all', or ''
+    const all = this._candidates || [];
 
-    if (categoryFilter) {
-      filtered = filtered.filter(c => c.category === categoryFilter);
-    }
+    const matchesOwner = c =>
+      !ownerFilter || ownerFilter === 'all' || c.createdBy === ownerFilter;
+    const matchesCategory = c =>
+      !categoryFilter || c.category === categoryFilter;
 
+    const primary = all.filter(c =>
+      matchesOwner(c) &&
+      matchesCategory(c) &&
+      (!query || this._candidateMatchesQuery(c, query))
+    );
+
+    let secondary = [];
     if (query) {
-      filtered = filtered.filter(c =>
-        c.name.toLowerCase().includes(query) ||
-        (c.email || '').toLowerCase().includes(query) ||
-        (c.phone || '').toLowerCase().includes(query) ||
-        (c.role || '').toLowerCase().includes(query) ||
-        (c.skills || '').toLowerCase().includes(query)
-      );
+      const filterIsAll = (!ownerFilter || ownerFilter === 'all') && !categoryFilter;
+      if (!filterIsAll) {
+        const primaryIds = new Set(primary.map(c => c.id));
+        secondary = all.filter(c =>
+          !primaryIds.has(c.id) && this._candidateMatchesQuery(c, query)
+        );
+      }
     }
 
-    document.getElementById('candidates-table').innerHTML = this.renderCandidateRows(filtered);
+    const tbody = document.getElementById('candidates-table');
+    tbody.innerHTML = this.renderCandidateRows(primary) +
+      (secondary.length
+        ? this.renderCandidateSeparatorRow(secondary.length) + this.renderCandidateRows(secondary)
+        : '');
   },
 
   sortCandidates(field) {
@@ -3066,7 +3106,7 @@ const views = {
       if (mEl) mEl.textContent = '';
     });
 
-    const sorted = [...this._candidates].sort((a, b) => {
+    this._candidates.sort((a, b) => {
       let result;
       switch (field) {
         case 'role':
@@ -3085,7 +3125,7 @@ const views = {
     document.getElementById(`sort-candidate-${field}`).textContent = arrow;
     const mEl = document.getElementById(`sort-candidate-${field}-m`);
     if (mEl) mEl.textContent = arrow;
-    document.getElementById('candidates-table').innerHTML = this.renderCandidateRows(sorted);
+    this.filterCandidates();
   },
 
   // Candidate Detail View
@@ -3112,7 +3152,7 @@ const views = {
             ${candidate.role ? `<p class="text-slate-600">${this.escapeHtml(candidate.role)}</p>` : ''}
             ${candidate.category ? `<span class="inline-block mt-1 px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(candidate.category)}">${this.escapeHtml(this._candidateCategories[candidate.category] || candidate.category)}</span>` : ''}
           </div>
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             <button onclick="router.navigate('candidate-form', {id: '${candidate.id}'})"
                     class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm">
               Edit
@@ -3120,6 +3160,10 @@ const views = {
             <button onclick="views.showTransferCandidateModal('${candidate.id}')"
                     class="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg hover:bg-indigo-100 transition-colors font-medium text-sm">
               Transfer
+            </button>
+            <button onclick="views.showOfferModal('${candidate.id}')"
+                    class="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-100 transition-colors font-medium text-sm">
+              Skapa erbjudande
             </button>
             <button onclick="views.deleteCandidate('${candidate.id}')"
                     class="bg-red-50 text-red-700 px-4 py-2 rounded-lg hover:bg-red-100 transition-colors font-medium text-sm">
@@ -3180,6 +3224,22 @@ const views = {
             </div>
           ` : '<p class="text-sm text-slate-400">No files uploaded</p>'}
         </div>
+
+        <div class="mt-4 pt-4 border-t border-slate-200">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="text-sm font-medium text-slate-500">Anställningserbjudanden</h3>
+            <button onclick="views.showOfferModal('${candidate.id}')"
+                    class="inline-flex items-center text-emerald-700 hover:text-emerald-800 font-medium text-sm">
+              <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+              </svg>
+              Skapa nytt erbjudande
+            </button>
+          </div>
+          <div id="offers-list">
+            <p class="text-sm text-slate-400">Laddar...</p>
+          </div>
+        </div>
       </div>
 
       <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
@@ -3222,6 +3282,552 @@ const views = {
       requestAnimationFrame(() => {
         this.loadPdfPreview(candidate.id, firstPdf.id, firstPdf.originalName);
       });
+    }
+
+    // Load offers in the background
+    this.loadOffersList(candidate.id);
+  },
+
+  async loadOffersList(candidateId) {
+    const target = document.getElementById('offers-list');
+    if (!target) return;
+    try {
+      const offers = await api.get(`/api/candidates/${candidateId}/offers`);
+      this._candidateOffers = offers;
+      if (!offers.length) {
+        target.innerHTML = '<p class="text-sm text-slate-400">Inga erbjudanden ännu. Klicka på "Skapa nytt erbjudande" för att börja.</p>';
+        return;
+      }
+      target.innerHTML = `
+        <div class="space-y-2">
+          ${offers.map((o) => `
+            <div class="border border-slate-200 rounded-lg p-3">
+              <div class="flex items-start justify-between gap-3 flex-wrap">
+                <div class="text-sm">
+                  <div class="font-medium text-slate-800">
+                    ${o.contractType === 'permanent' ? 'Tillsvidare' : 'Provanställning'} —
+                    ${this.escapeHtml(this._formatSwedishNumber(o.fixedSalary))} kr/mån + ${o.variablePercentage}%
+                  </div>
+                  <div class="text-xs text-slate-500 mt-0.5">
+                    Skapat ${new Date(o.createdAt).toLocaleString('sv-SE')}
+                    ${o.createdByUsername ? ' av ' + this.escapeHtml(o.createdByUsername) : ''}
+                    ${o.calculation && o.calculation.yearly ? ` • Årslön: ${this.escapeHtml(this._formatSwedishNumber(o.calculation.yearly.total))} kr` : ''}
+                  </div>
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                  <a href="/api/candidates/${candidateId}/offers/${o.id}/eml" download
+                     class="inline-flex items-center text-emerald-700 hover:text-emerald-800 text-xs font-medium px-2 py-1 bg-emerald-50 rounded">
+                    Öppna i Outlook
+                  </a>
+                  <a href="/api/candidates/${candidateId}/offers/${o.id}/contract" download
+                     class="text-blue-700 hover:text-blue-800 text-xs font-medium px-2 py-1 bg-blue-50 rounded">
+                    Avtal (.docx)
+                  </a>
+                  <a href="/api/candidates/${candidateId}/offers/${o.id}/attachment" download
+                     class="text-blue-700 hover:text-blue-800 text-xs font-medium px-2 py-1 bg-blue-50 rounded">
+                    Bilaga (.pdf)
+                  </a>
+                  <button onclick="views.reviseOffer('${candidateId}', '${o.id}')"
+                          class="text-slate-700 hover:text-slate-900 text-xs font-medium px-2 py-1 bg-slate-100 rounded">
+                    Revidera
+                  </button>
+                  <button onclick="views.deleteOffer('${candidateId}', '${o.id}')"
+                          class="text-red-600 hover:text-red-700 text-xs font-medium px-2 py-1 bg-red-50 rounded">
+                    Ta bort
+                  </button>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (err) {
+      console.error('Error loading offers:', err);
+      target.innerHTML = '<p class="text-sm text-red-500">Kunde inte ladda erbjudanden.</p>';
+    }
+  },
+
+  _formatSwedishNumber(n) {
+    if (n == null || !isFinite(n)) return '0';
+    return new Intl.NumberFormat('sv-SE').format(Math.round(n));
+  },
+
+  reviseOffer(candidateId, offerId) {
+    const offer = (this._candidateOffers || []).find((o) => o.id === offerId);
+    if (!offer) return;
+    this.showOfferModal(candidateId, offer);
+  },
+
+  async deleteOffer(candidateId, offerId) {
+    if (!confirm('Ta bort detta erbjudande? Filerna kommer också tas bort.')) return;
+    try {
+      await api.delete(`/api/candidates/${candidateId}/offers/${offerId}`);
+      this.loadOffersList(candidateId);
+    } catch (err) {
+      alert('Kunde inte ta bort erbjudandet: ' + (err.message || err));
+    }
+  },
+
+  // ----- Salary calculator (vanilla JS port of salary-model.ts) -----
+
+  _SALARY_CONST: {
+    DEFAULT_SALARY_COST_FACTOR: 1.466,
+    DEFAULT_SOCIAL_FEES_DIVISOR: 1.3142,
+    DEFAULT_VARIABLE_PERCENTAGE: 10,
+    DEFAULT_VACATION_DAYS: [0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 5],
+    SEMESTER_SUPPLEMENT_MONTH_INDEX: 3,
+    SEMESTER_SUPPLEMENT_PERCENT: 0.12,
+    WORKING_HOURS_BY_YEAR: {
+      2024: [176, 168, 168, 168, 168, 160, 184, 176, 168, 184, 168, 160],
+      2025: [176, 160, 168, 160, 160, 168, 184, 168, 176, 184, 160, 176],
+      2026: [160, 160, 176, 160, 152, 168, 184, 168, 176, 176, 168, 176],
+      2027: [168, 160, 184, 168, 152, 176, 176, 176, 176, 168, 168, 176],
+    },
+    MONTH_LABELS_SV: ['Jan', 'Feb', 'Mar', 'Apr', 'Maj', 'Juni', 'Juli', 'Aug', 'Sept', 'Okt', 'Nov', 'Dec'],
+  },
+
+  _getWorkingHoursForYear(year) {
+    return this._SALARY_CONST.WORKING_HOURS_BY_YEAR[year] || this._SALARY_CONST.WORKING_HOURS_BY_YEAR[2026];
+  },
+
+  _computeVariableSalary(inp) {
+    const C = this._SALARY_CONST;
+    const salaryCostFactor = inp.salaryCostFactor != null ? inp.salaryCostFactor : C.DEFAULT_SALARY_COST_FACTOR;
+    const socialFeesDivisor = inp.socialFeesDivisor != null ? inp.socialFeesDivisor : C.DEFAULT_SOCIAL_FEES_DIVISOR;
+    const variablePct = inp.variablePercentage / 100;
+    const safeAt = (a, i) => (a && typeof a[i] === 'number' ? a[i] : 0);
+    const months = [];
+    let totalVacation = 0;
+    for (let i = 0; i < 12; i++) {
+      const maxH = safeAt(inp.maxHours, i);
+      const intH = safeAt(inp.internalHours, i);
+      const extH = safeAt(inp.extraHours, i);
+      const vac = safeAt(inp.vacationDays, i);
+      totalVacation += vac;
+      const totalHours = maxH - intH + extH - vac * 8;
+      const revenue = inp.expectedRate * totalHours;
+      const profit = revenue - inp.fixedSalary * salaryCostFactor;
+      const variableGross = profit > 0 ? profit * variablePct : 0;
+      const variableNet = variableGross > 0 ? variableGross / socialFeesDivisor : 0;
+      months.push({
+        maxHours: maxH, internalHours: intH, extraHours: extH, vacationDays: vac,
+        totalHours, revenue, profit, variableGross, variableNet,
+        semesterSupplementGross: 0, semesterSupplementNet: 0,
+        total: inp.fixedSalary + variableNet,
+      });
+    }
+    const annualGross = months.reduce((a, m) => a + m.variableGross, 0);
+    const supplementGross = annualGross * C.SEMESTER_SUPPLEMENT_PERCENT;
+    const supplementNet = supplementGross / socialFeesDivisor;
+    const apr = months[C.SEMESTER_SUPPLEMENT_MONTH_INDEX];
+    if (apr) {
+      apr.semesterSupplementGross = supplementGross;
+      apr.semesterSupplementNet = supplementNet;
+      apr.total = inp.fixedSalary + apr.variableNet + supplementNet;
+    }
+    const sum = (k) => months.reduce((a, m) => a + m[k], 0);
+    return {
+      months,
+      yearly: {
+        totalHours: sum('totalHours'),
+        totalVacationDays: totalVacation,
+        revenue: sum('revenue'),
+        profit: sum('profit'),
+        variableGross: annualGross,
+        variableNet: sum('variableNet'),
+        semesterSupplementGross: supplementGross,
+        semesterSupplementNet: supplementNet,
+        total: sum('total'),
+        averageMonthly: sum('total') / 12,
+        annualFixed: inp.fixedSalary * 12,
+      },
+      inputs: {
+        fixedSalary: inp.fixedSalary,
+        expectedRate: inp.expectedRate,
+        variablePercentage: inp.variablePercentage,
+        salaryCostFactor,
+        socialFeesDivisor,
+      },
+    };
+  },
+
+  // ----- Offer modal -----
+
+  showOfferModal(candidateId, prefill) {
+    const candidate = this._currentCandidate;
+    if (!candidate || candidate.id !== candidateId) return;
+
+    // Default state: pre-fill from previous offer if revising; otherwise use sane defaults.
+    const today = new Date().toISOString().slice(0, 10);
+    const year = (prefill && prefill.salaryYear) || new Date().getFullYear();
+    const initialMaxHours = prefill && prefill.calculation && prefill.calculation.months
+      ? prefill.calculation.months.map((m) => m.maxHours)
+      : this._getWorkingHoursForYear(year);
+    const initialVacation = prefill && prefill.calculation && prefill.calculation.months
+      ? prefill.calculation.months.map((m) => m.vacationDays)
+      : [...this._SALARY_CONST.DEFAULT_VACATION_DAYS];
+
+    const state = {
+      contractType: (prefill && prefill.contractType) || 'probationary',
+      candidateName: (prefill && prefill.candidateName) || candidate.name || '',
+      personalNumber: (prefill && prefill.personalNumber) || '',
+      startDate: (prefill && prefill.startDate) || '',
+      workLocation: (prefill && prefill.workLocation) || 'Lund',
+      department: (prefill && prefill.department) || '2402',
+      signLocation: (prefill && prefill.signLocation) || (prefill && prefill.workLocation) || 'Lund',
+      signDate: (prefill && prefill.signDate) || today,
+      signerName: (prefill && prefill.signerName) || 'Thomas Hermansson',
+      signerTitle: (prefill && prefill.signerTitle) || 'Vice President, Sigma Technology Software Solution',
+      salaryYear: year,
+      fixedSalary: (prefill && prefill.fixedSalary) || 45000,
+      expectedRate: (prefill && prefill.expectedRate) || 950,
+      variablePercentage: (prefill && prefill.variablePercentage) != null ? prefill.variablePercentage : 10,
+      maxHours: initialMaxHours,
+      vacationDays: initialVacation,
+      submitting: false,
+    };
+
+    // Build container
+    const root = document.createElement('div');
+    root.id = 'offer-modal-root';
+    root.className = 'fixed inset-0 z-50 flex items-center justify-center';
+    root.innerHTML = `
+      <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" data-close="1"></div>
+      <div class="relative z-10 bg-white rounded-xl shadow-2xl w-full max-w-7xl mx-4 max-h-[95vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-800">${prefill ? 'Revidera' : 'Skapa'} anställningserbjudande</h3>
+            <p class="text-xs text-slate-500 mt-0.5">${this.escapeHtml(candidate.name)}</p>
+          </div>
+          <button data-close="1" class="text-slate-400 hover:text-slate-600 p-1 rounded">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="px-6 py-4">
+          <div id="offer-modal-body"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+    document.body.style.overflow = 'hidden';
+    root.addEventListener('click', (e) => {
+      if (e.target.dataset && e.target.dataset.close === '1') views.hideOfferModal();
+    });
+
+    this._offerState = state;
+    this.renderOfferModalBody();
+  },
+
+  hideOfferModal() {
+    const root = document.getElementById('offer-modal-root');
+    if (root) root.remove();
+    document.body.style.overflow = '';
+    this._offerState = null;
+  },
+
+  renderOfferModalBody() {
+    const s = this._offerState;
+    if (!s) return;
+    const body = document.getElementById('offer-modal-body');
+    if (!body) return;
+
+    const calc = this._computeVariableSalary({
+      fixedSalary: Number(s.fixedSalary) || 0,
+      expectedRate: Number(s.expectedRate) || 0,
+      variablePercentage: Number(s.variablePercentage) || 0,
+      maxHours: s.maxHours,
+      vacationDays: s.vacationDays,
+      internalHours: new Array(12).fill(0),
+      extraHours: new Array(12).fill(0),
+    });
+    s.calc = calc;
+
+    const months = this._SALARY_CONST.MONTH_LABELS_SV;
+    const fmt = (n) => this._formatSwedishNumber(n);
+
+    const previewClause = s.contractType === 'permanent'
+      ? 'tillsvidareanställning med en uppsägningstid på 1 månad'
+      : 'provanställning i 6 månader (uppsägningstid 2 veckor), därefter tillsvidare med uppsägningstid 1 månad';
+
+    body.innerHTML = `
+      <!-- Contract fields -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Avtalstyp</label>
+          <select data-bind="contractType" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+            <option value="probationary" ${s.contractType === 'probationary' ? 'selected' : ''}>Provanställning</option>
+            <option value="permanent" ${s.contractType === 'permanent' ? 'selected' : ''}>Tillsvidare</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Kandidatens namn *</label>
+          <input data-bind="candidateName" value="${this.escapeHtml(s.candidateName)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Personnummer</label>
+          <input data-bind="personalNumber" placeholder="ÅÅÅÅMMDD-XXXX" value="${this.escapeHtml(s.personalNumber)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Startdatum</label>
+          <input type="date" data-bind="startDate" value="${this.escapeHtml(s.startDate)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Tjänstgöringsort</label>
+          <input data-bind="workLocation" value="${this.escapeHtml(s.workLocation)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Avdelning</label>
+          <input data-bind="department" value="${this.escapeHtml(s.department)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Signeringsort</label>
+          <input data-bind="signLocation" value="${this.escapeHtml(s.signLocation)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Signeringsdatum</label>
+          <input type="date" data-bind="signDate" value="${this.escapeHtml(s.signDate)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Lönesamtals-år</label>
+          <input type="number" data-bind="salaryYear" min="2024" max="2030" value="${s.salaryYear}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Signerare (namn)</label>
+          <input data-bind="signerName" value="${this.escapeHtml(s.signerName)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Signerare (titel)</label>
+          <input data-bind="signerTitle" value="${this.escapeHtml(s.signerTitle)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+      </div>
+
+      <hr class="my-4 border-slate-200">
+
+      <h4 class="font-semibold text-slate-800 mb-3">Lönekalkylator</h4>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Fast månadslön (netto, kr) *</label>
+          <input type="number" data-bind="fixedSalary" value="${s.fixedSalary}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Arvode (kr / tim)</label>
+          <input type="number" data-bind="expectedRate" value="${s.expectedRate}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">%-sats rörlig (brutto)</label>
+          <input type="number" step="0.5" data-bind="variablePercentage" value="${s.variablePercentage}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+      </div>
+
+      <div class="border border-slate-200 rounded-md overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="bg-slate-50 border-b border-slate-200">
+              <th class="px-2 py-2 text-left font-semibold text-slate-600 sticky left-0 bg-slate-50 min-w-[170px]">Rad</th>
+              ${months.map((m) => `<th class="px-2 py-2 text-right font-semibold text-slate-600 min-w-[60px]">${m}</th>`).join('')}
+              <th class="px-2 py-2 text-right font-semibold text-slate-900 min-w-[80px]">Summa</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr class="bg-white">
+              <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-white">Max ord. timmar</td>
+              ${s.maxHours.map((v, i) => `
+                <td class="px-1 py-1">
+                  <input type="number" data-bind-arr="maxHours" data-idx="${i}"
+                         value="${v === 0 ? '' : v}" placeholder="0"
+                         class="w-full px-1 py-1 text-right border border-slate-200 rounded text-xs">
+                </td>
+              `).join('')}
+              <td class="px-2 py-1 text-right font-semibold text-slate-800">${fmt(s.maxHours.reduce((a, b) => a + (Number(b) || 0), 0))}</td>
+            </tr>
+            <tr class="bg-white">
+              <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-white">Semesterdagar</td>
+              ${s.vacationDays.map((v, i) => `
+                <td class="px-1 py-1">
+                  <input type="number" data-bind-arr="vacationDays" data-idx="${i}"
+                         value="${v === 0 ? '' : v}" placeholder="0"
+                         class="w-full px-1 py-1 text-right border border-slate-200 rounded text-xs">
+                </td>
+              `).join('')}
+              <td class="px-2 py-1 text-right font-semibold text-slate-800">${fmt(s.vacationDays.reduce((a, b) => a + (Number(b) || 0), 0))}</td>
+            </tr>
+            ${[
+              { label: 'Totalt antal timmar', vals: calc.months.map((m) => m.totalHours), total: calc.yearly.totalHours, money: false, tone: 'gray' },
+              { label: 'Arvode / månad', vals: calc.months.map((m) => m.revenue), total: calc.yearly.revenue, money: true, tone: 'gray' },
+              { label: '− Lönekostnad (profit)', vals: calc.months.map((m) => m.profit), total: calc.yearly.profit, money: true, tone: 'muted' },
+              { label: 'Rörlig lön brutto', vals: calc.months.map((m) => m.variableGross), total: calc.yearly.variableGross, money: true, tone: 'gray' },
+              { label: 'Rörlig lön netto', vals: calc.months.map((m) => m.variableNet), total: calc.yearly.variableNet, money: true, tone: 'green' },
+              { label: 'Sem.tillägg rörlig (Apr)', vals: calc.months.map((m) => m.semesterSupplementNet), total: calc.yearly.semesterSupplementNet, money: true, tone: 'green' },
+              { label: 'Fast + rörlig (netto)', vals: calc.months.map((m) => m.total), total: calc.yearly.total, money: true, tone: 'strong' },
+            ].map((row) => `
+              <tr class="bg-slate-50/50">
+                <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-slate-50/50">${row.label}</td>
+                ${row.vals.map((v) => `<td class="px-2 py-1 text-right ${row.tone === 'green' ? 'text-emerald-700 font-medium' : row.tone === 'strong' ? 'text-blue-700 font-semibold' : row.tone === 'muted' ? 'text-slate-400' : 'text-slate-800'}">${fmt(v)}</td>`).join('')}
+                <td class="px-2 py-1 text-right ${row.tone === 'green' ? 'text-emerald-700' : row.tone === 'strong' ? 'text-blue-700' : 'text-slate-800'} font-semibold">${fmt(row.total)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
+        <div class="p-3 border border-slate-200 rounded-lg bg-white">
+          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön fast</p>
+          <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.annualFixed)} kr</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">12 × fast månadslön</p>
+        </div>
+        <div class="p-3 border border-slate-200 rounded-lg bg-white">
+          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön rörlig (netto)</p>
+          <p class="text-lg font-semibold mt-0.5 text-emerald-700">${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">${s.variablePercentage}% + sem.tillägg</p>
+        </div>
+        <div class="p-3 border border-slate-200 rounded-lg bg-white">
+          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Total årslön (netto)</p>
+          <p class="text-lg font-semibold mt-0.5 text-blue-700">${fmt(calc.yearly.total)} kr</p>
+        </div>
+        <div class="p-3 border border-slate-200 rounded-lg bg-white">
+          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Snittlön / mån</p>
+          <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.averageMonthly)} kr</p>
+        </div>
+      </div>
+
+      <hr class="my-4 border-slate-200">
+
+      <h4 class="font-semibold text-slate-800 mb-2">Förhandsvisning av kontraktstext</h4>
+      <div class="bg-slate-50 border border-slate-200 rounded-md p-3 text-sm text-slate-700 space-y-1.5 mb-4">
+        <p><strong>${s.contractType === 'permanent' ? 'Tillsvidareanställning' : 'Provanställning'}</strong> i ${this.escapeHtml(s.workLocation || '—')} på avdelning ${this.escapeHtml(s.department || '—')}, från och med ${this.escapeHtml(s.startDate || '—')}.</p>
+        <p>${this.escapeHtml(s.candidateName || '—')} (${this.escapeHtml(s.personalNumber || '—')}) anställs som ${previewClause}.</p>
+        <p>Lönen fastställs till <strong>${fmt(s.fixedSalary)} kr/mån</strong> (oberoende av ${s.salaryYear} års lönesamtal).</p>
+        <p>Beräknad <strong>total årslön (netto): ${fmt(calc.yearly.total)} kr</strong>, varav rörlig ${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr.</p>
+        <p class="text-xs text-slate-500">Signerare: ${this.escapeHtml(s.signerName || '')} — ${this.escapeHtml(s.signerTitle || '')}</p>
+      </div>
+
+      <div class="flex justify-end gap-2 sticky bottom-0 bg-white pt-4 border-t border-slate-200 -mx-6 px-6 -mb-4 pb-4">
+        <button onclick="views.hideOfferModal()"
+                class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
+          Avbryt
+        </button>
+        <button id="offer-submit-btn" onclick="views.submitOffer()" ${s.submitting ? 'disabled' : ''}
+                class="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg hover:from-emerald-600 hover:to-teal-700 shadow-sm disabled:opacity-50">
+          ${s.submitting ? 'Skapar...' : 'Skapa erbjudande & öppna i Outlook'}
+        </button>
+      </div>
+    `;
+
+    // Wire up bindings
+    body.querySelectorAll('[data-bind]').forEach((el) => {
+      el.addEventListener('input', (e) => {
+        const k = el.dataset.bind;
+        let v = el.value;
+        if (['fixedSalary', 'expectedRate', 'variablePercentage', 'salaryYear'].includes(k)) {
+          v = v === '' ? '' : Number(v);
+        }
+        this._offerState[k] = v;
+        this._scheduleOfferRerender();
+      });
+    });
+    body.querySelectorAll('[data-bind-arr]').forEach((el) => {
+      el.addEventListener('input', (e) => {
+        const k = el.dataset.bindArr;
+        const i = Number(el.dataset.idx);
+        const v = el.value === '' ? 0 : Number(el.value);
+        this._offerState[k][i] = isFinite(v) ? v : 0;
+        this._scheduleOfferRerender();
+      });
+    });
+  },
+
+  _scheduleOfferRerender() {
+    if (this._offerRerenderTimer) return;
+    this._offerRerenderTimer = setTimeout(() => {
+      this._offerRerenderTimer = null;
+      const focused = document.activeElement;
+      const focusedSel = focused && focused.dataset && focused.dataset.bind
+        ? `[data-bind="${focused.dataset.bind}"]`
+        : focused && focused.dataset && focused.dataset.bindArr
+        ? `[data-bind-arr="${focused.dataset.bindArr}"][data-idx="${focused.dataset.idx}"]`
+        : null;
+      const cursor = focused && typeof focused.selectionStart === 'number' ? focused.selectionStart : null;
+      this.renderOfferModalBody();
+      if (focusedSel) {
+        const el = document.querySelector('#offer-modal-body ' + focusedSel);
+        if (el) {
+          el.focus();
+          if (cursor != null && el.setSelectionRange) {
+            try { el.setSelectionRange(cursor, cursor); } catch (e) { /* ignore */ }
+          }
+        }
+      }
+    }, 80);
+  },
+
+  async submitOffer() {
+    const s = this._offerState;
+    if (!s) return;
+    if (!s.candidateName || !s.candidateName.trim()) {
+      alert('Kandidatens namn krävs');
+      return;
+    }
+    if (!s.fixedSalary || !s.expectedRate) {
+      alert('Fast lön och arvode krävs');
+      return;
+    }
+
+    s.submitting = true;
+    this.renderOfferModalBody();
+    const candidateId = this._currentCandidate.id;
+
+    try {
+      const offer = await api.post(`/api/candidates/${candidateId}/offers`, {
+        contractType: s.contractType,
+        candidateName: s.candidateName,
+        personalNumber: s.personalNumber,
+        startDate: s.startDate,
+        workLocation: s.workLocation,
+        department: s.department,
+        signLocation: s.signLocation,
+        signDate: s.signDate,
+        signerName: s.signerName,
+        signerTitle: s.signerTitle,
+        salaryYear: Number(s.salaryYear) || new Date().getFullYear(),
+        fixedSalary: Number(s.fixedSalary) || 0,
+        expectedRate: Number(s.expectedRate) || 0,
+        variablePercentage: Number(s.variablePercentage) || 0,
+        maxHours: s.maxHours,
+        vacationDays: s.vacationDays,
+        internalHours: new Array(12).fill(0),
+        extraHours: new Array(12).fill(0),
+      });
+      this.hideOfferModal();
+      this.loadOffersList(candidateId);
+      // Trigger .eml download in a hidden anchor — Outlook on Windows opens it as a draft.
+      const a = document.createElement('a');
+      a.href = `/api/candidates/${candidateId}/offers/${offer.id}/eml`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('submitOffer error:', err);
+      alert('Kunde inte skapa erbjudandet: ' + (err.message || err));
+      s.submitting = false;
+      this.renderOfferModalBody();
     }
   },
 
@@ -3721,6 +4327,50 @@ const views = {
     if (!email.includes('@')) return;
     const guess = this.guessNameFromEmail(email);
     if (guess) nameInput.value = guess;
+  },
+
+  // Try to match the email domain against an existing company (contacts only).
+  // Skips free-email providers and leaves the selection alone if the user
+  // already picked a company.
+  maybeGuessContactCompany(email) {
+    const select = document.getElementById('contact-company');
+    if (!select) return;
+    if (select.value && select.value !== '') return;
+    const key = this._companyKeyFromEmail(email);
+    if (!key) return;
+    const opts = Array.from(select.options).filter(o => o.value && o.value !== '__new__');
+    const wordsOf = text => (text || '').toLowerCase().split(/[\s\-_.,&/]+/).filter(Boolean);
+    // Prefer exact word match, fall back to prefix either direction
+    let match = opts.find(o => wordsOf(o.textContent).includes(key));
+    if (!match) {
+      match = opts.find(o => wordsOf(o.textContent).some(w =>
+        w.length >= 3 && (w.startsWith(key) || key.startsWith(w))));
+    }
+    if (match) select.value = match.value;
+  },
+
+  _companyKeyFromEmail(email) {
+    if (!email || typeof email !== 'string') return '';
+    const at = email.indexOf('@');
+    if (at < 1 || at === email.length - 1) return '';
+    const host = email.slice(at + 1).toLowerCase().trim();
+    if (!host.includes('.')) return '';
+    const freeProviders = new Set([
+      'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'hotmail.com',
+      'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com',
+      'aol.com', 'protonmail.com', 'proton.me', 'pm.me', 'fastmail.com',
+      'yandex.com', 'mail.com', 'zoho.com', 'gmx.com', 'gmx.de', 'web.de',
+      'mailbox.org'
+    ]);
+    if (freeProviders.has(host)) return '';
+    const parts = host.split('.');
+    if (parts.length < 2) return '';
+    const ccSecondLevel = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac']);
+    let key = parts[parts.length - 2];
+    if (parts.length >= 3 && ccSecondLevel.has(key) && parts[parts.length - 1].length <= 3) {
+      key = parts[parts.length - 3];
+    }
+    return key.length >= 3 ? key : '';
   },
 
   async saveCandidate(event, id) {

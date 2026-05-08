@@ -27,11 +27,12 @@
   "dependencies": {
     "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^12.0.0",
     "connect-sqlite3": "^0.9.15",
     "express": "^5.0.1",
     "express-session": "^1.18.1",
     "multer": "^2.0.2",
+    "pdfkit": "^0.18.0",
     "unzipper": "^0.12.3"
   },
   "overrides": {

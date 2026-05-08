@@ -43,6 +43,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Archive contacts (soft delete - can be restored from Archive view)
    - Search/filter contacts by name, company, or any field
    - Sort contact list by name, company, or last note date
+   - **Email-driven auto-fill (Add Contact form)**: When an email is entered,
+     if the Name field is empty, it is populated from the local part (e.g.
+     `firstname.lastname@...` → `Firstname Lastname`). Additionally, if no
+     Company is selected yet, the Company dropdown is matched against the
+     email domain (e.g. `@acme.com` → `Acme Corp`). Free-email providers
+     (gmail, outlook, etc.) are ignored for company matching.
 
 4. **Company Management**
    - Add new companies with name, organization number, address, and technologies
@@ -54,13 +60,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 5. **Candidate Management**
    - Separate tab for managing job candidates (independent from contacts)
    - Candidate fields: name, email, phone, role, skills
+   - **Employment offers** (see section 11)
    - Resume file upload (PDF, DOC, DOCX, max 10MB)
    - Resume download functionality
    - Comments & ToDos: unified list on the candidate detail page (same pattern as Contacts and Companies), sortable by date or type, showing comments (rose) and linked ToDos (emerald) inline with inline checklist/complete controls
    - "Make this a ToDo" checkbox when adding a comment: if checked, creates a ToDo linked to the candidate (using comment text as title) instead of a comment; the ToDo appears in the candidate's Comments & ToDos list and in the global ToDos list
    - Full-text search across all candidate fields
+     - Search returns matches in two groups: first, candidates that match the currently active owner + category filter (primary results); then, after a subtle separator row, additional matches from across all owners and all categories that don't fit the active filter (secondary results). When the active filter is already "All Candidates (Team) / All Categories" the secondary group is empty.
    - Sort candidates by name, role, or skills
    - **Owner filter (team users)**: On the candidates list, a dropdown lets a team user choose whose candidates to view — their own (default), any other team member's, or all team candidates. An "Added By" column is shown for team users. Solo users see their own candidates with no dropdown.
+   - **Status column**: A two-line "Status" column on the candidates list shows the row's owner label on top ("My Candidates" if owned by the current user, otherwise the owner's username) and the category label below (e.g. "In Progress"). This makes it obvious which rows came from the active filter vs. the secondary "all candidates" search results.
    - **Transfer between team members**: On the candidate detail page, team users see a "Transfer" button that opens a modal with a dropdown of other team members. Transferring reassigns the candidate's owner (`created_by`) so it appears in the new owner's list. Only the current candidate owner or the team owner can transfer; the target must be a member of the same team.
 
 6. **Notes & ToDos Management**
@@ -119,6 +128,38 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - File system storage for uploaded resumes
    - Support for persistent volumes on cloud platforms (Railway)
 
+11. **Employment Offers (Candidates)**
+   - On the candidate detail page, "Skapa erbjudande" opens a full-screen modal
+     with a contract form and an embedded variable-salary calculator (port of
+     Sigma Technology Group's "Rörligtmål" model).
+   - **Contract form**: contract type (probationary / permanent), candidate name,
+     personal number, start date, work location, department, sign location, sign
+     date, signer name, signer title, salary year. Defaults are sensible
+     (Karlskrona / 2402 / Thomas Hermansson / Vice President, Sigma Technology
+     Software Solution); the company name and org. nr are baked into the .docx
+     template and cannot be changed per-offer.
+   - **Salary calculator**: fast lön (netto), arvode (kr/tim), %-sats. Editable
+     monthly hours and vacation days. Live 12-month breakdown table (totalt
+     antal timmar, arvode, lönekostnad, rörlig brutto/netto, semestertillägg,
+     fast + rörlig). Summary cards for årslön fast/rörlig/total and snittlön/mån.
+   - **Live preview** of the contract text with the live numbers folded in.
+   - **Submit** generates two artefacts: the contract `.docx` (filled-in copy of
+     `templates/contract-template.docx`) and a salary-attachment `.pdf` (the
+     monthly table + summary cards). Both files are persisted under `uploads/`
+     and tracked on a `candidate_offers` row that snapshots all inputs and the
+     full computed `ModelResult` as JSON.
+   - **Outlook integration**: after submit, the browser auto-downloads an `.eml`
+     file with `X-Unsent: 1`, the candidate's email pre-filled, and both
+     artefacts as base64 attachments. On Windows the file opens in Outlook as a
+     draft message with the attachments already in place.
+   - **Revisions**: each submit creates a *new* offer row (with new files), so
+     prior versions stay around for traceability. The "Revidera" button on a
+     listed offer pre-fills the modal with that offer's values to make it easy
+     to iterate on numbers and produce a new revision.
+   - **Permissions**: solo users can manage their own offers; team members can
+     create offers for any candidate they can see and can delete their own;
+     the team owner can delete any offer.
+
 ### Non-Functional Requirements
 
 - Multi-user support with authentication
@@ -142,6 +183,8 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 | Authentication | bcryptjs | Secure password hashing |
 | Frontend | HTML + Vanilla JS | No build step, easy to modify |
 | Styling | Tailwind CSS (CDN) | Modern light theme, minimal effort |
+| DOCX templating | unzipper + archiver | Read/write .docx as zip; placeholder substitution in `word/document.xml` |
+| PDF generation | pdfkit | Generates the variable-salary attachment PDF |
 
 ---
 
@@ -313,6 +356,42 @@ CREATE TABLE candidates (
 )
 ```
 
+#### Candidate Offers Table
+```sql
+CREATE TABLE candidate_offers (
+  id TEXT PRIMARY KEY,
+  candidate_id TEXT NOT NULL,
+  contract_type TEXT NOT NULL CHECK (contract_type IN ('probationary', 'permanent')),
+  candidate_name TEXT NOT NULL,
+  personal_number TEXT DEFAULT '',
+  start_date TEXT DEFAULT '',
+  work_location TEXT DEFAULT '',
+  department TEXT DEFAULT '',
+  sign_location TEXT DEFAULT '',
+  sign_date TEXT DEFAULT '',
+  signer_name TEXT DEFAULT '',
+  signer_title TEXT DEFAULT '',
+  fixed_salary INTEGER NOT NULL DEFAULT 0,
+  expected_rate INTEGER NOT NULL DEFAULT 0,
+  variable_percentage REAL NOT NULL DEFAULT 0,
+  salary_year INTEGER NOT NULL DEFAULT 0,
+  calculation_json TEXT NOT NULL DEFAULT '{}',
+  contract_filename TEXT DEFAULT '',
+  contract_original_name TEXT DEFAULT '',
+  attachment_filename TEXT DEFAULT '',
+  attachment_original_name TEXT DEFAULT '',
+  email_subject TEXT DEFAULT '',
+  email_body TEXT DEFAULT '',
+  team_id TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+)
+```
+
 #### Candidate Comments Table
 ```sql
 CREATE TABLE candidate_comments (
@@ -444,9 +523,9 @@ Main navigation tabs: **Contacts | Companies | Candidates | ToDos**
    - Company-level ToDos section
 
 6. **Candidates List**
-   - Table: Name, Role, Skills, Resume status
+   - Table: Name, Role, Category, Skills, Added By (team only), Status (owner + category, two lines)
    - Sortable columns
-   - Full-text search across all fields
+   - Full-text search across all fields, with primary (filter-matching) and secondary (all-team / all-categories) result groups separated by a divider row
    - "Add Candidate" button
    - Click row to view details
 
@@ -497,9 +576,16 @@ VibeCodingProject/
 ├── public/
 │   ├── index.html         # Main HTML file
 │   └── app.js             # Frontend JavaScript
+├── templates/
+│   └── contract-template.docx # Employment contract docx with {{PLACEHOLDER}}s
 ├── src/
 │   ├── database.js        # Database initialization
 │   ├── data.js            # Data layer functions
+│   ├── lib/
+│   │   ├── salary-model.js       # Variable-salary model (port of Rörligtmål)
+│   │   ├── contract-template.js  # Fills the contract docx template
+│   │   ├── offer-pdf.js          # Renders the salary attachment PDF (pdfkit)
+│   │   └── eml-builder.js        # Builds Outlook-draft .eml with attachments
 │   ├── middleware/
 │   │   └── auth.js        # Authentication middleware
 │   └── routes/
@@ -511,11 +597,13 @@ VibeCodingProject/
 │       ├── todos.js       # ToDo API routes
 │       ├── checklists.js  # Checklist API routes
 │       ├── candidates.js  # Candidate API routes
+│       ├── offers.js      # Employment offer routes
 │       ├── team.js        # Team management routes
 │       ├── invitations.js # Invitation routes
 │       ├── archive.js     # Archive viewing routes
 │       └── backup.js      # Export/Import routes
 └── scripts/
+    ├── build-contract-template.js # One-shot: build templates/contract-template.docx
     ├── migrate-json-to-sqlite.js  # Migration script
     └── seed-test-data.js          # Test data seeder
 ```
@@ -633,6 +721,17 @@ VibeCodingProject/
 | POST | /api/candidates/:id/comments | Add comment |
 | PUT | /api/candidates/:id/comments/:commentId | Update comment |
 | DELETE | /api/candidates/:id/comments/:commentId | Delete comment |
+
+### Candidate Offers (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/candidates/:candidateId/offers | List employment offers for the candidate (newest first) |
+| POST | /api/candidates/:candidateId/offers | Create a new offer; renders contract.docx + attachment.pdf |
+| GET | /api/candidates/:candidateId/offers/:offerId/contract | Download the filled contract .docx |
+| GET | /api/candidates/:candidateId/offers/:offerId/attachment | Download the salary attachment .pdf |
+| GET | /api/candidates/:candidateId/offers/:offerId/eml | Download an Outlook-draft .eml with both attachments |
+| DELETE | /api/candidates/:candidateId/offers/:offerId | Delete the offer (creator / team owner only) |
 
 ### Search (Protected)
 

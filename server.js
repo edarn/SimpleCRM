@@ -129,6 +129,9 @@ app.use('/api/checklists', requireAuth, require('./src/routes/checklists'));
 // Candidates routes with file upload middleware
 app.use('/api/candidates', requireAuth, require('./src/routes/candidates')(upload, uploadsDir));
 
+// Candidate employment offer routes (mounted under candidates)
+app.use('/api/candidates/:candidateId/offers', requireAuth, require('./src/routes/offers')(uploadsDir));
+
 // Team management routes (with logo upload support)
 app.use('/api/team', requireAuth, require('./src/routes/team')(logoUpload, uploadsDir));
 app.use('/api/invitations', requireAuth, require('./src/routes/invitations'));
