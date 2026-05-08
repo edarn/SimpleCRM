@@ -197,6 +197,19 @@ function transformDocumentXml(xml) {
   // 14. Signer title "Vice " + "President, Sigma Technology Software Solution ".
   apply('SIGNER_TITLE', ['Vice ', 'President, Sigma Technology Software Solution '], cleanRun('{{SIGNER_TITLE}}'));
 
+  // 15. Inject the variable-salary clause into the salary paragraph. The run
+  // immediately after {{SALARY_YEAR}} contains the rest of that sentence; we
+  // splice the new clause between "års lönesamtal." and the existing
+  // "(extra lön enligt nedan ej medräknat)" parenthetical.
+  const salaryRunOld = ' års lönesamtal. (extra lön enligt nedan ej medräknat)';
+  const salaryRunNew =
+    ' års lönesamtal. Utöver detta har NN en rörlig lönedel om {{VARIABLE_PERCENTAGE}} % som beräknas enligt bifogad bilaga.' +
+    ' Den uppskattade totala årslönen (fast + rörlig, netto) är {{ESTIMATED_TOTAL}} kr. (extra lön enligt nedan ej medräknat)';
+  if (!out.includes(salaryRunOld)) {
+    throw new Error('Salary clause anchor not found; did the upstream template change?');
+  }
+  out = out.replace(salaryRunOld, salaryRunNew);
+
   return out;
 }
 
@@ -204,8 +217,8 @@ function verify(xml) {
   const required = [
     '{{TITLE}}', '{{CANDIDATE_NAME}}', '{{PERSONAL_NUMBER}}', '{{DEPARTMENT}}',
     '{{START_DATE}}', '{{WORK_LOCATION}}', '{{CONTRACT_CLAUSE}}', '{{SALARY_YEAR}}',
-    '{{FIXED_SALARY}}', '{{SIGN_LOCATION}}', '{{SIGN_DATE}}', '{{SIGNER_NAME}}',
-    '{{SIGNER_TITLE}}',
+    '{{FIXED_SALARY}}', '{{VARIABLE_PERCENTAGE}}', '{{ESTIMATED_TOTAL}}',
+    '{{SIGN_LOCATION}}', '{{SIGN_DATE}}', '{{SIGNER_NAME}}', '{{SIGNER_TITLE}}',
   ];
   const missing = required.filter((p) => !xml.includes(p));
   if (missing.length) {

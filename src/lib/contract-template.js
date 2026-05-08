@@ -27,6 +27,14 @@ function formatSwedishNumber(n) {
   return new Intl.NumberFormat('sv-SE').format(Math.round(n));
 }
 
+function formatSwedishPercent(n) {
+  if (n == null) return '';
+  // Drop trailing ".0" but keep e.g. "12.5".
+  const num = Number(n);
+  if (!isFinite(num)) return '';
+  return new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 2 }).format(num);
+}
+
 async function readDocxEntries(filePath) {
   const entries = {};
   const directory = await unzipper.Open.file(filePath);
@@ -73,6 +81,8 @@ function buildDocxBuffer(entries) {
  * @param {string} values.signerTitle
  * @param {number} values.salaryYear
  * @param {number} values.fixedSalary       SEK / month
+ * @param {number} values.variablePercentage e.g. 10 for 10 %
+ * @param {number} values.estimatedTotal    estimated total annual salary (SEK, net)
  * @returns {Promise<Buffer>} the .docx file as a Buffer
  */
 async function renderContractDocx(values) {
@@ -95,6 +105,8 @@ async function renderContractDocx(values) {
     '{{CONTRACT_CLAUSE}}': escapeXml(clauseMap[values.contractType] || ''),
     '{{SALARY_YEAR}}': escapeXml(String(values.salaryYear || '')),
     '{{FIXED_SALARY}}': escapeXml(formatSwedishNumber(values.fixedSalary)),
+    '{{VARIABLE_PERCENTAGE}}': escapeXml(formatSwedishPercent(values.variablePercentage)),
+    '{{ESTIMATED_TOTAL}}': escapeXml(formatSwedishNumber(values.estimatedTotal)),
     '{{SIGN_LOCATION}}': escapeXml(values.signLocation || ''),
     '{{SIGN_DATE}}': escapeXml(values.signDate || ''),
     '{{SIGNER_NAME}}': escapeXml(values.signerName || ''),

@@ -115,6 +115,8 @@ module.exports = function (uploadsDir) {
         signerTitle: p.signerTitle,
         salaryYear: p.salaryYear,
         fixedSalary: Number(p.fixedSalary) || 0,
+        variablePercentage: Number(p.variablePercentage) || 0,
+        estimatedTotal: calc && calc.yearly ? calc.yearly.total : 0,
       });
 
       const pdfBuf = await renderOfferPdf({
