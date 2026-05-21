@@ -266,6 +266,9 @@ const auth = {
         <button onclick="router.navigate('archive'); toggleUserMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
           Archive
         </button>
+        <button onclick="router.navigate('team-settings'); toggleUserMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+          Settings
+        </button>
         <button onclick="teamManager.leaveTeam(); toggleUserMenu();" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100">
           Leave Team
         </button>
@@ -541,7 +544,9 @@ const router = {
           (route === 'contacts' && current?.startsWith('contact')) ||
           (route === 'companies' && current?.startsWith('company')) ||
           (route === 'candidates' && current?.startsWith('candidate')) ||
-          (route === 'todos' && current?.startsWith('todo'));
+          (route === 'todos' && current?.startsWith('todo')) ||
+          (route === 'inbox' && current?.startsWith('inbox')) ||
+          (route === 'requests' && current?.startsWith('request'));
       if (isActive) {
         link.classList.add('bg-white/25', 'text-white');
         link.classList.remove('text-blue-100');
@@ -598,6 +603,18 @@ const router = {
           break;
         case 'team-settings':
           await views.teamSettings(app);
+          break;
+        case 'inbox':
+          await views.inboxList(app);
+          break;
+        case 'inbox-detail':
+          await views.inboxDetail(app, params.id);
+          break;
+        case 'requests':
+          await views.requestList(app);
+          break;
+        case 'request-detail':
+          await views.requestDetail(app, params.id);
           break;
         case 'archive':
           await views.archiveView(app);
@@ -2030,6 +2047,7 @@ const views = {
     return todos.map(t => {
       const linkedLabel = t.linkedType === 'contact' ? `${this.escapeHtml(t.linkedName)} @ ${this.escapeHtml(t.linkedCompanyName || '')}` :
                           t.linkedType === 'candidate' ? `${this.escapeHtml(t.linkedName)} (Candidate)` :
+                          t.linkedType === 'general' ? '(From email)' :
                           this.escapeHtml(t.linkedName);
       const hasChecklist = t.checklistItemsState && t.checklistItemsState.length > 0;
       const checkedCount = hasChecklist ? t.checklistItemsState.filter(i => i.checked).length : 0;
@@ -2116,6 +2134,9 @@ const views = {
       router.navigate('contact-detail', { id });
     } else if (type === 'candidate') {
       router.navigate('candidate-detail', { id });
+    } else if (type === 'general') {
+      // General/email-generated todos have no linked entity
+      return;
     } else {
       router.navigate('company-detail', { id });
     }
@@ -4424,13 +4445,11 @@ const views = {
 
   // Team Settings View (Owner or Solo user who wants to create a team)
   async teamSettings(container) {
-    if (auth.currentUser.role === 'member') {
-      router.navigate('contacts');
-      return;
-    }
 
     const teamData = await api.get('/api/team');
     const isSolo = auth.currentUser.role === 'solo';
+    const isMember = auth.currentUser.role === 'member';
+    const isOwner = auth.currentUser.role === 'owner';
 
     container.innerHTML = `
       <div class="mb-6">
@@ -4440,8 +4459,9 @@ const views = {
       </div>
 
       <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
-        <h2 class="text-2xl font-bold text-slate-800 mb-6">${isSolo ? 'Create a Team' : 'Team Settings'}</h2>
+        <h2 class="text-2xl font-bold text-slate-800 mb-6">${isMember ? 'Settings' : isSolo ? 'Create a Team' : 'Team Settings'}</h2>
 
+        ${!isMember ? `
         ${isSolo ? `
         <div class="mb-6 p-4 bg-sky-50 rounded-lg border border-sky-100">
           <p class="text-sky-800">Invite someone to create a team. Once they accept, you'll both be able to see and edit all data. You'll become the team owner.</p>
@@ -4526,6 +4546,24 @@ const views = {
         </div>
         ` : ''}
         ` : ''}
+        ` : ''}
+
+        <!-- Authorized Email Addresses (AI Inbox) -->
+        <div class="border-t border-slate-200 pt-6 mt-6">
+          <h3 class="text-lg font-semibold text-slate-800 mb-4">My Email Addresses (AI Inbox)</h3>
+          <p class="text-sm text-slate-600 mb-4">Register your email addresses here. Only emails from these addresses will be processed by the AI Inbox.</p>
+          <form onsubmit="views.addUserEmail(event)" class="flex gap-2 mb-4">
+            <input type="email" id="user-email-input" placeholder="your@email.com" required
+                   class="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
+            <input type="text" id="user-email-label" placeholder="Label (e.g. Work)"
+                   class="w-32 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
+            <button type="submit" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-4 py-2 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-medium shadow-sm">
+              Add
+            </button>
+          </form>
+          <div id="user-emails-list"></div>
+          <div id="user-email-message" class="mt-2 text-sm hidden"></div>
+        </div>
 
         <!-- Data Backup Section -->
         <div class="border-t border-slate-200 pt-6 mt-6">
@@ -4558,6 +4596,71 @@ const views = {
     `;
 
     this._teamData = teamData;
+
+    // Load user emails for AI inbox
+    this.loadUserEmails();
+  },
+
+  async loadUserEmails() {
+    try {
+      const emails = await api.get('/api/user-emails');
+      const container = document.getElementById('user-emails-list');
+      if (!container) return;
+      if (emails.length === 0) {
+        container.innerHTML = '<p class="text-slate-500 text-sm">No email addresses registered yet.</p>';
+      } else {
+        container.innerHTML = emails.map(e => `
+          <div class="flex items-center justify-between py-2 border-b border-slate-100">
+            <div>
+              <span class="text-slate-800 font-medium">${this.escapeHtml(e.email)}</span>
+              ${e.label ? `<span class="text-xs ml-2 px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">${this.escapeHtml(e.label)}</span>` : ''}
+            </div>
+            <button onclick="views.removeUserEmail('${e.id}')" class="text-red-500 hover:text-red-700 text-sm font-medium">Remove</button>
+          </div>
+        `).join('');
+      }
+    } catch (err) {
+      console.error('Error loading user emails:', err);
+    }
+  },
+
+  async addUserEmail(e) {
+    e.preventDefault();
+    const email = document.getElementById('user-email-input').value.trim();
+    const label = document.getElementById('user-email-label').value.trim();
+    const msgEl = document.getElementById('user-email-message');
+    try {
+      const res = await fetch('/api/user-emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, label })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to add email');
+      }
+      document.getElementById('user-email-input').value = '';
+      document.getElementById('user-email-label').value = '';
+      msgEl.textContent = `Added ${email}`;
+      msgEl.className = 'mt-2 text-sm text-emerald-600';
+      msgEl.classList.remove('hidden');
+      setTimeout(() => msgEl.classList.add('hidden'), 3000);
+      this.loadUserEmails();
+    } catch (err) {
+      msgEl.textContent = err.message || 'Failed to add email';
+      msgEl.className = 'mt-2 text-sm text-red-600';
+      msgEl.classList.remove('hidden');
+    }
+  },
+
+  async removeUserEmail(emailId) {
+    if (!confirm('Remove this email address?')) return;
+    try {
+      await api.delete(`/api/user-emails/${emailId}`);
+      this.loadUserEmails();
+    } catch (err) {
+      alert('Failed to remove email');
+    }
   },
 
   renderPendingInvitations(invitations) {
@@ -4924,6 +5027,460 @@ const views = {
         `}
       </div>
     `;
+  },
+
+  // ============ AI Email Inbox ============
+
+  async inboxList(container) {
+    const emails = await api.get('/api/inbox');
+
+    container.innerHTML = `
+      <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">AI Inbox</h2>
+          <p class="text-slate-500">${emails.length} email(s) processed</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="views.showSimulateEmailModal()"
+                  class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-2.5 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm">
+            + Simulate Email
+          </button>
+          <button onclick="views.extractAllResumes()"
+                  class="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm border border-slate-200"
+                  title="Extract text from all uploaded resumes for AI matching">
+            Extract Resumes
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+        <div id="inbox-list" class="divide-y divide-slate-100">
+          ${this.renderInboxRows(emails)}
+        </div>
+      </div>
+    `;
+  },
+
+  renderInboxRows(emails) {
+    if (emails.length === 0) {
+      return '<div class="px-6 py-8 text-center text-slate-500">No emails yet. Use "Simulate Email" to test the AI inbox.</div>';
+    }
+    return emails.map(e => {
+      const statusColor = {
+        pending: 'bg-yellow-100 text-yellow-800',
+        processing: 'bg-blue-100 text-blue-800',
+        completed: 'bg-emerald-100 text-emerald-800',
+        failed: 'bg-red-100 text-red-800',
+        review: 'bg-amber-100 text-amber-800'
+      }[e.status] || 'bg-slate-100 text-slate-800';
+
+      const classColor = {
+        new_contact: 'bg-sky-100 text-sky-800',
+        consultant_request: 'bg-violet-100 text-violet-800',
+        todo: 'bg-emerald-100 text-emerald-800',
+        pending: 'bg-slate-100 text-slate-500'
+      }[e.classification] || 'bg-slate-100 text-slate-800';
+
+      const classLabel = {
+        new_contact: 'New Contact',
+        consultant_request: 'Consultant Request',
+        todo: 'ToDo',
+        pending: 'Pending'
+      }[e.classification] || e.classification;
+
+      return `
+      <div class="flex flex-wrap items-start px-4 sm:px-6 py-4 hover:bg-indigo-50/30 transition-colors cursor-pointer"
+           onclick="router.navigate('inbox-detail', {id: '${e.id}'})">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="font-medium text-slate-800">${this.escapeHtml(e.fromName || e.fromEmail)}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full ${classColor}">${classLabel}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full ${statusColor}">${e.status}</span>
+          </div>
+          <div class="text-sm text-slate-700 font-medium">${this.escapeHtml(e.subject || '(no subject)')}</div>
+          <div class="text-sm text-slate-500 mt-1 truncate">${this.escapeHtml(e.body.substring(0, 120))}${e.body.length > 120 ? '...' : ''}</div>
+          ${e.actionSummary ? `<div class="text-xs text-indigo-600 mt-1">${this.escapeHtml(e.actionSummary)}</div>` : ''}
+        </div>
+        <div class="text-xs text-slate-400 ml-4 mt-1 shrink-0">${formatDateTime(e.createdAt)}</div>
+      </div>`;
+    }).join('');
+  },
+
+  async inboxDetail(container, emailId) {
+    const email = await api.get(`/api/inbox/${emailId}`);
+
+    const classLabel = {
+      new_contact: 'New Contact',
+      consultant_request: 'Consultant Request',
+      todo: 'ToDo',
+      pending: 'Pending'
+    }[email.classification] || email.classification;
+
+    const classColor = {
+      new_contact: 'bg-sky-100 text-sky-800',
+      consultant_request: 'bg-violet-100 text-violet-800',
+      todo: 'bg-emerald-100 text-emerald-800'
+    }[email.classification] || 'bg-slate-100 text-slate-800';
+
+    const statusColor = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      processing: 'bg-blue-100 text-blue-800',
+      completed: 'bg-emerald-100 text-emerald-800',
+      failed: 'bg-red-100 text-red-800',
+      review: 'bg-amber-100 text-amber-800'
+    }[email.status] || 'bg-slate-100 text-slate-800';
+
+    let actionLink = '';
+    if (email.status === 'completed' && email.actionId) {
+      if (email.actionType === 'new_contact' || email.actionType === 'existing_contact') {
+        actionLink = `<a href="#" onclick="router.navigate('contact-detail', {id: '${email.actionId}'}); return false;" class="text-sky-600 hover:text-sky-700 font-medium">View Contact →</a>`;
+      } else if (email.actionType === 'consultant_request') {
+        actionLink = `<a href="#" onclick="router.navigate('request-detail', {id: '${email.actionId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">View Request →</a>`;
+      } else if (email.actionType === 'todo') {
+        actionLink = `<a href="#" onclick="router.navigate('todos'); return false;" class="text-emerald-600 hover:text-emerald-700 font-medium">View ToDos →</a>`;
+      }
+    }
+
+    container.innerHTML = `
+      <div class="mb-6">
+        <a href="#" onclick="router.navigate('inbox'); return false;" class="text-indigo-600 hover:text-indigo-700 font-medium">
+          ← Back to Inbox
+        </a>
+      </div>
+
+      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800">${this.escapeHtml(email.subject || '(no subject)')}</h2>
+            <p class="text-slate-600">From: ${this.escapeHtml(email.fromName ? email.fromName + ' <' + email.fromEmail + '>' : email.fromEmail)}</p>
+            <p class="text-sm text-slate-400">Received: ${formatDateTime(email.createdAt)}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm px-3 py-1 rounded-full ${classColor}">${classLabel}</span>
+            <span class="text-sm px-3 py-1 rounded-full ${statusColor}">${email.status}</span>
+          </div>
+        </div>
+
+        ${email.confidence ? `<div class="text-sm text-slate-500 mb-4">Confidence: ${Math.round(email.confidence * 100)}%</div>` : ''}
+
+        <div class="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
+          <h3 class="text-sm font-semibold text-slate-600 mb-2">Email Body</h3>
+          <pre class="text-sm text-slate-700 whitespace-pre-wrap font-sans">${this.escapeHtml(email.body)}</pre>
+        </div>
+
+        ${email.extractedData && Object.keys(email.extractedData).length > 0 ? `
+        <div class="bg-indigo-50 rounded-lg p-4 mb-4 border border-indigo-200">
+          <h3 class="text-sm font-semibold text-indigo-700 mb-2">Extracted Data</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            ${Object.entries(email.extractedData).map(([key, val]) =>
+              val ? `<div><span class="text-xs text-indigo-500 uppercase">${this.escapeHtml(key.replace(/_/g, ' '))}</span><br><span class="text-sm text-slate-800">${this.escapeHtml(String(val))}</span></div>` : ''
+            ).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${email.actionSummary ? `
+        <div class="bg-emerald-50 rounded-lg p-4 mb-4 border border-emerald-200">
+          <h3 class="text-sm font-semibold text-emerald-700 mb-2">Action Taken</h3>
+          <p class="text-sm text-slate-700">${this.escapeHtml(email.actionSummary)}</p>
+          ${actionLink ? `<div class="mt-2">${actionLink}</div>` : ''}
+        </div>
+        ` : ''}
+
+        ${email.errorMessage ? `
+        <div class="bg-red-50 rounded-lg p-4 mb-4 border border-red-200">
+          <h3 class="text-sm font-semibold text-red-700 mb-2">Error</h3>
+          <p class="text-sm text-red-600">${this.escapeHtml(email.errorMessage)}</p>
+        </div>
+        ` : ''}
+
+        <div class="flex gap-2 mt-4">
+          ${email.status === 'failed' || email.status === 'review' ? `
+          <button onclick="views.reprocessEmail('${email.id}')"
+                  class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
+            Reprocess
+          </button>
+          ` : ''}
+          <button onclick="views.deleteInboxEmail('${email.id}')"
+                  class="text-red-500 hover:text-red-700 text-sm font-medium px-4 py-2">
+            Delete
+          </button>
+        </div>
+      </div>
+    `;
+  },
+
+  showSimulateEmailModal() {
+    const content = document.getElementById('modal-content');
+    content.innerHTML = `
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Simulate Incoming Email</h3>
+      <p class="text-sm text-slate-500 mb-4">Paste an email to simulate receiving it. The sender email must be registered in your settings.</p>
+      <form onsubmit="views.submitSimulatedEmail(event)">
+        <div class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">From Email *</label>
+            <input type="email" id="sim-from-email" required autofocus
+                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">From Name</label>
+            <input type="text" id="sim-from-name"
+                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Subject</label>
+            <input type="text" id="sim-subject"
+                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Email Body *</label>
+            <textarea id="sim-body" rows="8" required
+                      class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Paste the email content here..."></textarea>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
+          <button type="submit" id="sim-submit-btn" class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm">
+            Send to AI
+          </button>
+        </div>
+      </form>
+    `;
+    modal.show();
+  },
+
+  async submitSimulatedEmail(e) {
+    e.preventDefault();
+    const submitBtn = document.getElementById('sim-submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Processing...';
+
+    try {
+      const res = await fetch('/api/inbox/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromEmail: document.getElementById('sim-from-email').value.trim(),
+          fromName: document.getElementById('sim-from-name').value.trim(),
+          subject: document.getElementById('sim-subject').value.trim(),
+          body: document.getElementById('sim-body').value
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      modal.hide();
+      router.navigate('inbox-detail', { id: data.id });
+      this.pollInboxStatus(data.id);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send to AI';
+      alert('Error: ' + (err.message || 'Failed to process email'));
+    }
+  },
+
+  async pollInboxStatus(emailId) {
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      if (attempts > 30) return; // Give up after 30 attempts (~30 seconds)
+      try {
+        const email = await api.get(`/api/inbox/${emailId}`);
+        if (email.status === 'completed' || email.status === 'failed' || email.status === 'review') {
+          // Refresh the detail view
+          if (router.currentRoute?.route === 'inbox-detail' && router.currentRoute?.params?.id === emailId) {
+            await this.inboxDetail(document.getElementById('app'), emailId);
+          }
+          return;
+        }
+        setTimeout(poll, 1000);
+      } catch (_) {
+        setTimeout(poll, 2000);
+      }
+    };
+    setTimeout(poll, 1500);
+  },
+
+  async reprocessEmail(emailId) {
+    try {
+      await api.post(`/api/inbox/${emailId}/reprocess`);
+      router.navigate('inbox-detail', { id: emailId });
+      this.pollInboxStatus(emailId);
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  },
+
+  async deleteInboxEmail(emailId) {
+    if (!confirm('Delete this email from inbox?')) return;
+    try {
+      await api.delete(`/api/inbox/${emailId}`);
+      router.navigate('inbox');
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  },
+
+  async extractAllResumes() {
+    try {
+      const result = await api.post('/api/inbox/extract-resumes');
+      alert(result.message);
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  },
+
+  // ============ Consultant Requests ============
+
+  async requestList(container) {
+    const requests = await api.get('/api/requests');
+
+    container.innerHTML = `
+      <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Consultant Requests</h2>
+          <p class="text-slate-500">${requests.filter(r => r.status === 'open').length} open, ${requests.length} total</p>
+        </div>
+      </div>
+
+      <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+        <table class="responsive-table min-w-full">
+          <thead class="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Request</th>
+              <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Client</th>
+              <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Skills</th>
+              <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Matches</th>
+              <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+              <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${requests.length === 0 ? `
+              <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No consultant requests yet. They are created automatically when the AI Inbox receives a request email.</td></tr>
+            ` : requests.map(r => {
+              const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[r.status] || 'bg-slate-100 text-slate-600';
+              const urgencyIcon = { urgent: '🔴', high: '🟠', normal: '', low: '🔵' }[r.urgency] || '';
+              return `
+              <tr class="hover:bg-violet-50/30 transition-colors cursor-pointer" onclick="router.navigate('request-detail', {id: '${r.id}'})">
+                <td class="px-6 py-4" data-label="Request">
+                  <div class="font-medium text-slate-800">${urgencyIcon} ${this.escapeHtml(r.title)}</div>
+                  ${r.role ? `<div class="text-sm text-slate-500">${this.escapeHtml(r.role)}</div>` : ''}
+                </td>
+                <td class="px-6 py-4 text-slate-600" data-label="Client">${this.escapeHtml(r.clientName || r.clientEmail || '-')}</td>
+                <td class="px-6 py-4 text-sm text-slate-600" data-label="Skills">${this.escapeHtml((r.requiredSkills || '').substring(0, 60))}${(r.requiredSkills || '').length > 60 ? '...' : ''}</td>
+                <td class="px-6 py-4" data-label="Matches">
+                  ${r.matchedCandidates && r.matchedCandidates.length > 0
+                    ? `<span class="text-violet-600 font-medium">${r.matchedCandidates.length} match(es)</span>`
+                    : '<span class="text-slate-400">None</span>'}
+                </td>
+                <td class="px-6 py-4" data-label="Status"><span class="text-xs px-2 py-1 rounded-full ${statusColor}">${r.status}</span></td>
+                <td class="px-6 py-4 text-sm text-slate-500" data-label="Date">${formatDateTime(r.createdAt)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  async requestDetail(container, requestId) {
+    const request = await api.get(`/api/requests/${requestId}`);
+
+    const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[request.status] || 'bg-slate-100 text-slate-600';
+    const urgencyLabel = { urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' }[request.urgency] || request.urgency;
+
+    container.innerHTML = `
+      <div class="mb-6">
+        <a href="#" onclick="router.navigate('requests'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
+          ← Back to Requests
+        </a>
+      </div>
+
+      <div class="bg-white shadow-sm rounded-xl p-6 mb-6 border border-slate-200">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800">${this.escapeHtml(request.title)}</h2>
+            ${request.role ? `<p class="text-slate-600">Role: ${this.escapeHtml(request.role)}</p>` : ''}
+            <p class="text-sm text-slate-400">Created: ${formatDateTime(request.createdAt)}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm px-3 py-1 rounded-full ${statusColor}">${request.status}</span>
+            <select onchange="views.updateRequestStatus('${request.id}', this.value)"
+                    class="text-sm px-3 py-1.5 border border-slate-300 rounded-lg">
+              ${['open', 'in_progress', 'filled', 'closed'].map(s =>
+                `<option value="${s}" ${request.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          ${request.clientName ? `<div><span class="text-sm text-slate-500">Client:</span> <span class="text-slate-800">${this.escapeHtml(request.clientName)}</span></div>` : ''}
+          ${request.clientEmail ? `<div><span class="text-sm text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(request.clientEmail)}" class="text-sky-600 hover:text-sky-700">${this.escapeHtml(request.clientEmail)}</a></div>` : ''}
+          <div><span class="text-sm text-slate-500">Urgency:</span> <span class="text-slate-800">${urgencyLabel}</span></div>
+          ${request.requiredSkills ? `<div class="sm:col-span-2"><span class="text-sm text-slate-500">Required Skills:</span> <span class="text-slate-800">${this.escapeHtml(request.requiredSkills)}</span></div>` : ''}
+        </div>
+
+        ${request.description ? `
+        <div class="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
+          <h3 class="text-sm font-semibold text-slate-600 mb-2">Description</h3>
+          <pre class="text-sm text-slate-700 whitespace-pre-wrap font-sans">${this.escapeHtml(request.description)}</pre>
+        </div>
+        ` : ''}
+
+        <div class="flex gap-2 mb-6">
+          <button onclick="views.deleteRequest('${request.id}')"
+                  class="text-red-500 hover:text-red-700 text-sm font-medium">Delete Request</button>
+        </div>
+      </div>
+
+      <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
+        <h3 class="text-lg font-semibold text-slate-800 mb-4">Matched Candidates</h3>
+        ${request.matchedCandidates && request.matchedCandidates.length > 0 ? `
+        <div class="space-y-3">
+          ${request.matchedCandidates.map((m, i) => `
+          <div class="flex items-start gap-4 p-4 rounded-lg border ${i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50'}">
+            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600'}">
+              ${m.score}%
+            </div>
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <a href="#" onclick="router.navigate('candidate-detail', {id: '${m.candidateId}'}); return false;"
+                   class="font-medium text-violet-600 hover:text-violet-700">${this.escapeHtml(m.candidateName || 'Unknown')}</a>
+                ${m.candidateRole ? `<span class="text-sm text-slate-500">${this.escapeHtml(m.candidateRole)}</span>` : ''}
+              </div>
+              ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
+              <p class="text-sm text-slate-600 mt-1">${this.escapeHtml(m.reasoning)}</p>
+            </div>
+          </div>
+          `).join('')}
+        </div>
+        ` : `
+        <p class="text-slate-500">No matching candidates found. Make sure candidates have uploaded resumes and click "Extract Resumes" in the Inbox tab.</p>
+        `}
+      </div>
+    `;
+  },
+
+  async updateRequestStatus(requestId, status) {
+    try {
+      await api.put(`/api/requests/${requestId}`, { status });
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  },
+
+  async deleteRequest(requestId) {
+    if (!confirm('Delete this request?')) return;
+    try {
+      await api.delete(`/api/requests/${requestId}`);
+      router.navigate('requests');
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
   },
 
   // Utility

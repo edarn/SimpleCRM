@@ -42,7 +42,7 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'ToDo title is required' });
     }
 
-    if (!linkedType || !['contact', 'company', 'candidate'].includes(linkedType)) {
+    if (!linkedType || !['contact', 'company', 'candidate', 'general'].includes(linkedType)) {
       return res.status(400).json({ error: 'linkedType must be "contact", "company", or "candidate"' });
     }
 
@@ -76,7 +76,7 @@ router.put('/:id', (req, res) => {
       return res.status(400).json({ error: 'ToDo title cannot be empty' });
     }
 
-    if (linkedType !== undefined && !['contact', 'company', 'candidate'].includes(linkedType)) {
+    if (linkedType !== undefined && !['contact', 'company', 'candidate', 'general'].includes(linkedType)) {
       return res.status(400).json({ error: 'linkedType must be "contact", "company", or "candidate"' });
     }
 

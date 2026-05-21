@@ -83,6 +83,16 @@
                data-route="todos">
               ToDos
             </a>
+            <a href="#" onclick="router.navigate('inbox'); return false;"
+               class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+               data-route="inbox">
+              Inbox
+            </a>
+            <a href="#" onclick="router.navigate('requests'); return false;"
+               class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+               data-route="requests">
+              Requests
+            </a>
           </div>
           <!-- Mobile hamburger button -->
           <button id="mobile-menu-button" class="md:hidden ml-4 text-white hidden" onclick="toggleMobileMenu()">
@@ -132,6 +142,12 @@
       <a href="#" onclick="router.navigate('todos'); toggleMobileMenu(); return false;"
          class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
          data-route="todos">ToDos</a>
+      <a href="#" onclick="router.navigate('inbox'); toggleMobileMenu(); return false;"
+         class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+         data-route="inbox">Inbox</a>
+      <a href="#" onclick="router.navigate('requests'); toggleMobileMenu(); return false;"
+         class="nav-link px-4 py-2 rounded-lg text-sm font-medium text-blue-100 hover:text-white hover:bg-white/20 transition-all duration-200"
+         data-route="requests">Requests</a>
     </div>
   </div>
 

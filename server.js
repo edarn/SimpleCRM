@@ -139,6 +139,15 @@ app.use('/api/invitations', requireAuth, require('./src/routes/invitations'));
 // Serve uploaded files (logos, resumes)
 app.use('/uploads', express.static(uploadsDir));
 
+// User emails (authorized sender addresses)
+app.use('/api/user-emails', requireAuth, require('./src/routes/user-emails'));
+
+// AI Email Inbox
+app.use('/api/inbox', requireAuth, require('./src/routes/inbox')(uploadsDir));
+
+// Consultant Requests
+app.use('/api/requests', requireAuth, require('./src/routes/requests'));
+
 // Archive routes
 app.use('/api/archive', requireAuth, require('./src/routes/archive'));
 

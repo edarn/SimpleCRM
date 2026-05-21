@@ -291,6 +291,44 @@ function migrateTodosLinkedType() {
   }
 }
 
+// Migrate todos linked_type CHECK constraint to also allow 'general' (for email-generated unlinked todos)
+function migrateTodosLinkedTypeGeneral() {
+  const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='todos'").get();
+  if (!tableInfo || !tableInfo.sql) return;
+  if (tableInfo.sql.includes("'general'")) return; // Already migrated
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS todos_new2 (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        due_date TEXT,
+        completed INTEGER DEFAULT 0,
+        completed_at TEXT,
+        linked_type TEXT NOT NULL CHECK (linked_type IN ('contact', 'company', 'candidate', 'general')),
+        linked_id TEXT NOT NULL,
+        checklist_id TEXT,
+        checklist_items_state TEXT DEFAULT '[]',
+        team_id TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id)
+      )
+    `);
+    db.exec(`INSERT INTO todos_new2 SELECT id, title, description, due_date, completed, completed_at, linked_type, linked_id, checklist_id, checklist_items_state, team_id, created_by, created_at, updated_at FROM todos`);
+    db.exec(`DROP TABLE todos`);
+    db.exec(`ALTER TABLE todos_new2 RENAME TO todos`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_todos_linked ON todos(linked_type, linked_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed)`);
+    console.log('Migrated todos table to support general linked_type');
+  } catch (err) {
+    console.error('Error migrating todos linked_type for general:', err.message);
+  }
+}
+
 // Migration function to add new columns to existing tables and assign existing data to the first user
 function migrateExistingData() {
   // Add team_id column to users if it doesn't exist
@@ -438,6 +476,93 @@ function migrateExistingData() {
       `).run(fileId, c.id, c.resume_filename, c.resume_original_name, mimeType, c.created_at, c.created_by);
     }
   }
+
+  // User emails table (authorized sender addresses for AI inbox)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_emails (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      label TEXT DEFAULT '',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_emails_email ON user_emails(email)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_user_emails_user_id ON user_emails(user_id)`);
+  } catch (err) {
+    console.log('user_emails index error:', err.message);
+  }
+
+  // Email inbox table (received/simulated emails and their processing status)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_inbox (
+      id TEXT PRIMARY KEY,
+      from_email TEXT NOT NULL,
+      from_name TEXT DEFAULT '',
+      subject TEXT DEFAULT '',
+      body TEXT NOT NULL,
+      classification TEXT DEFAULT 'pending',
+      confidence REAL DEFAULT 0,
+      extracted_data TEXT DEFAULT '{}',
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'review')),
+      action_type TEXT,
+      action_id TEXT,
+      action_summary TEXT DEFAULT '',
+      error_message TEXT DEFAULT '',
+      user_id TEXT,
+      team_id TEXT,
+      created_at TEXT NOT NULL,
+      processed_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+    )
+  `);
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_email_inbox_user_id ON email_inbox(user_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_email_inbox_team_id ON email_inbox(team_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_email_inbox_status ON email_inbox(status)`);
+  } catch (err) {
+    console.log('email_inbox index error:', err.message);
+  }
+
+  // Consultant requests table (extracted from emails, with candidate matching)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS consultant_requests (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      required_skills TEXT DEFAULT '',
+      role TEXT DEFAULT '',
+      client_name TEXT DEFAULT '',
+      client_email TEXT DEFAULT '',
+      urgency TEXT DEFAULT 'normal' CHECK (urgency IN ('low', 'normal', 'high', 'urgent')),
+      status TEXT DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'filled', 'closed')),
+      matched_candidates TEXT DEFAULT '[]',
+      email_inbox_id TEXT,
+      team_id TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (email_inbox_id) REFERENCES email_inbox(id),
+      FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )
+  `);
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_consultant_requests_team_id ON consultant_requests(team_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_consultant_requests_status ON consultant_requests(status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_consultant_requests_created_by ON consultant_requests(created_by)`);
+  } catch (err) {
+    console.log('consultant_requests index error:', err.message);
+  }
+
+  // Add resume_text column to candidates for caching extracted text
+  addColumnIfNotExists('candidates', 'resume_text', "TEXT DEFAULT ''");
+
+  // Migrate todos linked_type to also allow 'general' for email-generated todos
+  migrateTodosLinkedTypeGeneral();
 
   // Find the first user to assign orphaned data to
   const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();

@@ -1356,6 +1356,8 @@ function getLinkedEntityName(linkedType, linkedId) {
   } else if (linkedType === 'candidate') {
     const candidate = db.prepare('SELECT name FROM candidates WHERE id = ?').get(linkedId);
     return candidate ? { name: candidate.name, companyName: null } : null;
+  } else if (linkedType === 'general') {
+    return { name: 'General', companyName: null };
   }
   return null;
 }
@@ -2007,6 +2009,203 @@ function deleteOffer(candidateId, offerId, userId) {
   };
 }
 
+// ============ User Emails (Authorized Sender Addresses) ============
+
+function getUserEmails(userId) {
+  const rows = db.prepare('SELECT * FROM user_emails WHERE user_id = ? ORDER BY created_at ASC').all(userId);
+  return rows.map(toCamelCase);
+}
+
+function addUserEmail(userId, email, label) {
+  const id = generateId();
+  const now = getTimestamp();
+  // Check if this email is already registered by anyone
+  const existing = db.prepare('SELECT id, user_id FROM user_emails WHERE email = ?').get(email);
+  if (existing) {
+    if (existing.user_id === userId) return { error: 'You have already added this email' };
+    return { error: 'This email is registered by another user' };
+  }
+  db.prepare('INSERT INTO user_emails (id, user_id, email, label, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(id, userId, email.toLowerCase().trim(), label || '', now);
+  return { id, userId, email: email.toLowerCase().trim(), label: label || '', createdAt: now };
+}
+
+function removeUserEmail(emailId, userId) {
+  const row = db.prepare('SELECT * FROM user_emails WHERE id = ? AND user_id = ?').get(emailId, userId);
+  if (!row) return { error: 'Email not found' };
+  db.prepare('DELETE FROM user_emails WHERE id = ?').run(emailId);
+  return { deleted: true };
+}
+
+function findUserByAuthorizedEmail(email) {
+  const row = db.prepare(`
+    SELECT ue.user_id, u.username, u.team_id
+    FROM user_emails ue
+    JOIN users u ON u.id = ue.user_id
+    WHERE ue.email = ?
+  `).get(email.toLowerCase().trim());
+  return row ? toCamelCase(row) : null;
+}
+
+// ============ Email Inbox ============
+
+function getAllInboxEmails(userId) {
+  const teamId = getUserTeamId(userId);
+  let rows;
+  if (teamId) {
+    rows = db.prepare('SELECT * FROM email_inbox WHERE team_id = ? ORDER BY created_at DESC').all(teamId);
+  } else {
+    rows = db.prepare('SELECT * FROM email_inbox WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+  }
+  return rows.map(r => {
+    const obj = toCamelCase(r);
+    obj.extractedData = JSON.parse(r.extracted_data || '{}');
+    return obj;
+  });
+}
+
+function getInboxEmailById(emailId, userId) {
+  const teamId = getUserTeamId(userId);
+  let row;
+  if (teamId) {
+    row = db.prepare('SELECT * FROM email_inbox WHERE id = ? AND team_id = ?').get(emailId, teamId);
+  } else {
+    row = db.prepare('SELECT * FROM email_inbox WHERE id = ? AND user_id = ?').get(emailId, userId);
+  }
+  if (!row) return null;
+  const obj = toCamelCase(row);
+  obj.extractedData = JSON.parse(row.extracted_data || '{}');
+  return obj;
+}
+
+function createInboxEmail({ fromEmail, fromName, subject, body, userId, teamId }) {
+  const id = generateId();
+  const now = getTimestamp();
+  db.prepare(`
+    INSERT INTO email_inbox (id, from_email, from_name, subject, body, user_id, team_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, fromEmail, fromName || '', subject || '', body, userId, teamId || null, now);
+  return { id, fromEmail, fromName: fromName || '', subject: subject || '', body, status: 'pending', classification: 'pending', userId, teamId, createdAt: now };
+}
+
+function updateInboxEmail(emailId, updates) {
+  const sets = [];
+  const values = [];
+  if (updates.classification !== undefined) { sets.push('classification = ?'); values.push(updates.classification); }
+  if (updates.confidence !== undefined) { sets.push('confidence = ?'); values.push(updates.confidence); }
+  if (updates.extractedData !== undefined) { sets.push('extracted_data = ?'); values.push(JSON.stringify(updates.extractedData)); }
+  if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
+  if (updates.actionType !== undefined) { sets.push('action_type = ?'); values.push(updates.actionType); }
+  if (updates.actionId !== undefined) { sets.push('action_id = ?'); values.push(updates.actionId); }
+  if (updates.actionSummary !== undefined) { sets.push('action_summary = ?'); values.push(updates.actionSummary); }
+  if (updates.errorMessage !== undefined) { sets.push('error_message = ?'); values.push(updates.errorMessage); }
+  if (updates.processedAt !== undefined) { sets.push('processed_at = ?'); values.push(updates.processedAt); }
+  if (sets.length === 0) return;
+  values.push(emailId);
+  db.prepare(`UPDATE email_inbox SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+function deleteInboxEmail(emailId, userId) {
+  const email = getInboxEmailById(emailId, userId);
+  if (!email) return { error: 'Email not found' };
+  db.prepare('DELETE FROM email_inbox WHERE id = ?').run(emailId);
+  return { deleted: true };
+}
+
+// ============ Consultant Requests ============
+
+function getAllConsultantRequests(userId) {
+  const teamId = getUserTeamId(userId);
+  let rows;
+  if (teamId) {
+    rows = db.prepare('SELECT * FROM consultant_requests WHERE team_id = ? ORDER BY created_at DESC').all(teamId);
+  } else {
+    rows = db.prepare('SELECT * FROM consultant_requests WHERE created_by = ? ORDER BY created_at DESC').all(userId);
+  }
+  return rows.map(r => {
+    const obj = toCamelCase(r);
+    obj.matchedCandidates = JSON.parse(r.matched_candidates || '[]');
+    return obj;
+  });
+}
+
+function getConsultantRequestById(requestId, userId) {
+  const teamId = getUserTeamId(userId);
+  let row;
+  if (teamId) {
+    row = db.prepare('SELECT * FROM consultant_requests WHERE id = ? AND team_id = ?').get(requestId, teamId);
+  } else {
+    row = db.prepare('SELECT * FROM consultant_requests WHERE id = ? AND created_by = ?').get(requestId, userId);
+  }
+  if (!row) return null;
+  const obj = toCamelCase(row);
+  obj.matchedCandidates = JSON.parse(row.matched_candidates || '[]');
+  return obj;
+}
+
+function createConsultantRequest({ title, description, requiredSkills, role, clientName, clientEmail, urgency, emailInboxId }, userId) {
+  const teamId = getUserTeamId(userId);
+  const id = generateId();
+  const now = getTimestamp();
+  db.prepare(`
+    INSERT INTO consultant_requests (id, title, description, required_skills, role, client_name, client_email, urgency, email_inbox_id, team_id, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, title, description || '', requiredSkills || '', role || '', clientName || '', clientEmail || '', urgency || 'normal', emailInboxId || null, teamId, userId, now, now);
+  return { id, title, description: description || '', requiredSkills: requiredSkills || '', role: role || '', clientName: clientName || '', clientEmail: clientEmail || '', urgency: urgency || 'normal', status: 'open', matchedCandidates: [], emailInboxId, createdAt: now, updatedAt: now };
+}
+
+function updateConsultantRequest(requestId, updates, userId) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return null;
+  const now = getTimestamp();
+  const sets = ['updated_at = ?'];
+  const values = [now];
+  if (updates.title !== undefined) { sets.push('title = ?'); values.push(updates.title); }
+  if (updates.description !== undefined) { sets.push('description = ?'); values.push(updates.description); }
+  if (updates.requiredSkills !== undefined) { sets.push('required_skills = ?'); values.push(updates.requiredSkills); }
+  if (updates.role !== undefined) { sets.push('role = ?'); values.push(updates.role); }
+  if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
+  if (updates.matchedCandidates !== undefined) { sets.push('matched_candidates = ?'); values.push(JSON.stringify(updates.matchedCandidates)); }
+  values.push(requestId);
+  db.prepare(`UPDATE consultant_requests SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  return getConsultantRequestById(requestId, userId);
+}
+
+function deleteConsultantRequest(requestId, userId) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return { error: 'Request not found' };
+  if (!canDeleteEntity(userId, { created_by: request.createdBy })) {
+    return { error: 'Permission denied' };
+  }
+  db.prepare('DELETE FROM consultant_requests WHERE id = ?').run(requestId);
+  return { deleted: true };
+}
+
+// ============ Candidate Resume Text ============
+
+function updateCandidateResumeText(candidateId, resumeText) {
+  db.prepare('UPDATE candidates SET resume_text = ? WHERE id = ?').run(resumeText, candidateId);
+}
+
+function getCandidatesWithResumes(userId) {
+  const teamId = getUserTeamId(userId);
+  let rows;
+  if (teamId) {
+    rows = db.prepare(`
+      SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone
+      FROM candidates c
+      WHERE c.team_id = ? AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
+    `).all(teamId);
+  } else {
+    rows = db.prepare(`
+      SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone
+      FROM candidates c
+      WHERE c.created_by = ? AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
+    `).all(userId);
+  }
+  return rows.map(toCamelCase);
+}
+
 module.exports = {
   // Utilities
   generateId,
@@ -2109,5 +2308,29 @@ module.exports = {
   getInvitationsByTeam,
   acceptInvitation,
   declineInvitation,
-  cancelInvitation
+  cancelInvitation,
+
+  // User Emails
+  getUserEmails,
+  addUserEmail,
+  removeUserEmail,
+  findUserByAuthorizedEmail,
+
+  // Email Inbox
+  getAllInboxEmails,
+  getInboxEmailById,
+  createInboxEmail,
+  updateInboxEmail,
+  deleteInboxEmail,
+
+  // Consultant Requests
+  getAllConsultantRequests,
+  getConsultantRequestById,
+  createConsultantRequest,
+  updateConsultantRequest,
+  deleteConsultantRequest,
+
+  // Candidate Resume Text
+  updateCandidateResumeText,
+  getCandidatesWithResumes
 };

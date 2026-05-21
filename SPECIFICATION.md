@@ -160,6 +160,44 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      create offers for any candidate they can see and can delete their own;
      the team owner can delete any offer.
 
+12. **AI Email Inbox**
+   - Emails sent to the system are classified by Claude AI and trigger automatic
+     CRM actions based on content.
+   - **Authorized sender addresses**: Each user registers their email addresses
+     (work, personal, etc.) in Settings. Only emails from registered addresses
+     are processed; unrecognized senders are silently discarded.
+   - **Email classification**: Each incoming email is sent to Claude AI
+     (claude-sonnet-4-20250514) which classifies it as one of:
+     - `new_contact` — extract name, email, phone, title, company, department
+       and create a contact (and company if needed). Duplicates detected by email match.
+     - `consultant_request` — extract request details (title, description,
+       required skills, role, client info, urgency) and create a consultant
+       request entry. AI-powered candidate matching ranks all candidates with
+       resumes against the request.
+     - `todo` — extract a task summary and create a ToDo. If the sender matches
+       a known contact, the ToDo is linked to that contact; otherwise linked as
+       `general` type.
+   - **Confidence threshold**: classifications with confidence < 70% are marked
+     for manual review instead of auto-executing.
+   - **Resume text extraction**: PDF (pdf-parse) and DOCX (mammoth) resumes are
+     parsed to text and cached in `candidates.resume_text` for AI matching.
+   - **Candidate matching**: For consultant requests, each candidate's resume
+     text + skills are sent to Claude AI alongside the request, producing a
+     ranked list with scores (0-100) and reasoning.
+   - **Temporary simulation UI**: A "Simulate Email" button in the Inbox tab
+     allows pasting an email (from, subject, body) to test the pipeline without
+     a real inbound email service. Will be replaced by a webhook endpoint
+     (SendGrid Inbound Parse, Mailgun, or Cloudflare Email Workers) once an
+     inbound email provider is configured.
+   - **Inbox tab**: Shows all received emails with status (pending/processing/
+     completed/failed/review), classification, action summary. Click for detail
+     view with original email, extracted data, and link to created entity.
+   - **Requests tab**: Lists all consultant requests with client, required skills,
+     match count, status (open/in_progress/filled/closed), and date. Detail view
+     shows matched candidates ranked by AI score with reasoning.
+   - **New dependencies**: `@anthropic-ai/sdk`, `pdf-parse`, `mammoth`
+   - **New env var**: `ANTHROPIC_API_KEY`
+
 ### Non-Functional Requirements
 
 - Multi-user support with authentication
@@ -185,6 +223,9 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 | Styling | Tailwind CSS (CDN) | Modern light theme, minimal effort |
 | DOCX templating | unzipper + archiver | Read/write .docx as zip; placeholder substitution in `word/document.xml` |
 | PDF generation | pdfkit | Generates the variable-salary attachment PDF |
+| AI Classification | @anthropic-ai/sdk | Claude AI email classification & candidate matching |
+| PDF text extraction | pdf-parse | Extract text from PDF resumes for AI matching |
+| DOCX text extraction | mammoth | Extract text from DOCX resumes for AI matching |
 
 ---
 
@@ -408,6 +449,67 @@ CREATE TABLE candidate_comments (
 )
 ```
 
+#### User Emails Table
+```sql
+CREATE TABLE user_emails (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  label TEXT DEFAULT '',
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)
+```
+
+#### Email Inbox Table
+```sql
+CREATE TABLE email_inbox (
+  id TEXT PRIMARY KEY,
+  from_email TEXT NOT NULL,
+  from_name TEXT DEFAULT '',
+  subject TEXT DEFAULT '',
+  body TEXT NOT NULL,
+  classification TEXT DEFAULT 'pending',
+  confidence REAL DEFAULT 0,
+  extracted_data TEXT DEFAULT '{}',
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'review')),
+  action_type TEXT,
+  action_id TEXT,
+  action_summary TEXT DEFAULT '',
+  error_message TEXT DEFAULT '',
+  user_id TEXT,
+  team_id TEXT,
+  created_at TEXT NOT NULL,
+  processed_at TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+)
+```
+
+#### Consultant Requests Table
+```sql
+CREATE TABLE consultant_requests (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  required_skills TEXT DEFAULT '',
+  role TEXT DEFAULT '',
+  client_name TEXT DEFAULT '',
+  client_email TEXT DEFAULT '',
+  urgency TEXT DEFAULT 'normal' CHECK (urgency IN ('low', 'normal', 'high', 'urgent')),
+  status TEXT DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'filled', 'closed')),
+  matched_candidates TEXT DEFAULT '[]',
+  email_inbox_id TEXT,
+  team_id TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (email_inbox_id) REFERENCES email_inbox(id),
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+)
+```
+
 ### Field Descriptions
 
 #### User Fields
@@ -487,7 +589,7 @@ Every view/modal that presents a text input auto-focuses the topmost relevant fi
 
 ### Navigation
 
-Main navigation tabs: **Contacts | Companies | Candidates | ToDos**
+Main navigation tabs: **Contacts | Companies | Candidates | ToDos | Inbox | Requests**
 
 ### Pages/Views
 
@@ -585,7 +687,10 @@ VibeCodingProject/
 │   │   ├── salary-model.js       # Variable-salary model (port of Rörligtmål)
 │   │   ├── contract-template.js  # Fills the contract docx template
 │   │   ├── offer-pdf.js          # Renders the salary attachment PDF (pdfkit)
-│   │   └── eml-builder.js        # Builds Outlook-draft .eml with attachments
+│   │   ├── eml-builder.js        # Builds Outlook-draft .eml with attachments
+│   │   ├── email-classifier.js  # Claude AI email classification & extraction
+│   │   ├── resume-parser.js     # PDF/DOCX text extraction for resumes
+│   │   └── candidate-matcher.js # AI-powered candidate-to-request matching
 │   ├── middleware/
 │   │   └── auth.js        # Authentication middleware
 │   └── routes/
@@ -601,7 +706,10 @@ VibeCodingProject/
 │       ├── team.js        # Team management routes
 │       ├── invitations.js # Invitation routes
 │       ├── archive.js     # Archive viewing routes
-│       └── backup.js      # Export/Import routes
+│       ├── backup.js      # Export/Import routes
+│       ├── inbox.js       # AI Email Inbox routes
+│       ├── requests.js    # Consultant request routes
+│       └── user-emails.js # User email management routes
 └── scripts/
     ├── build-contract-template.js # One-shot: build templates/contract-template.docx
     ├── migrate-json-to-sqlite.js  # Migration script
@@ -739,6 +847,34 @@ VibeCodingProject/
 |--------|----------|-------------|
 | GET | /api/search?q=term | Search companies and contacts |
 
+### User Emails (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/user-emails | List current user's registered email addresses |
+| POST | /api/user-emails | Add a new authorized email address |
+| DELETE | /api/user-emails/:id | Remove an authorized email address |
+
+### AI Email Inbox (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/inbox | List all inbox emails |
+| GET | /api/inbox/:id | Get single inbox email with details |
+| POST | /api/inbox/simulate | Simulate receiving an email (temp dev UI) |
+| POST | /api/inbox/:id/reprocess | Reprocess a failed/review email |
+| DELETE | /api/inbox/:id | Delete an inbox email |
+| POST | /api/inbox/extract-resumes | Extract text from all candidate resumes |
+
+### Consultant Requests (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/requests | List all consultant requests |
+| GET | /api/requests/:id | Get single request with enriched match details |
+| PUT | /api/requests/:id | Update request (status, etc.) |
+| DELETE | /api/requests/:id | Delete a request |
+
 ### Health Check
 
 | Method | Endpoint | Description |
@@ -757,6 +893,7 @@ VibeCodingProject/
 | NODE_ENV | Environment (production/development) | development |
 | DATABASE_PATH | Path to SQLite database | ./data/crm.db |
 | SESSION_SECRET | Secret for session encryption | dev-secret-change-in-production |
+| ANTHROPIC_API_KEY | API key for Claude AI (email classification & matching) | (required for AI Inbox) |
 
 ### Railway Deployment
 
@@ -782,7 +919,7 @@ Resume uploads are stored in the same volume directory (`/data/uploads`).
 - [ ] Favorite/pin important contacts
 - [ ] Company-level notes
 - [ ] Candidate status tracking (pipeline stages)
-- [ ] Email integration
+- [x] ~~Email integration~~ (Implemented — AI Email Inbox with classification)
 - [ ] Calendar integration for ToDos
 - [x] ~~JSON data backup and restore~~ (Implemented)
 - [x] ~~Archive/soft delete for companies and contacts~~ (Implemented)
