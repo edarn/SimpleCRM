@@ -2,6 +2,7 @@ const express = require('express');
 const data = require('../data');
 const path = require('path');
 const fs = require('fs');
+const { validateFileMagic } = require('../middleware/file-validate');
 
 // Fix multer's latin1 encoding of originalname for Swedish characters
 function fixOriginalName(file) {
@@ -44,6 +45,15 @@ router.get('/:id', (req, res) => {
 // POST /api/candidates - Create new candidate (multipart/form-data)
 router.post('/', upload.single('resume'), (req, res) => {
   try {
+    // Validate file magic bytes if a file was uploaded
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      if (!validateFileMagic(req.file.path, ext)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(400).json({ error: 'File content does not match its extension. Upload rejected.' });
+      }
+    }
+
     const userId = req.session.userId;
     const { name, email, phone, role, skills, category } = req.body;
 
@@ -93,6 +103,15 @@ router.post('/', upload.single('resume'), (req, res) => {
 // PUT /api/candidates/:id - Update candidate (multipart/form-data)
 router.put('/:id', upload.single('resume'), (req, res) => {
   try {
+    // Validate file magic bytes if a file was uploaded
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      if (!validateFileMagic(req.file.path, ext)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(400).json({ error: 'File content does not match its extension. Upload rejected.' });
+      }
+    }
+
     const userId = req.session.userId;
     const { name, email, phone, role, skills, category } = req.body;
 
@@ -206,6 +225,15 @@ router.delete('/:id', (req, res) => {
 // POST /api/candidates/:id/files - Upload file to candidate
 router.post('/:id/files', upload.single('file'), (req, res) => {
   try {
+    // Validate file magic bytes
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      if (!validateFileMagic(req.file.path, ext)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(400).json({ error: 'File content does not match its extension. Upload rejected.' });
+      }
+    }
+
     const userId = req.session.userId;
     const candidate = data.getCandidateById(req.params.id, userId);
 
@@ -264,9 +292,11 @@ router.get('/:id/files/:fileId', (req, res) => {
     if (req.query.inline === 'true') {
       const encodedName = encodeURIComponent(file.originalName);
       res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedName}`);
-      if (file.mimeType) {
-        res.setHeader('Content-Type', file.mimeType);
-      }
+      // Only allow safe MIME types for inline viewing — never trust DB value directly
+      const ext = path.extname(file.filename).toLowerCase();
+      const safeMimeTypes = { '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+      res.setHeader('Content-Type', safeMimeTypes[ext] || 'application/octet-stream');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       return res.sendFile(filePath);
     }
 

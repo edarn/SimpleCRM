@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const data = require('../data');
+const { validateFileMagic } = require('../middleware/file-validate');
 
 module.exports = (logoUpload, uploadsDir) => {
 const router = express.Router();
@@ -220,6 +221,13 @@ router.post('/logo', logoUpload.single('logo'), (req, res) => {
 
     if (!req.file) {
       return res.status(400).json({ error: 'No logo file uploaded' });
+    }
+
+    // Validate file magic bytes
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (!validateFileMagic(req.file.path, ext)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(400).json({ error: 'File content does not match its extension. Upload rejected.' });
     }
 
     // Delete old logo if exists

@@ -624,7 +624,11 @@ const router = {
       }
     } catch (err) {
       if (err.message !== 'Authentication required') {
-        app.innerHTML = `<div class="text-red-600">Error: ${err.message}</div>`;
+        const errDiv = document.createElement('div');
+        errDiv.className = 'text-red-600';
+        errDiv.textContent = 'Error: ' + err.message;
+        app.innerHTML = '';
+        app.appendChild(errDiv);
       }
     }
 
@@ -4565,6 +4569,27 @@ const views = {
           <div id="user-email-message" class="mt-2 text-sm hidden"></div>
         </div>
 
+        <!-- Change Password -->
+        <div class="border-t border-slate-200 pt-6 mt-6">
+          <h3 class="text-lg font-semibold text-slate-800 mb-4">Change Password</h3>
+          <form onsubmit="views.changePassword(event)" class="max-w-sm">
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-slate-700 mb-1">Current Password</label>
+              <input type="password" id="current-password" required
+                     class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
+            </div>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-slate-700 mb-1">New Password</label>
+              <input type="password" id="new-password" required minlength="6"
+                     class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors">
+            </div>
+            <button type="submit" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-4 py-2 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-medium shadow-sm text-sm">
+              Change Password
+            </button>
+          </form>
+          <div id="password-message" class="mt-2 text-sm hidden"></div>
+        </div>
+
         <!-- Data Backup Section -->
         <div class="border-t border-slate-200 pt-6 mt-6">
           <h3 class="text-lg font-semibold text-slate-800 mb-4">Data Backup</h3>
@@ -4648,6 +4673,33 @@ const views = {
       this.loadUserEmails();
     } catch (err) {
       msgEl.textContent = err.message || 'Failed to add email';
+      msgEl.className = 'mt-2 text-sm text-red-600';
+      msgEl.classList.remove('hidden');
+    }
+  },
+
+  async changePassword(e) {
+    e.preventDefault();
+    const msgEl = document.getElementById('password-message');
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: document.getElementById('current-password').value,
+          newPassword: document.getElementById('new-password').value
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to change password');
+      document.getElementById('current-password').value = '';
+      document.getElementById('new-password').value = '';
+      msgEl.textContent = 'Password changed successfully';
+      msgEl.className = 'mt-2 text-sm text-emerald-600';
+      msgEl.classList.remove('hidden');
+      setTimeout(() => msgEl.classList.add('hidden'), 5000);
+    } catch (err) {
+      msgEl.textContent = err.message;
       msgEl.className = 'mt-2 text-sm text-red-600';
       msgEl.classList.remove('hidden');
     }

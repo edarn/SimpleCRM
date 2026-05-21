@@ -558,6 +558,9 @@ function migrateExistingData() {
     console.log('consultant_requests index error:', err.message);
   }
 
+  // Add expires_at column to team_invitations for expiration
+  addColumnIfNotExists('team_invitations', 'expires_at', 'TEXT');
+
   // Add resume_text column to candidates for caching extracted text
   addColumnIfNotExists('candidates', 'resume_text', "TEXT DEFAULT ''");
 

@@ -4,7 +4,16 @@ const fs = require('fs');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
 const multer = require('multer');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { requireAuth } = require('./src/middleware/auth');
+const { enforceFieldLimits } = require('./src/middleware/validate');
+
+// Validate session secret in production
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET environment variable is required in production');
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,7 +59,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
-// Configure multer for logo uploads (images)
+// Configure multer for logo uploads (images — no SVG to prevent XSS)
 const logoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
@@ -63,12 +72,12 @@ const logoStorage = multer.diskStorage({
 });
 
 const logoFilter = (req, file, cb) => {
-  const allowedTypes = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
+  const allowedTypes = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
   if (allowedTypes.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Only image files (PNG, JPG, GIF, WebP, SVG) are allowed'), false);
+    cb(new Error('Only image files (PNG, JPG, GIF, WebP) are allowed'), false);
   }
 };
 
@@ -96,6 +105,7 @@ const sessionConfig = {
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   }
 };
@@ -105,8 +115,42 @@ if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
-// Middleware
-app.use(express.json());
+// Security headers via helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    }
+  },
+  crossOriginEmbedderPolicy: false // needed for CDN resources
+}));
+
+// Rate limiting — strict on auth, general on API
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 attempts per 15 minutes
+  message: { error: 'Too many attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 120, // 120 requests per minute
+  message: { error: 'Too many requests, please slow down' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Limit request body size
+app.use(express.json({ limit: '1mb' }));
 app.use(session(sessionConfig));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -115,8 +159,12 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Auth routes (no authentication required)
-app.use('/api/auth', require('./src/routes/auth'));
+// Auth routes (no authentication required, but rate-limited)
+app.use('/api/auth', authLimiter, require('./src/routes/auth'));
+
+// Apply general rate limit and input validation to all API routes
+app.use('/api/', apiLimiter);
+app.use('/api/', enforceFieldLimits);
 
 // Protected API routes (authentication required)
 app.use('/api/companies', requireAuth, require('./src/routes/companies'));
@@ -136,8 +184,13 @@ app.use('/api/candidates/:candidateId/offers', requireAuth, require('./src/route
 app.use('/api/team', requireAuth, require('./src/routes/team')(logoUpload, uploadsDir));
 app.use('/api/invitations', requireAuth, require('./src/routes/invitations'));
 
-// Serve uploaded files (logos, resumes)
-app.use('/uploads', express.static(uploadsDir));
+// Serve uploaded files with security headers (no MIME sniffing, no caching of sensitive files)
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'");
+  res.setHeader('Cache-Control', 'private, no-cache');
+  next();
+}, express.static(uploadsDir));
 
 // User emails (authorized sender addresses)
 app.use('/api/user-emails', requireAuth, require('./src/routes/user-emails'));

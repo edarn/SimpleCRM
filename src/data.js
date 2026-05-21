@@ -249,10 +249,12 @@ function createInvitation(inviterId, email) {
     return { error: 'Invitation already sent to this email' };
   }
 
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
   db.prepare(`
-    INSERT INTO team_invitations (id, team_id, inviter_id, email, status, created_at)
-    VALUES (?, ?, ?, ?, 'pending', ?)
-  `).run(id, teamId, inviterId, email, now);
+    INSERT INTO team_invitations (id, team_id, inviter_id, email, status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+  `).run(id, teamId, inviterId, email, now, expiresAt);
 
   return {
     id,
@@ -260,7 +262,8 @@ function createInvitation(inviterId, email) {
     inviterId,
     email,
     status: 'pending',
-    createdAt: now
+    createdAt: now,
+    expiresAt
   };
 }
 
@@ -286,6 +289,10 @@ function getInvitationById(invitationId) {
 }
 
 function getInvitationsByEmail(email) {
+  const now = getTimestamp();
+  // Auto-expire old invitations
+  db.prepare(`DELETE FROM team_invitations WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < ?`).run(now);
+
   const rows = db.prepare(`
     SELECT ti.*, u.username as inviter_username
     FROM team_invitations ti
@@ -306,6 +313,9 @@ function getInvitationsByEmail(email) {
 }
 
 function getInvitationsByTeam(teamId) {
+  const now = getTimestamp();
+  db.prepare(`DELETE FROM team_invitations WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < ?`).run(now);
+
   const rows = db.prepare(`
     SELECT ti.*, u.username as inviter_username
     FROM team_invitations ti
@@ -398,6 +408,11 @@ function getUsernameById(userId) {
   if (!userId) return null;
   const user = db.prepare('SELECT username FROM users WHERE id = ?').get(userId);
   return user?.username || null;
+}
+
+function updateUserPassword(userId, newPasswordHash) {
+  const now = getTimestamp();
+  db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(newPasswordHash, now, userId);
 }
 
 // ============ Company Functions ============
@@ -2259,6 +2274,7 @@ module.exports = {
   getUserById,
   createUser,
   getUsernameById,
+  updateUserPassword,
 
   // Candidates
   getAllCandidates,
