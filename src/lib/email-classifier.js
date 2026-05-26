@@ -21,17 +21,19 @@ async function classifyEmail({ fromEmail, fromName, subject, body }) {
 
 The input may be a raw pasted email with headers (From, To, Subject, Date), a plain message, or an entire conversation thread with multiple replies. Parse and understand the full content.
 
-IMPORTANT: A single email can contain MULTIPLE actionable items. For example, one email might:
-- Introduce a new contact AND request a consultant
-- Request a consultant AND contain a task to follow up
-- Introduce multiple new contacts
-- Contain both a consultant request and action items
+IMPORTANT: A single email can contain MULTIPLE actionable items. Extract ALL actions you find. Return an array even if there is only one action.
 
-Extract ALL actions you find. Return an array even if there is only one action.
+CRITICAL RULE — ALWAYS create a "new_contact" action for every person in the email who is NOT the CRM user. The CRM user is the person pasting the email (typically "Thomas Hermansson" or similar). Every OTHER person who appears in the conversation with an email address should get a new_contact action. This includes:
+- The person the user is emailing with (From/To headers)
+- People mentioned by name with contact details
+- People in CC
+- People referenced in email signatures
+
+Even if the email is primarily a consultant request or a todo, ALSO add new_contact actions for the people involved. For example, if Lotta from Axis sends a consultant request, you should create BOTH a new_contact for Lotta AND a consultant_request.
 
 Action types:
 
-1. "new_contact" - The email introduces a person or contains contact information for someone who should be added to the contact database. This includes introductions, business cards, "meet our new colleague" emails, forwarded contact details, email signatures with contact info, etc. If the sender themselves is a new contact, include them too.
+1. "new_contact" - A person who should be added to the contact database. Extract their name, email, phone, title, company from headers, signatures, or message body. ALWAYS include this for external parties in the conversation.
 
 2. "consultant_request" - The email contains a request for a consultant, contractor, or resource. It describes a role/position to fill, skills needed, or asks if you have someone available for a project/assignment.
 
