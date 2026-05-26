@@ -649,7 +649,9 @@ function focusAutofocus(container) {
 // Modal helper
 const modal = {
   show(content) {
-    document.getElementById('modal-content').innerHTML = content;
+    if (content !== undefined) {
+      document.getElementById('modal-content').innerHTML = content;
+    }
     document.getElementById('modal').classList.remove('hidden');
     focusAutofocus(document.getElementById('modal-content'));
   },
