@@ -5267,31 +5267,21 @@ const views = {
   showSimulateEmailModal() {
     const content = document.getElementById('modal-content');
     content.innerHTML = `
-      <h3 class="text-lg font-semibold text-slate-800 mb-4">Simulate Incoming Email</h3>
-      <p class="text-sm text-slate-500 mb-4">Paste an email to simulate receiving it. The sender email must be registered in your settings.</p>
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Paste Email</h3>
+      <p class="text-sm text-slate-500 mb-4">Paste the raw email content below. Can be a single email or a conversation thread. The AI will extract sender, subject and content automatically.</p>
       <form onsubmit="views.submitSimulatedEmail(event)">
-        <div class="space-y-3">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">From Email *</label>
-            <input type="email" id="sim-from-email" required autofocus
-                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">From Name</label>
-            <input type="text" id="sim-from-name"
-                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Subject</label>
-            <input type="text" id="sim-subject"
-                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Email Body *</label>
-            <textarea id="sim-body" rows="8" required
-                      class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Paste the email content here..."></textarea>
-          </div>
+        <div>
+          <textarea id="sim-raw-email" rows="14" required autofocus
+                    class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
+                    placeholder="Paste email here, e.g.:
+
+From: Johan Svensson <johan@example.com>
+Subject: Need a Java developer
+Date: 2026-05-26
+
+Hi Thomas,
+
+We're looking for a senior Java developer..."></textarea>
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
@@ -5311,15 +5301,13 @@ const views = {
     submitBtn.textContent = 'Processing...';
 
     try {
+      const rawEmail = document.getElementById('sim-raw-email').value.trim();
+      if (!rawEmail) throw new Error('Please paste an email');
+
       const res = await fetch('/api/inbox/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fromEmail: document.getElementById('sim-from-email').value.trim(),
-          fromName: document.getElementById('sim-from-name').value.trim(),
-          subject: document.getElementById('sim-subject').value.trim(),
-          body: document.getElementById('sim-body').value
-        })
+        body: JSON.stringify({ rawEmail })
       });
       const data = await res.json();
       if (!res.ok) {

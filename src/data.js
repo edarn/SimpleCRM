@@ -2106,6 +2106,9 @@ function createInboxEmail({ fromEmail, fromName, subject, body, userId, teamId }
 function updateInboxEmail(emailId, updates) {
   const sets = [];
   const values = [];
+  if (updates.fromEmail !== undefined) { sets.push('from_email = ?'); values.push(updates.fromEmail); }
+  if (updates.fromName !== undefined) { sets.push('from_name = ?'); values.push(updates.fromName); }
+  if (updates.subject !== undefined) { sets.push('subject = ?'); values.push(updates.subject); }
   if (updates.classification !== undefined) { sets.push('classification = ?'); values.push(updates.classification); }
   if (updates.confidence !== undefined) { sets.push('confidence = ?'); values.push(updates.confidence); }
   if (updates.extractedData !== undefined) { sets.push('extracted_data = ?'); values.push(JSON.stringify(updates.extractedData)); }

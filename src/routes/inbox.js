@@ -34,25 +34,30 @@ module.exports = function(uploadsDir) {
   });
 
   // POST /api/inbox/simulate - Simulate receiving an email (temporary dev UI)
+  // Accepts { rawEmail } — a single pasted blob that the AI will parse
   router.post('/simulate', async (req, res) => {
     try {
-      const { fromEmail, fromName, subject, body } = req.body;
-      if (!fromEmail || !body) {
-        return res.status(400).json({ error: 'fromEmail and body are required' });
+      const { rawEmail } = req.body;
+      if (!rawEmail || !rawEmail.trim()) {
+        return res.status(400).json({ error: 'rawEmail is required' });
       }
 
-      // Check if sender is an authorized email
-      const authorizedUser = data.findUserByAuthorizedEmail(fromEmail);
-      if (!authorizedUser) {
-        return res.status(403).json({ error: 'Sender email is not registered as an authorized address. Add it in your settings first.' });
-      }
+      // Use the logged-in user as the actor (authorized by being logged in)
+      const userId = req.session.userId;
+      const teamId = data.getUserTeamId(userId) || null;
 
-      const userId = authorizedUser.userId;
-      const teamId = authorizedUser.teamId || null;
+      // Try to extract a from-email from the raw text for display purposes
+      const fromMatch = rawEmail.match(/[Ff]rom:\s*(?:.*<)?([^\s<>]+@[^\s<>]+)>?/);
+      const subjectMatch = rawEmail.match(/[Ss]ubject:\s*(.+)/);
+      const fromEmail = fromMatch ? fromMatch[1].trim() : '';
+      const subject = subjectMatch ? subjectMatch[1].trim() : '';
 
-      // Create inbox entry
+      // Create inbox entry with the raw email as body
       const inboxEntry = data.createInboxEmail({
-        fromEmail, fromName: fromName || '', subject: subject || '', body,
+        fromEmail: fromEmail || 'pasted',
+        fromName: '',
+        subject: subject || '(pasted email)',
+        body: rawEmail.trim(),
         userId, teamId
       });
 
@@ -184,11 +189,23 @@ module.exports = function(uploadsDir) {
       body: email.body
     });
 
-    data.updateInboxEmail(emailId, {
+    // Update with classification results and AI-extracted sender info
+    const updates = {
       classification: classification.classification,
       confidence: classification.confidence,
       extractedData: classification.extracted
-    });
+    };
+    // If the AI extracted better sender/subject info, update those too
+    if (classification.sender_email && email.fromEmail === 'pasted') {
+      updates.fromEmail = classification.sender_email;
+    }
+    if (classification.sender_name && !email.fromName) {
+      updates.fromName = classification.sender_name;
+    }
+    if (classification.subject && email.subject === '(pasted email)') {
+      updates.subject = classification.subject;
+    }
+    data.updateInboxEmail(emailId, updates);
 
     // If confidence is low, mark for review
     if (classification.confidence < 0.7) {
