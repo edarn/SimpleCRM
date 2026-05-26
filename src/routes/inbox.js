@@ -120,40 +120,49 @@ module.exports = function(uploadsDir) {
       const teamId = data.getUserTeamId(userId);
 
       // Get all candidates that have files but no extracted text
-      let candidates;
-      if (teamId) {
-        candidates = require('../database').prepare(`
-          SELECT c.id, cf.filename, cf.original_name
-          FROM candidates c
-          JOIN candidate_files cf ON cf.candidate_id = c.id
-          WHERE c.team_id = ? AND (c.resume_text IS NULL OR c.resume_text = '')
-        `).all(teamId);
-      } else {
-        candidates = require('../database').prepare(`
-          SELECT c.id, cf.filename, cf.original_name
-          FROM candidates c
-          JOIN candidate_files cf ON cf.candidate_id = c.id
-          WHERE c.created_by = ? AND (c.resume_text IS NULL OR c.resume_text = '')
-        `).all(userId);
-      }
+      // Check both candidate_files table and legacy resume_filename column
+      const db = require('../database');
+      const whereClause = teamId ? 'c.team_id = ?' : 'c.created_by = ?';
+      const param = teamId || userId;
+
+      const candidates = db.prepare(`
+        SELECT DISTINCT c.id, c.name, c.skills, c.resume_filename,
+               cf.filename AS file_filename, cf.original_name AS file_original_name
+        FROM candidates c
+        LEFT JOIN candidate_files cf ON cf.candidate_id = c.id
+        WHERE ${whereClause} AND (c.resume_text IS NULL OR c.resume_text = '')
+      `).all(param);
 
       let extracted = 0;
+      let skipped = 0;
       for (const c of candidates) {
-        if (uploadsDir && c.filename) {
-          const filePath = path.join(uploadsDir, c.filename);
+        // Try candidate_files first, fall back to legacy resume_filename
+        const filename = c.file_filename || c.resume_filename;
+        let text = '';
+
+        if (uploadsDir && filename) {
+          const filePath = path.join(uploadsDir, filename);
           try {
-            const text = await extractTextFromFile(filePath);
-            if (text) {
-              data.updateCandidateResumeText(c.id, text);
-              extracted++;
-            }
+            text = await extractTextFromFile(filePath);
           } catch (err) {
-            console.error(`Error extracting resume for candidate ${c.id}:`, err.message);
+            console.error(`Error extracting resume for ${c.name} (${c.id}):`, err.message);
           }
+        }
+
+        // If file extraction failed (e.g. .doc format), use skills as fallback
+        if (!text && c.skills) {
+          text = `Skills: ${c.skills}`;
+        }
+
+        if (text) {
+          data.updateCandidateResumeText(c.id, text);
+          extracted++;
+        } else {
+          skipped++;
         }
       }
 
-      res.json({ message: `Extracted text from ${extracted} resumes`, total: candidates.length, extracted });
+      res.json({ message: `Extracted text from ${extracted} resumes` + (skipped > 0 ? ` (${skipped} had no extractable content)` : ''), total: candidates.length, extracted, skipped });
     } catch (err) {
       console.error('Error extracting resumes:', err);
       res.status(500).json({ error: 'Internal server error' });
