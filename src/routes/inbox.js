@@ -181,65 +181,96 @@ module.exports = function(uploadsDir) {
 
     data.updateInboxEmail(emailId, { status: 'processing' });
 
-    // Step 1: Classify the email using AI
-    const classification = await classifyEmail({
+    // Step 1: Classify the email using AI (returns multiple actions)
+    const result = await classifyEmail({
       fromEmail: email.fromEmail,
       fromName: email.fromName,
       subject: email.subject,
       body: email.body
     });
 
-    // Update with classification results and AI-extracted sender info
+    // Normalize: support both old single-action and new multi-action format
+    const actions = result.actions || [{
+      classification: result.classification,
+      confidence: result.confidence,
+      extracted: result.extracted
+    }];
+
+    // Update with AI-extracted sender info
     const updates = {
-      classification: classification.classification,
-      confidence: classification.confidence,
-      extractedData: classification.extracted
+      classification: actions.map(a => a.classification).join(', '),
+      confidence: Math.min(...actions.map(a => a.confidence)),
+      extractedData: actions.map(a => ({ classification: a.classification, ...a.extracted }))
     };
-    // If the AI extracted better sender/subject info, update those too
-    if (classification.sender_email && email.fromEmail === 'pasted') {
-      updates.fromEmail = classification.sender_email;
+    if (result.sender_email && email.fromEmail === 'pasted') {
+      updates.fromEmail = result.sender_email;
     }
-    if (classification.sender_name && !email.fromName) {
-      updates.fromName = classification.sender_name;
+    if (result.sender_name && !email.fromName) {
+      updates.fromName = result.sender_name;
     }
-    if (classification.subject && email.subject === '(pasted email)') {
-      updates.subject = classification.subject;
+    if (result.subject && email.subject === '(pasted email)') {
+      updates.subject = result.subject;
     }
     data.updateInboxEmail(emailId, updates);
 
-    // If confidence is low, mark for review
-    if (classification.confidence < 0.7) {
+    // If lowest confidence is below threshold, mark for review
+    const minConfidence = Math.min(...actions.map(a => a.confidence));
+    if (minConfidence < 0.7) {
       data.updateInboxEmail(emailId, {
         status: 'review',
-        actionSummary: `Low confidence (${Math.round(classification.confidence * 100)}%). Manual review recommended.`,
+        actionSummary: `Low confidence (${Math.round(minConfidence * 100)}%). ${actions.length} action(s) detected. Manual review recommended.`,
         processedAt: new Date().toISOString()
       });
       return;
     }
 
-    // Step 2: Execute the appropriate action
-    const ext = classification.extracted;
+    // Step 2: Execute all actions
+    const summaries = [];
+    const actionIds = [];
+    const actionTypes = [];
 
-    switch (classification.classification) {
-      case 'new_contact':
-        await handleNewContact(emailId, ext, userId);
-        break;
-      case 'consultant_request':
-        await handleConsultantRequest(emailId, ext, email, userId);
-        break;
-      case 'todo':
-        await handleTodo(emailId, ext, email, userId);
-        break;
-      default:
-        data.updateInboxEmail(emailId, {
-          status: 'failed',
-          errorMessage: `Unknown classification: ${classification.classification}`,
-          processedAt: new Date().toISOString()
-        });
+    for (const action of actions) {
+      try {
+        switch (action.classification) {
+          case 'new_contact': {
+            const r = await handleNewContact(action.extracted, userId);
+            summaries.push(r.summary);
+            actionTypes.push(r.type);
+            actionIds.push(r.id);
+            break;
+          }
+          case 'consultant_request': {
+            const r = await handleConsultantRequest(action.extracted, email, userId, emailId);
+            summaries.push(r.summary);
+            actionTypes.push(r.type);
+            actionIds.push(r.id);
+            break;
+          }
+          case 'todo': {
+            const r = await handleTodo(action.extracted, email, userId);
+            summaries.push(r.summary);
+            actionTypes.push(r.type);
+            actionIds.push(r.id);
+            break;
+          }
+          default:
+            summaries.push(`Unknown action: ${action.classification}`);
+        }
+      } catch (err) {
+        summaries.push(`Error: ${err.message}`);
+      }
     }
+
+    data.updateInboxEmail(emailId, {
+      status: 'completed',
+      actionType: actionTypes.join(', '),
+      actionId: actionIds.join(', '),
+      actionSummary: summaries.join(' | '),
+      processedAt: new Date().toISOString()
+    });
   }
 
-  async function handleNewContact(emailId, extracted, userId) {
+  async function handleNewContact(extracted, userId) {
     // Check if contact already exists by email
     if (extracted.email) {
       const allContacts = data.getAllContacts(userId);
@@ -247,14 +278,7 @@ module.exports = function(uploadsDir) {
         c.email && c.email.toLowerCase() === extracted.email.toLowerCase()
       );
       if (existing) {
-        data.updateInboxEmail(emailId, {
-          status: 'completed',
-          actionType: 'existing_contact',
-          actionId: existing.id,
-          actionSummary: `Contact "${existing.name}" already exists with this email.`,
-          processedAt: new Date().toISOString()
-        });
-        return;
+        return { type: 'existing_contact', id: existing.id, summary: `Contact "${existing.name}" already exists.` };
       }
     }
 
@@ -277,7 +301,6 @@ module.exports = function(uploadsDir) {
         companyId = newCompany.id;
       }
     } else {
-      // Need a company - create a placeholder
       const companies = data.getAllCompanies(userId);
       let unknownCompany = companies.find(c => c.name === 'Unknown Company');
       if (!unknownCompany) {
@@ -301,17 +324,10 @@ module.exports = function(uploadsDir) {
       phone: extracted.phone || ''
     }, userId);
 
-    data.updateInboxEmail(emailId, {
-      status: 'completed',
-      actionType: 'new_contact',
-      actionId: contact.id,
-      actionSummary: `Created contact "${contact.name}"${extracted.company ? ' at ' + extracted.company : ''}.`,
-      processedAt: new Date().toISOString()
-    });
+    return { type: 'new_contact', id: contact.id, summary: `Created contact "${contact.name}"${extracted.company ? ' at ' + extracted.company : ''}.` };
   }
 
-  async function handleConsultantRequest(emailId, extracted, email, userId) {
-    // Create the consultant request
+  async function handleConsultantRequest(extracted, email, userId, emailId) {
     const request = data.createConsultantRequest({
       title: extracted.title || email.subject || 'Consultant Request',
       description: extracted.description || '',
@@ -364,25 +380,16 @@ module.exports = function(uploadsDir) {
       }, candidates);
     }
 
-    data.updateConsultantRequest(request.id, {
-      matchedCandidates: matches
-    }, userId);
+    data.updateConsultantRequest(request.id, { matchedCandidates: matches }, userId);
 
     const matchSummary = matches.length > 0
       ? ` Matched ${matches.length} candidate(s), best: ${matches[0].score}% fit.`
       : ' No matching candidates found.';
 
-    data.updateInboxEmail(emailId, {
-      status: 'completed',
-      actionType: 'consultant_request',
-      actionId: request.id,
-      actionSummary: `Created request "${request.title}".${matchSummary}`,
-      processedAt: new Date().toISOString()
-    });
+    return { type: 'consultant_request', id: request.id, summary: `Created request "${request.title}".${matchSummary}` };
   }
 
-  async function handleTodo(emailId, extracted, email, userId) {
-    // Try to match sender to a contact
+  async function handleTodo(extracted, email, userId) {
     let linkedType = 'general';
     let linkedId = 'email';
 
@@ -404,17 +411,8 @@ module.exports = function(uploadsDir) {
       checklistId: null
     }, userId);
 
-    const linkedSummary = senderContact
-      ? ` Linked to contact "${senderContact.name}".`
-      : '';
-
-    data.updateInboxEmail(emailId, {
-      status: 'completed',
-      actionType: 'todo',
-      actionId: todo.id,
-      actionSummary: `Created ToDo "${todo.title}".${linkedSummary}`,
-      processedAt: new Date().toISOString()
-    });
+    const linkedSummary = senderContact ? ` Linked to "${senderContact.name}".` : '';
+    return { type: 'todo', id: todo.id, summary: `Created ToDo "${todo.title}".${linkedSummary}` };
   }
 
   return router;

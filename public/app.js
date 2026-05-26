@@ -5163,18 +5163,14 @@ const views = {
   async inboxDetail(container, emailId) {
     const email = await api.get(`/api/inbox/${emailId}`);
 
-    const classLabel = {
-      new_contact: 'New Contact',
-      consultant_request: 'Consultant Request',
-      todo: 'ToDo',
-      pending: 'Pending'
-    }[email.classification] || email.classification;
-
-    const classColor = {
-      new_contact: 'bg-sky-100 text-sky-800',
-      consultant_request: 'bg-violet-100 text-violet-800',
-      todo: 'bg-emerald-100 text-emerald-800'
-    }[email.classification] || 'bg-slate-100 text-slate-800';
+    const classMap = { new_contact: 'New Contact', consultant_request: 'Consultant Request', todo: 'ToDo', pending: 'Pending' };
+    const classColorMap = { new_contact: 'bg-sky-100 text-sky-800', consultant_request: 'bg-violet-100 text-violet-800', todo: 'bg-emerald-100 text-emerald-800' };
+    const classTypes = (email.classification || 'pending').split(', ').map(c => c.trim());
+    const classLabelsHtml = classTypes.map(c => {
+      const label = classMap[c] || c;
+      const color = classColorMap[c] || 'bg-slate-100 text-slate-800';
+      return `<span class="text-sm px-3 py-1 rounded-full ${color}">${label}</span>`;
+    }).join(' ');
 
     const statusColor = {
       pending: 'bg-yellow-100 text-yellow-800',
@@ -5184,15 +5180,24 @@ const views = {
       review: 'bg-amber-100 text-amber-800'
     }[email.status] || 'bg-slate-100 text-slate-800';
 
-    let actionLink = '';
-    if (email.status === 'completed' && email.actionId) {
-      if (email.actionType === 'new_contact' || email.actionType === 'existing_contact') {
-        actionLink = `<a href="#" onclick="router.navigate('contact-detail', {id: '${email.actionId}'}); return false;" class="text-sky-600 hover:text-sky-700 font-medium">View Contact →</a>`;
-      } else if (email.actionType === 'consultant_request') {
-        actionLink = `<a href="#" onclick="router.navigate('request-detail', {id: '${email.actionId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">View Request →</a>`;
-      } else if (email.actionType === 'todo') {
-        actionLink = `<a href="#" onclick="router.navigate('todos'); return false;" class="text-emerald-600 hover:text-emerald-700 font-medium">View ToDos →</a>`;
+    // Build action links — supports multiple actions (comma-separated types/ids)
+    let actionLinks = '';
+    if (email.status === 'completed' && email.actionType) {
+      const types = email.actionType.split(', ');
+      const ids = email.actionId ? email.actionId.split(', ') : [];
+      const links = [];
+      for (let i = 0; i < types.length; i++) {
+        const t = types[i].trim();
+        const id = (ids[i] || '').trim();
+        if (t === 'new_contact' || t === 'existing_contact') {
+          links.push(`<a href="#" onclick="router.navigate('contact-detail', {id: '${id}'}); return false;" class="text-sky-600 hover:text-sky-700 font-medium">View Contact →</a>`);
+        } else if (t === 'consultant_request') {
+          links.push(`<a href="#" onclick="router.navigate('request-detail', {id: '${id}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">View Request →</a>`);
+        } else if (t === 'todo') {
+          links.push(`<a href="#" onclick="router.navigate('todos'); return false;" class="text-emerald-600 hover:text-emerald-700 font-medium">View ToDos →</a>`);
+        }
       }
+      actionLinks = links.join(' &nbsp; ');
     }
 
     container.innerHTML = `
@@ -5210,7 +5215,7 @@ const views = {
             <p class="text-sm text-slate-400">Received: ${formatDateTime(email.createdAt)}</p>
           </div>
           <div class="flex items-center gap-2">
-            <span class="text-sm px-3 py-1 rounded-full ${classColor}">${classLabel}</span>
+            ${classLabelsHtml}
             <span class="text-sm px-3 py-1 rounded-full ${statusColor}">${email.status}</span>
           </div>
         </div>
@@ -5222,22 +5227,25 @@ const views = {
           <pre class="text-sm text-slate-700 whitespace-pre-wrap font-sans">${this.escapeHtml(email.body)}</pre>
         </div>
 
-        ${email.extractedData && Object.keys(email.extractedData).length > 0 ? `
+        ${email.extractedData && (Array.isArray(email.extractedData) ? email.extractedData.length > 0 : Object.keys(email.extractedData).length > 0) ? `
         <div class="bg-indigo-50 rounded-lg p-4 mb-4 border border-indigo-200">
           <h3 class="text-sm font-semibold text-indigo-700 mb-2">Extracted Data</h3>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            ${Object.entries(email.extractedData).map(([key, val]) =>
-              val ? `<div><span class="text-xs text-indigo-500 uppercase">${this.escapeHtml(key.replace(/_/g, ' '))}</span><br><span class="text-sm text-slate-800">${this.escapeHtml(String(val))}</span></div>` : ''
-            ).join('')}
-          </div>
+          ${(Array.isArray(email.extractedData) ? email.extractedData : [email.extractedData]).map((item, idx) => `
+            ${Array.isArray(email.extractedData) && email.extractedData.length > 1 ? `<div class="text-xs font-bold text-indigo-600 uppercase mt-${idx > 0 ? '3' : '0'} mb-1">${this.escapeHtml(item.classification || 'Action ' + (idx + 1))}</div>` : ''}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              ${Object.entries(item).filter(([key]) => key !== 'classification').map(([key, val]) =>
+                val ? `<div><span class="text-xs text-indigo-500 uppercase">${this.escapeHtml(key.replace(/_/g, ' '))}</span><br><span class="text-sm text-slate-800">${this.escapeHtml(String(val))}</span></div>` : ''
+              ).join('')}
+            </div>
+          `).join('')}
         </div>
         ` : ''}
 
         ${email.actionSummary ? `
         <div class="bg-emerald-50 rounded-lg p-4 mb-4 border border-emerald-200">
-          <h3 class="text-sm font-semibold text-emerald-700 mb-2">Action Taken</h3>
-          <p class="text-sm text-slate-700">${this.escapeHtml(email.actionSummary)}</p>
-          ${actionLink ? `<div class="mt-2">${actionLink}</div>` : ''}
+          <h3 class="text-sm font-semibold text-emerald-700 mb-2">Actions Taken</h3>
+          ${email.actionSummary.split(' | ').map(s => `<p class="text-sm text-slate-700 mb-1">&bull; ${this.escapeHtml(s.trim())}</p>`).join('')}
+          ${actionLinks ? `<div class="mt-2">${actionLinks}</div>` : ''}
         </div>
         ` : ''}
 

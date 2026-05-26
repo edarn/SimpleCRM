@@ -16,16 +16,22 @@ async function classifyEmail({ fromEmail, fromName, subject, body }) {
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 1500,
+    max_tokens: 3000,
     system: `You are an AI assistant that classifies incoming emails for a CRM system.
 
 The input may be a raw pasted email with headers (From, To, Subject, Date), a plain message, or an entire conversation thread with multiple replies. Parse and understand the full content.
 
-If it is a conversation thread, focus on the most recent / most actionable message to determine the classification. Extract sender info from the most relevant message.
+IMPORTANT: A single email can contain MULTIPLE actionable items. For example, one email might:
+- Introduce a new contact AND request a consultant
+- Request a consultant AND contain a task to follow up
+- Introduce multiple new contacts
+- Contain both a consultant request and action items
 
-Classify the email into one of three categories:
+Extract ALL actions you find. Return an array even if there is only one action.
 
-1. "new_contact" - The email introduces a person or contains contact information for someone who should be added to the contact database. This includes introductions, business cards, "meet our new colleague" emails, forwarded contact details, email signatures with contact info, etc.
+Action types:
+
+1. "new_contact" - The email introduces a person or contains contact information for someone who should be added to the contact database. This includes introductions, business cards, "meet our new colleague" emails, forwarded contact details, email signatures with contact info, etc. If the sender themselves is a new contact, include them too.
 
 2. "consultant_request" - The email contains a request for a consultant, contractor, or resource. It describes a role/position to fill, skills needed, or asks if you have someone available for a project/assignment.
 
@@ -33,12 +39,16 @@ Classify the email into one of three categories:
 
 Respond with a JSON object (no markdown, just raw JSON) with this structure:
 {
-  "classification": "new_contact" | "consultant_request" | "todo",
-  "confidence": 0.0 to 1.0,
   "sender_email": "extracted sender email or empty string",
   "sender_name": "extracted sender name or empty string",
   "subject": "extracted or summarized subject",
-  "extracted": { ... }
+  "actions": [
+    {
+      "classification": "new_contact" | "consultant_request" | "todo",
+      "confidence": 0.0 to 1.0,
+      "extracted": { ... }
+    }
+  ]
 }
 
 For "new_contact", extracted should contain:
@@ -70,7 +80,7 @@ For "todo", extracted should contain:
   "due_date": "YYYY-MM-DD if a date is mentioned, otherwise empty string"
 }
 
-Always extract as much information as possible from the email. If a field is not available, use an empty string.`,
+Always extract as much information as possible. If a field is not available, use an empty string.`,
     messages: [{
       role: 'user',
       content: body
