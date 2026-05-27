@@ -133,10 +133,14 @@ module.exports = function (uploadsDir) {
       const contractOriginalName = makeContractName(p.candidateName);
       const attachmentOriginalName = makeAttachmentName(p.candidateName);
 
-      fs.writeFileSync(path.join(uploadsDir, contractFilename), contractBuf);
-      fs.writeFileSync(path.join(uploadsDir, attachmentFilename), pdfBuf);
+      const contractPath = path.join(uploadsDir, contractFilename);
+      const attachmentPath = path.join(uploadsDir, attachmentFilename);
+      fs.writeFileSync(contractPath, contractBuf);
+      fs.writeFileSync(attachmentPath, pdfBuf);
 
-      const result = data.createOffer(candidate.id, {
+      let result;
+      try {
+        result = data.createOffer(candidate.id, {
         contractType: p.contractType,
         candidateName: p.candidateName,
         personalNumber: p.personalNumber,
@@ -160,10 +164,16 @@ module.exports = function (uploadsDir) {
         emailBody: p.emailBody || '',
       }, userId);
 
+      } catch (dbErr) {
+        // Clean up files if DB insert failed
+        try { fs.unlinkSync(contractPath); } catch (_) {}
+        try { fs.unlinkSync(attachmentPath); } catch (_) {}
+        throw dbErr;
+      }
+
       if (result.error) {
-        // Best-effort cleanup of files that just got written.
-        try { fs.unlinkSync(path.join(uploadsDir, contractFilename)); } catch (e) { /* ignore */ }
-        try { fs.unlinkSync(path.join(uploadsDir, attachmentFilename)); } catch (e) { /* ignore */ }
+        try { fs.unlinkSync(contractPath); } catch (_) {}
+        try { fs.unlinkSync(attachmentPath); } catch (_) {}
         return res.status(400).json({ error: result.error });
       }
 

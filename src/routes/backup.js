@@ -469,13 +469,12 @@ router.post('/import-zip', backupUpload.single('backup'), async (req, res) => {
       }
     });
 
-    importTransaction();
-
-    // Extract actual files from ZIP to uploads directory
+    // Extract files BEFORE DB transaction so they exist when DB references them
     if (uploadsDir) {
       for (const entry of directory.files) {
         if (entry.path.startsWith('files/') && entry.path !== 'files/') {
           const filename = path.basename(entry.path);
+          if (!/^[a-zA-Z0-9._-]+$/.test(filename)) continue; // skip suspicious filenames
           const destPath = path.join(uploadsDir, filename);
           if (!fs.existsSync(destPath)) {
             const buf = await entry.buffer();
@@ -484,6 +483,8 @@ router.post('/import-zip', backupUpload.single('backup'), async (req, res) => {
         }
       }
     }
+
+    importTransaction();
 
     res.json({
       success: true,

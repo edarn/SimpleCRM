@@ -69,28 +69,36 @@ router.post('/', upload.single('resume'), (req, res) => {
       resumeOriginalName = fixOriginalName(req.file);
     }
 
-    const newCandidate = data.createCandidate({
-      name: name.trim(),
-      email,
-      phone,
-      role,
-      skills,
-      category,
-      resumeFilename,
-      resumeOriginalName
-    }, userId);
-
-    // Also add to candidate_files table if file was uploaded
-    if (req.file) {
-      data.addCandidateFile(newCandidate.id, {
-        filename: resumeFilename,
-        originalName: resumeOriginalName,
-        fileSize: req.file.size,
-        mimeType: req.file.mimetype
+    let newCandidate;
+    try {
+      newCandidate = data.createCandidate({
+        name: name.trim(),
+        email,
+        phone,
+        role,
+        skills,
+        category,
+        resumeFilename,
+        resumeOriginalName
       }, userId);
-      // Re-fetch to include files
-      const updated = data.getCandidateById(newCandidate.id, userId);
-      return res.status(201).json(updated);
+
+      // Also add to candidate_files table if file was uploaded
+      if (req.file) {
+        data.addCandidateFile(newCandidate.id, {
+          filename: resumeFilename,
+          originalName: resumeOriginalName,
+          fileSize: req.file.size,
+          mimeType: req.file.mimetype
+        }, userId);
+        const updated = data.getCandidateById(newCandidate.id, userId);
+        return res.status(201).json(updated);
+      }
+    } catch (dbErr) {
+      // Clean up uploaded file if DB operation failed
+      if (req.file) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      throw dbErr;
     }
 
     res.status(201).json(newCandidate);

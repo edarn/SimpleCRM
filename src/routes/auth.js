@@ -46,12 +46,17 @@ router.post('/register', async (req, res) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Create user
+    // Create user (may fail on UNIQUE constraint race)
     const user = data.createUser({
       username: username.trim().toLowerCase(),
       email: email.trim().toLowerCase(),
       passwordHash
     });
+
+    if (user.error) {
+      logSecurity('register_conflict', { username: username.trim().toLowerCase(), ip: req.ip });
+      return res.status(400).json({ error: user.error });
+    }
 
     // Regenerate session to prevent session fixation
     const oldSession = req.session;

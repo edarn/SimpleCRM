@@ -174,6 +174,11 @@ module.exports = function(uploadsDir) {
     }
   });
 
+  // Check if inbox entry still exists (guards against deletion during async processing)
+  function inboxEntryExists(emailId, userId) {
+    return !!data.getInboxEmailById(emailId, userId);
+  }
+
   // Core email processing logic
   async function processEmail(emailId, userId) {
     const email = data.getInboxEmailById(emailId, userId);
@@ -230,6 +235,12 @@ module.exports = function(uploadsDir) {
     const actionTypes = [];
 
     for (const action of actions) {
+      // Guard: check inbox entry wasn't deleted during async processing
+      if (!inboxEntryExists(emailId, userId)) {
+        console.log(`Inbox entry ${emailId} deleted during processing, aborting remaining actions`);
+        return;
+      }
+
       try {
         switch (action.classification) {
           case 'new_contact': {

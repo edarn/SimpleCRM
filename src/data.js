@@ -101,33 +101,25 @@ function getTeamLogo(userId) {
   return team?.logo_filename || null;
 }
 
-// Create a new team (user becomes owner)
-function createTeam(ownerId) {
+// Create a new team (user becomes owner) — atomic transaction
+const createTeamTx = db.transaction((ownerId) => {
   const id = generateId();
   const now = getTimestamp();
 
-  // Create the team
-  db.prepare(`
-    INSERT INTO teams (id, owner_id, created_at)
-    VALUES (?, ?, ?)
-  `).run(id, ownerId, now);
-
-  // Set the owner's team_id
+  db.prepare(`INSERT INTO teams (id, owner_id, created_at) VALUES (?, ?, ?)`).run(id, ownerId, now);
   db.prepare('UPDATE users SET team_id = ?, updated_at = ? WHERE id = ?').run(id, now, ownerId);
+  db.prepare(`INSERT INTO team_members (team_id, user_id, joined_at) VALUES (?, ?, ?)`).run(id, ownerId, now);
 
-  // Add owner as a team member
-  db.prepare(`
-    INSERT INTO team_members (team_id, user_id, joined_at)
-    VALUES (?, ?, ?)
-  `).run(id, ownerId, now);
-
-  // Transfer all owner's solo data to the team
   const tables = ['companies', 'contacts', 'notes', 'todos', 'candidates', 'candidate_comments'];
   for (const table of tables) {
     db.prepare(`UPDATE ${table} SET team_id = ? WHERE created_by = ? AND team_id IS NULL`).run(id, ownerId);
   }
 
   return { id, ownerId, createdAt: now };
+});
+
+function createTeam(ownerId) {
+  return createTeamTx(ownerId);
 }
 
 // Get team members
@@ -167,50 +159,55 @@ function addTeamMember(teamId, userId) {
   return true;
 }
 
-// Remove a user from a team (their data stays with the team)
-function removeTeamMember(teamId, userId) {
+// Remove a user from a team (their data stays with the team) — atomic
+const removeTeamMemberTx = db.transaction((teamId, userId) => {
   const now = getTimestamp();
-
-  // Remove from team_members
   db.prepare('DELETE FROM team_members WHERE team_id = ? AND user_id = ?').run(teamId, userId);
-
-  // Clear user's team_id
   db.prepare('UPDATE users SET team_id = NULL, updated_at = ? WHERE id = ?').run(now, userId);
-
   return true;
+});
+
+function removeTeamMember(teamId, userId) {
+  return removeTeamMemberTx(teamId, userId);
 }
 
-// Transfer ownership to another member
-function transferOwnership(teamId, newOwnerId) {
-  const now = getTimestamp();
-
-  // Verify new owner is a member
+// Transfer ownership to another member — atomic with verification
+const transferOwnershipTx = db.transaction((teamId, newOwnerId) => {
+  // Verify new owner is still a member inside the transaction
   const member = db.prepare('SELECT * FROM team_members WHERE team_id = ? AND user_id = ?').get(teamId, newOwnerId);
   if (!member) return false;
-
-  // Update team owner
   db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(newOwnerId, teamId);
-
   return true;
+});
+
+function transferOwnership(teamId, newOwnerId) {
+  return transferOwnershipTx(teamId, newOwnerId);
 }
 
-// Merge user's solo data into a team
-function mergeUserDataIntoTeam(userId, teamId) {
+// Merge user's solo data into a team — atomic
+const mergeUserDataIntoTeamTx = db.transaction((userId, teamId) => {
   const tables = ['companies', 'contacts', 'notes', 'todos', 'candidates', 'candidate_comments'];
   for (const table of tables) {
     db.prepare(`UPDATE ${table} SET team_id = ? WHERE created_by = ? AND team_id IS NULL`).run(teamId, userId);
   }
+});
+
+function mergeUserDataIntoTeam(userId, teamId) {
+  mergeUserDataIntoTeamTx(userId, teamId);
 }
 
-// Delete all solo data for a user (when they choose "start fresh" on joining)
-function deleteUserSoloData(userId) {
-  // Delete in order respecting foreign keys
+// Delete all solo data for a user (when they choose "start fresh" on joining) — atomic
+const deleteUserSoloDataTx = db.transaction((userId) => {
   db.prepare('DELETE FROM candidate_comments WHERE created_by = ? AND team_id IS NULL').run(userId);
   db.prepare('DELETE FROM candidates WHERE created_by = ? AND team_id IS NULL').run(userId);
   db.prepare('DELETE FROM notes WHERE created_by = ? AND team_id IS NULL').run(userId);
   db.prepare('DELETE FROM todos WHERE created_by = ? AND team_id IS NULL').run(userId);
   db.prepare('DELETE FROM contacts WHERE created_by = ? AND team_id IS NULL').run(userId);
   db.prepare('DELETE FROM companies WHERE created_by = ? AND team_id IS NULL').run(userId);
+});
+
+function deleteUserSoloData(userId) {
+  deleteUserSoloDataTx(userId);
 }
 
 // Check if user has any solo data
@@ -225,46 +222,38 @@ function userHasSoloData(userId) {
 
 // ============ Invitation Functions ============
 
-function createInvitation(inviterId, email) {
+// Create invitation — atomic transaction to prevent duplicate invitations
+const createInvitationTx = db.transaction((inviterId, email) => {
   const id = generateId();
   const now = getTimestamp();
 
-  // Get or create team for inviter
   let user = db.prepare('SELECT team_id FROM users WHERE id = ?').get(inviterId);
   let teamId = user?.team_id;
 
   if (!teamId) {
-    // Create a new team with inviter as owner
-    const team = createTeam(inviterId);
+    const team = createTeamTx(inviterId);
     teamId = team.id;
   }
 
-  // Check if invitation already exists
+  // Check inside transaction to prevent duplicates
   const existing = db.prepare(`
-    SELECT * FROM team_invitations
-    WHERE team_id = ? AND email = ? AND status = 'pending'
+    SELECT * FROM team_invitations WHERE team_id = ? AND email = ? AND status = 'pending'
   `).get(teamId, email);
-
   if (existing) {
     return { error: 'Invitation already sent to this email' };
   }
 
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
   db.prepare(`
     INSERT INTO team_invitations (id, team_id, inviter_id, email, status, created_at, expires_at)
     VALUES (?, ?, ?, ?, 'pending', ?, ?)
   `).run(id, teamId, inviterId, email, now, expiresAt);
 
-  return {
-    id,
-    teamId,
-    inviterId,
-    email,
-    status: 'pending',
-    createdAt: now,
-    expiresAt
-  };
+  return { id, teamId, inviterId, email, status: 'pending', createdAt: now, expiresAt };
+});
+
+function createInvitation(inviterId, email) {
+  return createInvitationTx(inviterId, email);
 }
 
 function getInvitationById(invitationId) {
@@ -335,39 +324,39 @@ function getInvitationsByTeam(teamId) {
   }));
 }
 
-function acceptInvitation(invitationId, userId, mergeData = false) {
+// Accept invitation — atomic transaction for all checks + mutations
+const acceptInvitationTx = db.transaction((invitationId, userId, mergeData) => {
   const invitation = getInvitationById(invitationId);
   if (!invitation || invitation.status !== 'pending') {
     return { error: 'Invalid or expired invitation' };
   }
 
-  // Check user's email matches invitation
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user || user.email !== invitation.email) {
     return { error: 'This invitation is not for your account' };
   }
 
-  // Check if user is already in a team
+  // Re-check team_id inside transaction to prevent race
   if (user.team_id) {
     return { error: 'You are already in a team. Leave your current team first.' };
   }
 
-  const now = getTimestamp();
-
-  // Handle user's existing data
   if (mergeData) {
-    mergeUserDataIntoTeam(userId, invitation.teamId);
+    mergeUserDataIntoTeamTx(userId, invitation.teamId);
   } else {
-    deleteUserSoloData(userId);
+    deleteUserSoloDataTx(userId);
   }
 
-  // Add user to team
-  addTeamMember(invitation.teamId, userId);
-
-  // Update invitation status
+  const now = getTimestamp();
+  db.prepare(`INSERT OR IGNORE INTO team_members (team_id, user_id, joined_at) VALUES (?, ?, ?)`).run(invitation.teamId, userId, now);
+  db.prepare('UPDATE users SET team_id = ?, updated_at = ? WHERE id = ?').run(invitation.teamId, now, userId);
   db.prepare("UPDATE team_invitations SET status = 'accepted' WHERE id = ?").run(invitationId);
 
   return { success: true, teamId: invitation.teamId };
+});
+
+function acceptInvitation(invitationId, userId, mergeData = false) {
+  return acceptInvitationTx(invitationId, userId, mergeData);
 }
 
 function declineInvitation(invitationId, userId) {
@@ -1501,18 +1490,19 @@ function createUser({ username, email, passwordHash }) {
   const id = generateId();
   const now = getTimestamp();
 
-  db.prepare(`
-    INSERT INTO users (id, username, email, password_hash, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, username, email, passwordHash, now, now);
+  try {
+    db.prepare(`
+      INSERT INTO users (id, username, email, password_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, username, email, passwordHash, now, now);
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE constraint failed')) {
+      return { error: 'Username or email already in use' };
+    }
+    throw err;
+  }
 
-  return {
-    id,
-    username,
-    email,
-    createdAt: now,
-    updatedAt: now
-  };
+  return { id, username, email, createdAt: now, updatedAt: now };
 }
 
 // ============ Candidate Functions ============
@@ -1754,8 +1744,8 @@ function getCandidateFiles(candidateId) {
   }));
 }
 
-function addCandidateFile(candidateId, { filename, originalName, fileSize, mimeType }, userId) {
-  // Check 5 file limit
+// Add candidate file — atomic check + insert to prevent exceeding limit
+const addCandidateFileTx = db.transaction((candidateId, { filename, originalName, fileSize, mimeType }, userId) => {
   const count = db.prepare('SELECT COUNT(*) as cnt FROM candidate_files WHERE candidate_id = ?').get(candidateId).cnt;
   if (count >= 5) {
     return { error: 'Maximum 5 files per candidate' };
@@ -1771,15 +1761,11 @@ function addCandidateFile(candidateId, { filename, originalName, fileSize, mimeT
 
   db.prepare('UPDATE candidates SET updated_at = ? WHERE id = ?').run(now, candidateId);
 
-  return {
-    id,
-    filename,
-    originalName,
-    fileSize: fileSize || 0,
-    mimeType: mimeType || '',
-    uploadedAt: now,
-    uploadedBy: userId
-  };
+  return { id, filename, originalName, fileSize: fileSize || 0, mimeType: mimeType || '', uploadedAt: now, uploadedBy: userId };
+});
+
+function addCandidateFile(candidateId, fileData, userId) {
+  return addCandidateFileTx(candidateId, fileData, userId);
 }
 
 function deleteCandidateFile(candidateId, fileId, userId) {
@@ -2034,15 +2020,20 @@ function getUserEmails(userId) {
 function addUserEmail(userId, email, label) {
   const id = generateId();
   const now = getTimestamp();
-  // Check if this email is already registered by anyone
-  const existing = db.prepare('SELECT id, user_id FROM user_emails WHERE email = ?').get(email);
-  if (existing) {
-    if (existing.user_id === userId) return { error: 'You have already added this email' };
-    return { error: 'This email is registered by another user' };
+  const normalizedEmail = email.toLowerCase().trim();
+  try {
+    db.prepare('INSERT INTO user_emails (id, user_id, email, label, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, userId, normalizedEmail, label || '', now);
+    return { id, userId, email: normalizedEmail, label: label || '', createdAt: now };
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE constraint failed')) {
+      // Check who owns it for a better error message
+      const existing = db.prepare('SELECT user_id FROM user_emails WHERE email = ?').get(normalizedEmail);
+      if (existing && existing.user_id === userId) return { error: 'You have already added this email' };
+      return { error: 'This email is registered by another user' };
+    }
+    throw err;
   }
-  db.prepare('INSERT INTO user_emails (id, user_id, email, label, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(id, userId, email.toLowerCase().trim(), label || '', now);
-  return { id, userId, email: email.toLowerCase().trim(), label: label || '', createdAt: now };
 }
 
 function removeUserEmail(emailId, userId) {
