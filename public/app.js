@@ -2900,6 +2900,7 @@ const views = {
   // Candidate category labels
   _candidateCategories: {
     in_progress: 'In Progress',
+    employed_no_assignment: 'Anställd utan uppdrag',
     declined: 'Declined',
     not_qualified: 'Not Qualified',
     contact_later: 'Contact Later',
@@ -2946,10 +2947,16 @@ const views = {
           <h2 class="text-2xl font-bold text-slate-800">Candidates</h2>
           <p class="text-slate-500">${candidates.length} candidates</p>
         </div>
-        <button onclick="router.navigate('candidate-form')"
-                class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-5 py-2.5 rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all font-medium shadow-sm">
-          + Add Candidate
-        </button>
+        <div class="flex gap-2">
+          <button onclick="views.showCVImportModal()"
+                  class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2.5 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
+            Import CVs
+          </button>
+          <button onclick="router.navigate('candidate-form')"
+                  class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-5 py-2.5 rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all font-medium shadow-sm">
+            + Add Candidate
+          </button>
+        </div>
       </div>
 
       <div class="mb-4 flex flex-col sm:flex-row gap-3">
@@ -3014,9 +3021,126 @@ const views = {
     this.filterCandidates();
   },
 
+  showCVImportModal() {
+    const content = document.getElementById('modal-content');
+    content.innerHTML = `
+      <h3 class="text-lg font-semibold text-slate-800 mb-4">Import CVs</h3>
+      <p class="text-sm text-slate-500 mb-4">Upload one or more CV files (PDF or Word). The AI will extract candidate information automatically.</p>
+      <form onsubmit="views.submitCVImport(event)">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-1">CV Files *</label>
+          <input type="file" id="cv-import-files" multiple required accept=".pdf,.doc,.docx"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 text-sm">
+          <p class="text-xs text-slate-400 mt-1">PDF, DOC, DOCX. Max 20 files.</p>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 mb-2">Category</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="cv-import-category" value="in_progress" checked class="text-rose-500 focus:ring-rose-500">
+              <span class="text-sm text-slate-700">New candidate (In Progress)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="cv-import-category" value="employed_no_assignment" class="text-indigo-500 focus:ring-indigo-500">
+              <span class="text-sm text-slate-700">Sigma-anställd utan uppdrag</span>
+            </label>
+          </div>
+        </div>
+        <div id="cv-import-progress" class="hidden mb-4">
+          <div class="text-sm text-slate-600 mb-1" id="cv-import-status">Processing...</div>
+          <div class="w-full bg-slate-200 rounded-full h-2">
+            <div id="cv-import-bar" class="bg-violet-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+          </div>
+        </div>
+        <div id="cv-import-results" class="hidden mb-4 max-h-48 overflow-y-auto"></div>
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
+          <button type="submit" id="cv-import-btn" class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm">
+            Import
+          </button>
+        </div>
+      </form>
+    `;
+    modal.show();
+  },
+
+  async submitCVImport(e) {
+    e.preventDefault();
+    const filesInput = document.getElementById('cv-import-files');
+    const files = filesInput.files;
+    if (files.length === 0) return;
+
+    const category = document.querySelector('input[name="cv-import-category"]:checked').value;
+    const btn = document.getElementById('cv-import-btn');
+    const progress = document.getElementById('cv-import-progress');
+    const statusEl = document.getElementById('cv-import-status');
+    const bar = document.getElementById('cv-import-bar');
+    const resultsEl = document.getElementById('cv-import-results');
+
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+    progress.classList.remove('hidden');
+    statusEl.textContent = `Uploading ${files.length} file(s) and processing with AI...`;
+    bar.style.width = '10%';
+
+    try {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append('cvFiles', file);
+      }
+      formData.append('category', category);
+
+      bar.style.width = '30%';
+
+      const res = await fetch('/api/candidates/import-cvs', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+
+      bar.style.width = '100%';
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Import failed');
+      }
+
+      statusEl.textContent = data.message;
+      resultsEl.classList.remove('hidden');
+      resultsEl.innerHTML = data.results.map(r => {
+        if (r.status === 'created') {
+          return `<div class="flex items-center gap-2 py-1 text-sm">
+            <span class="text-emerald-500">&#10003;</span>
+            <a href="#" onclick="modal.hide(); router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">${this.escapeHtml(r.name)}</a>
+            <span class="text-slate-400">${this.escapeHtml(r.role)}</span>
+          </div>`;
+        } else {
+          return `<div class="flex items-center gap-2 py-1 text-sm">
+            <span class="text-red-500">&#10007;</span>
+            <span class="text-slate-700">${this.escapeHtml(r.file)}</span>
+            <span class="text-red-500 text-xs">${this.escapeHtml(r.error || r.status)}</span>
+          </div>`;
+        }
+      }).join('');
+
+      btn.textContent = 'Done';
+      // Refresh candidate list after a short delay
+      setTimeout(() => {
+        modal.hide();
+        router.navigate('candidates');
+      }, 3000);
+    } catch (err) {
+      bar.style.width = '0%';
+      progress.classList.add('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Import';
+      alert('Error: ' + err.message);
+    }
+  },
+
   _categoryBadgeClass(category) {
     const colors = {
       in_progress: 'bg-amber-100 text-amber-700',
+      employed_no_assignment: 'bg-indigo-100 text-indigo-700',
       declined: 'bg-red-100 text-red-700',
       not_qualified: 'bg-slate-100 text-slate-600',
       contact_later: 'bg-blue-100 text-blue-700',

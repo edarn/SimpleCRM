@@ -453,5 +453,104 @@ router.delete('/:id/comments/:commentId', (req, res) => {
   }
 });
 
+// POST /api/candidates/import-cvs - Bulk import candidates from CV files
+router.post('/import-cvs', upload.array('cvFiles', 20), async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const category = req.body.category || 'in_progress';
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    // Validate magic bytes for all files
+    for (const file of req.files) {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (!validateFileMagic(file.path, ext)) {
+        // Clean up all uploaded files
+        for (const f of req.files) {
+          try { fs.unlinkSync(f.path); } catch (_) {}
+        }
+        const name = fixOriginalName(file);
+        return res.status(400).json({ error: `File "${name}" content does not match its extension. All uploads rejected.` });
+      }
+    }
+
+    const { extractTextFromFile } = require('../lib/resume-parser');
+    const { parseCV } = require('../lib/cv-parser');
+
+    const results = [];
+
+    for (const file of req.files) {
+      const originalName = fixOriginalName(file);
+      try {
+        // Extract text from the CV file
+        const resumeText = await extractTextFromFile(file.path);
+        if (!resumeText) {
+          results.push({ file: originalName, status: 'skipped', error: 'Could not extract text from file' });
+          continue;
+        }
+
+        // Use AI to parse the CV
+        const parsed = await parseCV(resumeText);
+
+        if (!parsed.name) {
+          results.push({ file: originalName, status: 'skipped', error: 'Could not extract candidate name from CV' });
+          continue;
+        }
+
+        // Create the candidate
+        const candidate = data.createCandidate({
+          name: parsed.name,
+          email: parsed.email || '',
+          phone: parsed.phone || '',
+          role: parsed.role || '',
+          skills: parsed.skills || '',
+          category,
+          resumeFilename: file.filename,
+          resumeOriginalName: originalName
+        }, userId);
+
+        // Add file to candidate_files table
+        data.addCandidateFile(candidate.id, {
+          filename: file.filename,
+          originalName,
+          fileSize: file.size,
+          mimeType: file.mimetype
+        }, userId);
+
+        // Cache extracted text for AI matching
+        data.updateCandidateResumeText(candidate.id, resumeText);
+
+        // Add automatic comment
+        data.createCandidateComment(candidate.id, 'Automatiskt skapad via CV import', userId);
+
+        results.push({
+          file: originalName,
+          status: 'created',
+          candidateId: candidate.id,
+          name: parsed.name,
+          role: parsed.role || '',
+          skills: parsed.skills || ''
+        });
+      } catch (err) {
+        console.error(`Error processing CV ${originalName}:`, err.message);
+        results.push({ file: originalName, status: 'error', error: err.message });
+      }
+    }
+
+    const created = results.filter(r => r.status === 'created').length;
+    const failed = results.filter(r => r.status !== 'created').length;
+
+    res.status(201).json({
+      message: `Created ${created} candidate(s)` + (failed > 0 ? `, ${failed} failed` : ''),
+      results
+    });
+  } catch (err) {
+    console.error('Error importing CVs:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
   return router;
 };
