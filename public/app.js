@@ -5368,8 +5368,9 @@ const views = {
         ${email.actionSummary ? `
         <div class="bg-emerald-50 rounded-lg p-4 mb-4 border border-emerald-200">
           <h3 class="text-sm font-semibold text-emerald-700 mb-2">Actions Taken</h3>
-          ${email.actionSummary.split(' | ').map(s => `<p class="text-sm text-slate-700 mb-1">&bull; ${this.escapeHtml(s.trim())}</p>`).join('')}
-          ${actionLinks ? `<div class="mt-2">${actionLinks}</div>` : ''}
+          <div id="inbox-actions-list">
+            ${this.renderInboxActions(email)}
+          </div>
         </div>
         ` : ''}
 
@@ -5482,6 +5483,56 @@ We're looking for a senior Java developer..."></textarea>
       await api.post(`/api/inbox/${emailId}/reprocess`);
       router.navigate('inbox-detail', { id: emailId });
       this.pollInboxStatus(emailId);
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  },
+
+  renderInboxActions(email) {
+    const types = (email.actionType || '').split(', ').map(s => s.trim());
+    const ids = (email.actionId || '').split(', ').map(s => s.trim());
+    const summaries = (email.actionSummary || '').split(' | ').map(s => s.trim());
+
+    return types.map((t, i) => {
+      const id = ids[i] || '';
+      const summary = summaries[i] || t;
+      const isContact = t === 'new_contact' || t === 'existing_contact';
+      const isRequest = t === 'consultant_request';
+      const isTodo = t === 'todo';
+
+      const typeLabel = { new_contact: 'Contact', existing_contact: 'Contact', consultant_request: 'Request', todo: 'ToDo' }[t] || t;
+      const typeColor = { new_contact: 'bg-sky-100 text-sky-700', existing_contact: 'bg-sky-100 text-sky-700', consultant_request: 'bg-violet-100 text-violet-700', todo: 'bg-emerald-100 text-emerald-700' }[t] || 'bg-slate-100 text-slate-600';
+
+      let viewLink = '';
+      if (isContact && id) viewLink = `<a href="#" onclick="router.navigate('contact-detail', {id: '${id}'}); return false;" class="text-sky-600 hover:text-sky-700 text-xs font-medium">View</a>`;
+      else if (isRequest && id) viewLink = `<a href="#" onclick="router.navigate('request-detail', {id: '${id}'}); return false;" class="text-violet-600 hover:text-violet-700 text-xs font-medium">View</a>`;
+      else if (isTodo) viewLink = `<a href="#" onclick="router.navigate('todos'); return false;" class="text-emerald-600 hover:text-emerald-700 text-xs font-medium">View</a>`;
+
+      const deleteBtn = (isContact && id && t === 'new_contact')
+        ? `<button onclick="views.undoInboxAction('${email.id}', '${id}', 'contact', ${i})" class="text-red-400 hover:text-red-600 text-xs font-medium ml-auto">Delete</button>`
+        : '';
+
+      return `
+        <div class="flex items-center gap-2 py-1.5 ${i > 0 ? 'border-t border-emerald-200/50' : ''}" id="inbox-action-${i}">
+          <span class="text-xs px-2 py-0.5 rounded-full ${typeColor}">${typeLabel}</span>
+          <span class="text-sm text-slate-700 flex-1">${this.escapeHtml(summary)}</span>
+          ${viewLink}
+          ${deleteBtn}
+        </div>`;
+    }).join('');
+  },
+
+  async undoInboxAction(emailId, entityId, entityType, actionIndex) {
+    if (!confirm('Delete this contact? This cannot be undone.')) return;
+    try {
+      if (entityType === 'contact') {
+        await api.delete(`/api/contacts/${entityId}`);
+      }
+      // Remove the action row from the UI
+      const row = document.getElementById(`inbox-action-${actionIndex}`);
+      if (row) {
+        row.innerHTML = `<span class="text-xs text-slate-400 italic">Deleted</span>`;
+      }
     } catch (err) {
       alert('Error: ' + err.message);
     }
