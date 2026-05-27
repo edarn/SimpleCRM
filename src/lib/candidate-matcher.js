@@ -16,12 +16,16 @@ async function matchCandidates(request, candidates) {
 
   const anthropic = getClient();
 
-  // Build candidate summaries for the prompt
+  // Use simple numeric IDs (1, 2, 3...) that the AI can reliably return
+  // Then map back to real UUIDs after
+  const idToUuid = {};
   const candidateSummaries = candidates.map((c, i) => {
-    let summary = `[Candidate ${i + 1}] ID: ${c.id}\nName: ${c.name}\nRole: ${c.role || 'Not specified'}\nSkills: ${c.skills || 'Not specified'}`;
+    const simpleId = i + 1;
+    idToUuid[simpleId] = c.id;
+
+    let summary = `[${simpleId}] ${c.name}\nRole: ${c.role || 'Not specified'}\nSkills: ${c.skills || 'Not specified'}`;
     if (c.resumeText) {
-      const trimmedResume = c.resumeText.substring(0, 2000);
-      summary += `\nResume excerpt:\n${trimmedResume}`;
+      summary += `\nResume:\n${c.resumeText.substring(0, 2000)}`;
     }
     return summary;
   }).join('\n\n---\n\n');
@@ -30,9 +34,9 @@ async function matchCandidates(request, candidates) {
     model: 'claude-sonnet-4-20250514',
     max_tokens: 4000,
     temperature: 0,
-    system: `You are an AI recruiter assistant. You will receive a consultant/resource request and a list of candidates with their profiles and resume text.
+    system: `You are an AI recruiter assistant. You will receive a consultant/resource request and a list of candidates. Each candidate has a number in brackets like [1], [2], [3] etc.
 
-Rank the candidates by how well they match the request using this scoring system:
+Rank the candidates by how well they match the request.
 
 SCORING CRITERIA (apply consistently):
 - Required skills match: up to 50 points
@@ -46,30 +50,25 @@ SCORING CRITERIA (apply consistently):
 
 RULES:
 - Be consistent: the same candidate with the same request must always get approximately the same score.
-- Round scores to nearest 5 (e.g. 75, 80, 85, not 77 or 82).
+- Round scores to nearest 5 (e.g. 75, 80, 85).
 - A candidate missing most required skills should score below 40.
 - A candidate matching all required skills and role should score 80+.
 - Only include candidates scoring >= 30.
+- IMPORTANT: Use the candidate NUMBER (1, 2, 3...) as the "id" field. Do NOT invent or modify the number.
 
-Respond with a JSON array (no markdown, just raw JSON) ordered from best to worst match:
-[
-  {
-    "candidateId": "the ID",
-    "score": 0-100,
-    "reasoning": "2-3 sentence explanation referencing specific skills matched/missing"
-  }
-]
+Respond with a JSON array (no markdown, just raw JSON) ordered best to worst:
+[{"id": 1, "score": 85, "reasoning": "Strong match because..."}]
 
-If no candidates match well, return an empty array [].`,
+Empty array [] if no candidates match.`,
     messages: [{
       role: 'user',
-      content: `## Consultant Request
+      content: `## Request
 Title: ${request.title}
 Description: ${request.description}
 Required Skills: ${request.requiredSkills}
 Role: ${request.role}
 
-## Available Candidates
+## Candidates
 
 ${candidateSummaries}`
     }]
@@ -89,34 +88,20 @@ ${candidateSummaries}`
     }
   }
 
-  // Build lookup maps to resolve AI-returned IDs back to real candidates
-  const idMap = new Map();
-  const nameMap = new Map();
-  candidates.forEach((c, i) => {
-    idMap.set(c.id, c.id);
-    idMap.set(String(i + 1), c.id); // AI might return index "1", "2" etc.
-    nameMap.set(c.name.toLowerCase(), c.id);
-  });
-
-  // Validate and fix candidateId in each match
+  // Map simple numeric IDs back to real UUIDs
   return matches
     .map(m => {
-      let resolvedId = idMap.get(m.candidateId) || idMap.get(String(m.candidateId));
-      if (!resolvedId && m.candidateId) {
-        // Try partial UUID match or name match
-        const candidate = candidates.find(c =>
-          c.id.startsWith(m.candidateId) || c.id === m.candidateId
-        );
-        if (candidate) resolvedId = candidate.id;
-      }
-      if (!resolvedId && m.candidateName) {
-        resolvedId = nameMap.get(m.candidateName.toLowerCase());
-      }
-      if (!resolvedId) {
-        console.warn('Could not resolve candidateId:', m.candidateId);
+      const numId = Number(m.id || m.candidateId);
+      const realId = idToUuid[numId];
+      if (!realId) {
+        console.warn('Candidate match returned unknown id:', m.id || m.candidateId);
         return null;
       }
-      return { ...m, candidateId: resolvedId };
+      return {
+        candidateId: realId,
+        score: m.score,
+        reasoning: m.reasoning
+      };
     })
     .filter(Boolean);
 }
