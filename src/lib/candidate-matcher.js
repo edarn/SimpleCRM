@@ -20,7 +20,6 @@ async function matchCandidates(request, candidates) {
   const candidateSummaries = candidates.map((c, i) => {
     let summary = `[Candidate ${i + 1}] ID: ${c.id}\nName: ${c.name}\nRole: ${c.role || 'Not specified'}\nSkills: ${c.skills || 'Not specified'}`;
     if (c.resumeText) {
-      // Limit resume text to avoid token overflow
       const trimmedResume = c.resumeText.substring(0, 2000);
       summary += `\nResume excerpt:\n${trimmedResume}`;
     }
@@ -29,20 +28,37 @@ async function matchCandidates(request, candidates) {
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 2000,
+    max_tokens: 4000,
+    temperature: 0,
     system: `You are an AI recruiter assistant. You will receive a consultant/resource request and a list of candidates with their profiles and resume text.
 
-Rank the candidates by how well they match the request. Consider:
-- Skills match (most important)
-- Role/experience relevance
-- Overall profile fit
+Rank the candidates by how well they match the request using this scoring system:
 
-Respond with a JSON array (no markdown, just raw JSON) of matched candidates, ordered from best to worst match. Only include candidates with a reasonable match (score >= 30). Each entry should have:
-{
-  "candidateId": "the ID",
-  "score": 0-100,
-  "reasoning": "2-3 sentence explanation of why this candidate matches or doesn't"
-}
+SCORING CRITERIA (apply consistently):
+- Required skills match: up to 50 points
+  - Each required skill found in candidate profile = points proportional to 50 / number of required skills
+  - Partial match (related but not exact skill) = half points
+- Role/seniority match: up to 20 points
+  - Exact role match = 20, similar role = 10-15, different role = 0-5
+- Experience level: up to 15 points
+  - Matches requested seniority = 15, one level off = 8, far off = 0-3
+- Overall profile fit (language, location, availability, soft skills): up to 15 points
+
+RULES:
+- Be consistent: the same candidate with the same request must always get approximately the same score.
+- Round scores to nearest 5 (e.g. 75, 80, 85, not 77 or 82).
+- A candidate missing most required skills should score below 40.
+- A candidate matching all required skills and role should score 80+.
+- Only include candidates scoring >= 30.
+
+Respond with a JSON array (no markdown, just raw JSON) ordered from best to worst match:
+[
+  {
+    "candidateId": "the ID",
+    "score": 0-100,
+    "reasoning": "2-3 sentence explanation referencing specific skills matched/missing"
+  }
+]
 
 If no candidates match well, return an empty array [].`,
     messages: [{
