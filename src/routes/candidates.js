@@ -297,6 +297,8 @@ router.get('/:id/files/:fileId', (req, res) => {
       const safeMimeTypes = { '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
       res.setHeader('Content-Type', safeMimeTypes[ext] || 'application/octet-stream');
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      // Override helmet's frame-ancestors so PDF can render in iframe
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; frame-ancestors 'self'");
       return res.sendFile(filePath);
     }
 

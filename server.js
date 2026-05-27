@@ -188,7 +188,8 @@ app.use('/api/invitations', requireAuth, require('./src/routes/invitations'));
 // Serve uploaded files with security headers (no MIME sniffing, no caching of sensitive files)
 app.use('/uploads', (req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Content-Security-Policy', "default-src 'none'");
+  // Allow PDF viewer to render but block scripts and other active content
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:");
   res.setHeader('Cache-Control', 'private, no-cache');
   next();
 }, express.static(uploadsDir));
