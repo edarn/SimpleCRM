@@ -2212,13 +2212,15 @@ function getCandidatesWithResumes(userId) {
     rows = db.prepare(`
       SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone
       FROM candidates c
-      WHERE c.team_id = ? AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
+      WHERE c.team_id = ? AND c.category IN ('in_progress', 'employed_no_assignment', 'contact_later')
+        AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
     `).all(teamId);
   } else {
     rows = db.prepare(`
       SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone
       FROM candidates c
-      WHERE c.created_by = ? AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
+      WHERE c.created_by = ? AND c.category IN ('in_progress', 'employed_no_assignment', 'contact_later')
+        AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
     `).all(userId);
   }
   return rows.map(toCamelCase);
