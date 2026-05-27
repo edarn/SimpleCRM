@@ -5657,8 +5657,12 @@ We're looking for a senior Java developer..."></textarea>
         ` : ''}
 
         <div class="flex gap-2 mb-6">
+          <button onclick="views.rematchRequest('${request.id}')" id="rematch-btn"
+                  class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
+            Re-match Candidates
+          </button>
           <button onclick="views.deleteRequest('${request.id}')"
-                  class="text-red-500 hover:text-red-700 text-sm font-medium">Delete Request</button>
+                  class="text-red-500 hover:text-red-700 text-sm font-medium px-4 py-2">Delete Request</button>
         </div>
       </div>
 
@@ -5695,6 +5699,21 @@ We're looking for a senior Java developer..."></textarea>
       await api.put(`/api/requests/${requestId}`, { status });
     } catch (err) {
       alert('Error: ' + err.message);
+    }
+  },
+
+  async rematchRequest(requestId) {
+    const btn = document.getElementById('rematch-btn');
+    btn.disabled = true;
+    btn.textContent = 'Matching...';
+    try {
+      const result = await api.post(`/api/requests/${requestId}/rematch`);
+      // Refresh the page to show new matches
+      await this.requestDetail(document.getElementById('app'), requestId);
+    } catch (err) {
+      alert('Error: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Re-match Candidates';
     }
   },
 

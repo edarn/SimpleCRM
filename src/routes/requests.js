@@ -55,6 +55,37 @@ router.put('/:id', (req, res) => {
   }
 });
 
+// POST /api/requests/:id/rematch - Re-run candidate matching
+router.post('/:id/rematch', async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const request = data.getConsultantRequestById(req.params.id, userId);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    const { matchCandidates } = require('../lib/candidate-matcher');
+    const candidates = data.getCandidatesWithResumes(userId);
+
+    let matches = [];
+    if (candidates.length > 0) {
+      matches = await matchCandidates({
+        title: request.title,
+        description: request.description,
+        requiredSkills: request.requiredSkills,
+        role: request.role
+      }, candidates);
+    }
+
+    data.updateConsultantRequest(req.params.id, { matchedCandidates: matches }, userId);
+
+    res.json({ message: `Matched ${matches.length} candidate(s)`, matchCount: matches.length });
+  } catch (err) {
+    console.error('Error re-matching:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/requests/:id - Delete a request
 router.delete('/:id', (req, res) => {
   try {
