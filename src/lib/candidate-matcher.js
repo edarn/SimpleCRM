@@ -76,16 +76,49 @@ ${candidateSummaries}`
   });
 
   const text = response.content[0].text.trim();
+  let matches;
   try {
-    return JSON.parse(text);
+    matches = JSON.parse(text);
   } catch (err) {
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      matches = JSON.parse(jsonMatch[0]);
+    } else {
+      console.error('Failed to parse candidate matching response:', text.substring(0, 200));
+      return [];
     }
-    console.error('Failed to parse candidate matching response:', text.substring(0, 200));
-    return [];
   }
+
+  // Build lookup maps to resolve AI-returned IDs back to real candidates
+  const idMap = new Map();
+  const nameMap = new Map();
+  candidates.forEach((c, i) => {
+    idMap.set(c.id, c.id);
+    idMap.set(String(i + 1), c.id); // AI might return index "1", "2" etc.
+    nameMap.set(c.name.toLowerCase(), c.id);
+  });
+
+  // Validate and fix candidateId in each match
+  return matches
+    .map(m => {
+      let resolvedId = idMap.get(m.candidateId) || idMap.get(String(m.candidateId));
+      if (!resolvedId && m.candidateId) {
+        // Try partial UUID match or name match
+        const candidate = candidates.find(c =>
+          c.id.startsWith(m.candidateId) || c.id === m.candidateId
+        );
+        if (candidate) resolvedId = candidate.id;
+      }
+      if (!resolvedId && m.candidateName) {
+        resolvedId = nameMap.get(m.candidateName.toLowerCase());
+      }
+      if (!resolvedId) {
+        console.warn('Could not resolve candidateId:', m.candidateId);
+        return null;
+      }
+      return { ...m, candidateId: resolvedId };
+    })
+    .filter(Boolean);
 }
 
 module.exports = { matchCandidates };
