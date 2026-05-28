@@ -5646,20 +5646,26 @@ We're looking for a senior Java developer..."></textarea>
           ${request.clientName ? `<div><span class="text-sm text-slate-500">Client:</span> <span class="text-slate-800">${this.escapeHtml(request.clientName)}</span></div>` : ''}
           ${request.clientEmail ? `<div><span class="text-sm text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(request.clientEmail)}" class="text-sky-600 hover:text-sky-700">${this.escapeHtml(request.clientEmail)}</a></div>` : ''}
           <div><span class="text-sm text-slate-500">Urgency:</span> <span class="text-slate-800">${urgencyLabel}</span></div>
-          ${request.requiredSkills ? `<div class="sm:col-span-2"><span class="text-sm text-slate-500">Required Skills:</span> <span class="text-slate-800">${this.escapeHtml(request.requiredSkills)}</span></div>` : ''}
         </div>
 
-        ${request.description ? `
-        <div class="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
-          <h3 class="text-sm font-semibold text-slate-600 mb-2">Description</h3>
-          <pre class="text-sm text-slate-700 whitespace-pre-wrap font-sans">${this.escapeHtml(request.description)}</pre>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-600 mb-1">Required Skills</label>
+          <input type="text" id="req-skills-input" value="${this.escapeHtml(request.requiredSkills || '')}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 text-sm"
+                 placeholder="e.g. C++, Python, Kubernetes, Linux">
         </div>
-        ` : ''}
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-600 mb-1">Description</label>
+          <textarea id="req-desc-input" rows="4"
+                    class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 text-sm"
+                    placeholder="Describe what's needed...">${this.escapeHtml(request.description || '')}</textarea>
+        </div>
 
         <div class="flex gap-2 mb-6">
-          <button onclick="views.rematchRequest('${request.id}')" id="rematch-btn"
+          <button onclick="views.saveAndRematchRequest('${request.id}')" id="rematch-btn"
                   class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
-            Re-match Candidates
+            Save &amp; Re-match
           </button>
           <button onclick="views.deleteRequest('${request.id}')"
                   class="text-red-500 hover:text-red-700 text-sm font-medium px-4 py-2">Delete Request</button>
@@ -5702,18 +5708,23 @@ We're looking for a senior Java developer..."></textarea>
     }
   },
 
-  async rematchRequest(requestId) {
+  async saveAndRematchRequest(requestId) {
     const btn = document.getElementById('rematch-btn');
     btn.disabled = true;
-    btn.textContent = 'Matching...';
+    btn.textContent = 'Saving & matching...';
     try {
-      const result = await api.post(`/api/requests/${requestId}/rematch`);
-      // Refresh the page to show new matches
+      // Save updated fields first
+      await api.put(`/api/requests/${requestId}`, {
+        requiredSkills: document.getElementById('req-skills-input').value.trim(),
+        description: document.getElementById('req-desc-input').value.trim()
+      });
+      // Then re-match with the updated data
+      await api.post(`/api/requests/${requestId}/rematch`);
       await this.requestDetail(document.getElementById('app'), requestId);
     } catch (err) {
       alert('Error: ' + err.message);
       btn.disabled = false;
-      btn.textContent = 'Re-match Candidates';
+      btn.textContent = 'Save & Re-match';
     }
   },
 
