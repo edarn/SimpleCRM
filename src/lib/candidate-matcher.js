@@ -25,7 +25,8 @@ async function matchCandidates(request, candidates) {
 
     let summary = `[${simpleId}] ${c.name}\nRole: ${c.role || 'Not specified'}\nSkills: ${c.skills || 'Not specified'}`;
     if (c.resumeText) {
-      summary += `\nResume:\n${c.resumeText.substring(0, 2000)}`;
+      // Use up to 4000 chars per candidate to capture experience sections, not just the header
+      summary += `\nResume:\n${c.resumeText.substring(0, 4000)}`;
     }
     return summary;
   }).join('\n\n---\n\n');
