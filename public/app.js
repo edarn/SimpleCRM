@@ -5649,10 +5649,9 @@ We're looking for a senior Java developer..."></textarea>
         </div>
 
         <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-600 mb-1">Required Skills</label>
-          <input type="text" id="req-skills-input" value="${this.escapeHtml(request.requiredSkills || '')}"
-                 class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 text-sm"
-                 placeholder="e.g. C++, Python, Kubernetes, Linux">
+          <label class="block text-sm font-medium text-slate-600 mb-1">Required Skills <span class="text-xs text-slate-400 font-normal">(click = prioritize, double-click = edit, x = remove)</span></label>
+          <div id="req-skills-tags" class="flex flex-wrap gap-2 p-2 border border-slate-300 rounded-lg min-h-[42px] bg-white">
+          </div>
         </div>
 
         <div class="mb-4">
@@ -5698,6 +5697,9 @@ We're looking for a senior Java developer..."></textarea>
         `}
       </div>
     `;
+
+    // Initialize skill tags after DOM is set
+    this.initSkillTags(request.requiredSkills);
   },
 
   async updateRequestStatus(requestId, status) {
@@ -5708,17 +5710,117 @@ We're looking for a senior Java developer..."></textarea>
     }
   },
 
+  // Skills tag management
+  _skillTags: [],
+
+  initSkillTags(skillsString) {
+    // Parse "**Angular**, C++, **Python**" into [{text, priority}]
+    this._skillTags = (skillsString || '').split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => {
+        const priority = s.startsWith('**') && s.endsWith('**');
+        const text = priority ? s.slice(2, -2) : s;
+        return { text, priority };
+      });
+    this.renderSkillTags();
+  },
+
+  renderSkillTags() {
+    const container = document.getElementById('req-skills-tags');
+    if (!container) return;
+    container.innerHTML = this._skillTags.map((tag, i) => `
+      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm cursor-pointer select-none transition-all
+        ${tag.priority ? 'bg-violet-200 text-violet-900 font-bold ring-2 ring-violet-400' : 'bg-slate-100 text-slate-700 font-normal'}"
+        onclick="views.toggleSkillPriority(${i})"
+        ondblclick="views.editSkillTag(${i}, event)">
+        <span id="skill-text-${i}">${this.escapeHtml(tag.text)}</span>
+        <button onclick="event.stopPropagation(); views.removeSkillTag(${i})"
+                class="text-slate-400 hover:text-red-500 ml-0.5 text-xs leading-none">&times;</button>
+      </span>
+    `).join('') + `
+      <button onclick="views.addSkillTag()"
+              class="inline-flex items-center px-2 py-1 rounded-full text-sm text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition-colors">
+        + add
+      </button>
+    `;
+  },
+
+  toggleSkillPriority(index) {
+    this._skillTags[index].priority = !this._skillTags[index].priority;
+    this.renderSkillTags();
+  },
+
+  editSkillTag(index, event) {
+    event.stopPropagation();
+    const span = document.getElementById(`skill-text-${index}`);
+    const tag = this._skillTags[index];
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = tag.text;
+    input.className = 'w-24 px-1 py-0 text-sm border border-violet-300 rounded outline-none bg-white';
+    input.onclick = (e) => e.stopPropagation();
+    input.onblur = () => {
+      const val = input.value.trim();
+      if (val) {
+        this._skillTags[index].text = val;
+      } else {
+        this._skillTags.splice(index, 1);
+      }
+      this.renderSkillTags();
+    };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') input.blur();
+      if (e.key === 'Escape') { input.value = tag.text; input.blur(); }
+    };
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+  },
+
+  removeSkillTag(index) {
+    this._skillTags.splice(index, 1);
+    this.renderSkillTags();
+  },
+
+  addSkillTag() {
+    const container = document.getElementById('req-skills-tags');
+    // Remove the add button temporarily and insert an input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'New skill...';
+    input.className = 'px-2 py-1 text-sm border border-violet-300 rounded-full outline-none w-28 focus:ring-2 focus:ring-violet-500';
+    input.onblur = () => {
+      const val = input.value.trim();
+      if (val) {
+        this._skillTags.push({ text: val, priority: false });
+      }
+      this.renderSkillTags();
+    };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') input.blur();
+      if (e.key === 'Escape') { input.value = ''; input.blur(); }
+    };
+    // Insert before the add button
+    const addBtn = container.querySelector('button:last-child');
+    container.insertBefore(input, addBtn);
+    addBtn.classList.add('hidden');
+    input.focus();
+  },
+
+  getSkillsString() {
+    return this._skillTags.map(t => t.priority ? `**${t.text}**` : t.text).join(', ');
+  },
+
   async saveAndRematchRequest(requestId) {
     const btn = document.getElementById('rematch-btn');
     btn.disabled = true;
     btn.textContent = 'Saving & matching...';
     try {
-      // Save updated fields first
       await api.put(`/api/requests/${requestId}`, {
-        requiredSkills: document.getElementById('req-skills-input').value.trim(),
+        requiredSkills: this.getSkillsString(),
         description: document.getElementById('req-desc-input').value.trim()
       });
-      // Then re-match with the updated data
       await api.post(`/api/requests/${requestId}/rematch`);
       await this.requestDetail(document.getElementById('app'), requestId);
     } catch (err) {

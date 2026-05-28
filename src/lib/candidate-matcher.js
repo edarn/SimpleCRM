@@ -38,10 +38,24 @@ async function matchCandidates(request, candidates) {
 
 Rank the candidates by how well they match the request.
 
+SKILL VERSION NUMBERS:
+Skills may include version requirements like "Angular 14+", "Java11+", "C++17", "React 18+", ".NET 6+".
+These mean the TECHNOLOGY itself with a minimum version preference — NOT an exact string to match.
+- "Angular14+" or "Angular 14+" → the candidate knows Angular (any recent version matches)
+- "Java 11+" → the candidate knows Java (version 11 or later, but any Java experience is relevant)
+- "C++17" → the candidate knows C++ (modern standards preferred)
+- "Python 3.x" → the candidate knows Python 3
+A candidate listing "Angular" or "Angular 17" matches "Angular 14+". Focus on the core technology.
+
+PRIORITIZED SKILLS:
+Skills wrapped in **double asterisks** (e.g. **C++**, **Kubernetes**) are critical/must-have.
+These weigh MORE in scoring. Missing a prioritized skill is a bigger penalty than missing a normal one.
+
 SCORING CRITERIA (apply consistently):
 - Required skills match: up to 50 points
-  - Each required skill found in candidate profile = points proportional to 50 / number of required skills
-  - Partial match (related but not exact skill) = half points
+  - Prioritized skills (**bold**): worth double the points of normal skills
+  - Each matching skill = points proportional to 50 / weighted total
+  - Partial match (related but not exact technology) = half points
 - Role/seniority match: up to 20 points
   - Exact role match = 20, similar role = 10-15, different role = 0-5
 - Experience level: up to 15 points
