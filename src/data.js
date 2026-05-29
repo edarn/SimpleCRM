@@ -2123,6 +2123,21 @@ function deleteInboxEmail(emailId, userId) {
 
 // ============ Consultant Requests ============
 
+function getOpenConsultantRequests(userId) {
+  const teamId = getUserTeamId(userId);
+  let rows;
+  if (teamId) {
+    rows = db.prepare("SELECT * FROM consultant_requests WHERE team_id = ? AND status IN ('open', 'in_progress') ORDER BY created_at DESC").all(teamId);
+  } else {
+    rows = db.prepare("SELECT * FROM consultant_requests WHERE created_by = ? AND status IN ('open', 'in_progress') ORDER BY created_at DESC").all(userId);
+  }
+  return rows.map(r => {
+    const obj = toCamelCase(r);
+    obj.matchedCandidates = JSON.parse(r.matched_candidates || '[]');
+    return obj;
+  });
+}
+
 function getAllConsultantRequests(userId) {
   const teamId = getUserTeamId(userId);
   let rows;
@@ -2336,6 +2351,7 @@ module.exports = {
   deleteInboxEmail,
 
   // Consultant Requests
+  getOpenConsultantRequests,
   getAllConsultantRequests,
   getConsultantRequestById,
   createConsultantRequest,

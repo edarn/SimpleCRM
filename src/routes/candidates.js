@@ -262,12 +262,15 @@ router.post('/:id/files', upload.single('file'), (req, res) => {
     }, userId);
 
     if (result.error) {
-      // Clean up uploaded file since we can't store it
-      try {
-        fs.unlinkSync(path.join(uploadsDir, req.file.filename));
-      } catch (e) { /* ignore */ }
+      try { fs.unlinkSync(path.join(uploadsDir, req.file.filename)); } catch (_) {}
       return res.status(400).json({ error: result.error });
     }
+
+    // Auto-extract resume text in the background for AI matching
+    const { extractTextFromFile } = require('../lib/resume-parser');
+    extractTextFromFile(path.join(uploadsDir, req.file.filename)).then(text => {
+      if (text) data.updateCandidateResumeText(req.params.id, text);
+    }).catch(err => console.error('Resume text extraction error:', err.message));
 
     res.status(201).json(result);
   } catch (err) {
@@ -460,6 +463,99 @@ router.delete('/:id/comments/:commentId', (req, res) => {
   } catch (err) {
     console.error('Error deleting comment:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/candidates/:id/match-requests - Match candidate against open requests
+router.post('/:id/match-requests', async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const candidate = data.getCandidateById(req.params.id, userId);
+    if (!candidate) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
+
+    const openRequests = data.getOpenConsultantRequests(userId);
+    if (openRequests.length === 0) {
+      return res.json({ matches: [] });
+    }
+
+    // Make sure we have resume text
+    let resumeText = '';
+    const db = require('../database');
+    const row = db.prepare('SELECT resume_text FROM candidates WHERE id = ?').get(req.params.id);
+    resumeText = row?.resume_text || '';
+
+    // If no resume text, try to extract from files now
+    if (!resumeText) {
+      const files = data.getCandidateFiles(req.params.id);
+      if (files.length > 0 && uploadsDir) {
+        const { extractTextFromFile } = require('../lib/resume-parser');
+        for (const f of files) {
+          const filePath = path.join(uploadsDir, f.filename);
+          if (fs.existsSync(filePath)) {
+            resumeText = await extractTextFromFile(filePath);
+            if (resumeText) {
+              data.updateCandidateResumeText(req.params.id, resumeText);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    const candidateProfile = `${candidate.name}\nRole: ${candidate.role || 'Not specified'}\nSkills: ${candidate.skills || 'Not specified'}${resumeText ? '\nResume:\n' + resumeText.substring(0, 4000) : ''}`;
+
+    // Match candidate against each open request using AI
+    const Anthropic = require('@anthropic-ai/sdk');
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.json({ matches: [] });
+
+    const client = new Anthropic({ apiKey });
+    const requestSummaries = openRequests.map((r, i) => (
+      `[${i + 1}] ${r.title}\nRole: ${r.role || ''}\nSkills: ${(r.requiredSkills || '').replace(/\*\*/g, '')}\nDescription: ${(r.description || '').substring(0, 500)}`
+    )).join('\n\n---\n\n');
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      temperature: 0,
+      system: `You receive a candidate profile and a list of open consultant requests. Score how well the candidate matches EACH request (0-100). Only return requests where the score is 50 or higher.
+
+Respond with a JSON array (no markdown, just raw JSON):
+[{"id": 1, "score": 75, "reasoning": "Short explanation"}]
+
+Empty array [] if no request matches above 50.`,
+      messages: [{
+        role: 'user',
+        content: `## Candidate\n${candidateProfile}\n\n## Open Requests\n\n${requestSummaries}`
+      }]
+    });
+
+    const text = response.content[0].text.trim();
+    let aiMatches;
+    try {
+      aiMatches = JSON.parse(text);
+    } catch (_) {
+      const m = text.match(/\[[\s\S]*\]/);
+      aiMatches = m ? JSON.parse(m[0]) : [];
+    }
+
+    // Map numeric IDs back to request data
+    const matches = aiMatches
+      .map(m => {
+        const idx = Number(m.id) - 1;
+        const req = openRequests[idx];
+        if (!req) return null;
+        return { requestId: req.id, title: req.title, role: req.role, score: m.score, reasoning: m.reasoning };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+
+    res.json({ matches });
+  } catch (err) {
+    console.error('Error matching requests:', err);
+    res.json({ matches: [] });
   }
 });
 

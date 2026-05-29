@@ -3358,6 +3358,9 @@ const views = {
           </div>
         ` : ''}
 
+        <div id="candidate-request-matches" class="hidden mt-4 pt-4 border-t border-slate-200">
+        </div>
+
         <div class="mt-4 pt-4 border-t border-slate-200">
           <div class="flex justify-between items-center mb-2">
             <h3 class="text-sm font-medium text-slate-500">Files (${fileCount}/5)</h3>
@@ -3456,8 +3459,43 @@ const views = {
       });
     }
 
-    // Load offers in the background
+    // Load offers and request matches in the background
     this.loadOffersList(candidate.id);
+    this.loadCandidateRequestMatches(candidate.id);
+  },
+
+  async loadCandidateRequestMatches(candidateId) {
+    const container = document.getElementById('candidate-request-matches');
+    if (!container) return;
+    try {
+      const result = await api.post(`/api/candidates/${candidateId}/match-requests`);
+      if (!result.matches || result.matches.length === 0) return;
+
+      container.classList.remove('hidden');
+      container.innerHTML = `
+        <h3 class="text-sm font-medium text-slate-500 mb-2">Matching Open Requests</h3>
+        <div class="space-y-2">
+          ${result.matches.map(m => `
+            <a href="#" onclick="router.navigate('request-detail', {id: '${m.requestId}'}); return false;"
+               class="flex items-center gap-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 hover:bg-violet-100/50 transition-colors">
+              <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-violet-200 text-violet-800">
+                ${m.score}%
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-violet-700 truncate">${this.escapeHtml(m.title)}</div>
+                ${m.role ? `<div class="text-xs text-slate-500">${this.escapeHtml(m.role)}</div>` : ''}
+                <div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>
+              </div>
+              <svg class="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </a>
+          `).join('')}
+        </div>
+      `;
+    } catch (err) {
+      console.error('Error loading request matches:', err);
+    }
   },
 
   async loadOffersList(candidateId) {
