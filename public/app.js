@@ -5739,7 +5739,7 @@ We're looking for a senior Java developer..."></textarea>
                 class="text-slate-400 hover:text-red-500 ml-0.5 text-xs leading-none">&times;</button>
       </span>
     `).join('') + `
-      <button onclick="views.addSkillTag()"
+      <button id="skill-add-btn" onclick="views.addSkillTag()"
               class="inline-flex items-center px-2 py-1 rounded-full text-sm text-violet-500 hover:text-violet-700 hover:bg-violet-50 transition-colors">
         + add
       </button>
@@ -5785,7 +5785,7 @@ We're looking for a senior Java developer..."></textarea>
 
   addSkillTag() {
     const container = document.getElementById('req-skills-tags');
-    // Remove the add button temporarily and insert an input
+    const addBtn = document.getElementById('skill-add-btn');
     const input = document.createElement('input');
     input.type = 'text';
     input.placeholder = 'New skill...';
@@ -5801,10 +5801,8 @@ We're looking for a senior Java developer..."></textarea>
       if (e.key === 'Enter') input.blur();
       if (e.key === 'Escape') { input.value = ''; input.blur(); }
     };
-    // Insert before the add button
-    const addBtn = container.querySelector('button:last-child');
-    container.insertBefore(input, addBtn);
     addBtn.classList.add('hidden');
+    container.insertBefore(input, addBtn);
     input.focus();
   },
 
