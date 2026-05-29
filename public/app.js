@@ -5583,11 +5583,20 @@ We're looking for a senior Java developer..."></textarea>
   async requestList(container) {
     const requests = await api.get('/api/requests');
 
+    // Sort: active first (open, in_progress), then closed/filled
+    const activeStatuses = ['open', 'in_progress'];
+    const sorted = [...requests].sort((a, b) => {
+      const aActive = activeStatuses.includes(a.status) ? 0 : 1;
+      const bActive = activeStatuses.includes(b.status) ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
     container.innerHTML = `
       <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h2 class="text-2xl font-bold text-slate-800">Consultant Requests</h2>
-          <p class="text-slate-500">${requests.filter(r => r.status === 'open').length} open, ${requests.length} total</p>
+          <p class="text-slate-500">${requests.filter(r => activeStatuses.includes(r.status)).length} active, ${requests.length} total</p>
         </div>
       </div>
 
@@ -5604,19 +5613,20 @@ We're looking for a senior Java developer..."></textarea>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            ${requests.length === 0 ? `
+            ${sorted.length === 0 ? `
               <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No consultant requests yet. They are created automatically when the AI Inbox receives a request email.</td></tr>
-            ` : requests.map(r => {
+            ` : sorted.map(r => {
+              const isClosed = r.status === 'closed' || r.status === 'filled';
               const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[r.status] || 'bg-slate-100 text-slate-600';
               const urgencyIcon = { urgent: '🔴', high: '🟠', normal: '', low: '🔵' }[r.urgency] || '';
               return `
-              <tr class="hover:bg-violet-50/30 transition-colors cursor-pointer" onclick="router.navigate('request-detail', {id: '${r.id}'})">
+              <tr class="${isClosed ? 'opacity-50' : 'hover:bg-violet-50/30'} transition-colors cursor-pointer" onclick="router.navigate('request-detail', {id: '${r.id}'})">
                 <td class="px-6 py-4" data-label="Request">
-                  <div class="font-medium text-slate-800">${urgencyIcon} ${this.escapeHtml(r.title)}</div>
+                  <div class="font-medium ${isClosed ? 'text-slate-400 line-through' : 'text-slate-800'}">${urgencyIcon} ${this.escapeHtml(r.title)}</div>
                   ${r.role ? `<div class="text-sm text-slate-500">${this.escapeHtml(r.role)}</div>` : ''}
                 </td>
                 <td class="px-6 py-4 text-slate-600" data-label="Client">${this.escapeHtml(r.clientName || r.clientEmail || '-')}</td>
-                <td class="px-6 py-4 text-sm text-slate-600" data-label="Skills">${this.escapeHtml((r.requiredSkills || '').substring(0, 60))}${(r.requiredSkills || '').length > 60 ? '...' : ''}</td>
+                <td class="px-6 py-4 text-sm text-slate-600" data-label="Skills">${this.escapeHtml((r.requiredSkills || '').replace(/\*\*/g, '').substring(0, 60))}${(r.requiredSkills || '').length > 60 ? '...' : ''}</td>
                 <td class="px-6 py-4" data-label="Matches">
                   ${r.matchedCandidates && r.matchedCandidates.length > 0
                     ? `<span class="text-violet-600 font-medium">${r.matchedCandidates.length} match(es)</span>`
@@ -5693,12 +5703,24 @@ We're looking for a senior Java developer..."></textarea>
       </div>
 
       <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
-        <h3 class="text-lg font-semibold text-slate-800 mb-4">Matched Candidates</h3>
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-slate-800">Matched Candidates</h3>
+          ${request.matchedCandidates && request.matchedCandidates.length > 0 ? `
+          <button onclick="views.sendSelectedCandidates('${request.id}')" id="send-selected-btn"
+                  class="bg-gradient-to-r from-sky-500 to-blue-600 text-white px-4 py-2 rounded-lg hover:from-sky-600 hover:to-blue-700 transition-all font-medium shadow-sm text-sm">
+            Send Selected via Outlook
+          </button>
+          ` : ''}
+        </div>
         ${request.matchedCandidates && request.matchedCandidates.length > 0 ? `
         <div class="space-y-3">
-          ${request.matchedCandidates.map((m, i) => `
-          <div class="flex items-start gap-4 p-4 rounded-lg border ${i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50'}">
-            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600'}">
+          ${request.matchedCandidates.map((m, i) => {
+            const wasSent = m.sent;
+            return `
+          <div class="flex items-start gap-3 p-4 rounded-lg border ${wasSent ? 'border-sky-200 bg-sky-50/50' : i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50'}">
+            <input type="checkbox" class="match-select-cb mt-1 h-5 w-5 text-violet-600 rounded border-slate-300 focus:ring-violet-500 cursor-pointer"
+                   data-candidate-id="${m.candidateId}" data-index="${i}">
+            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${wasSent ? 'bg-sky-200 text-sky-800' : i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600'}">
               ${m.score}%
             </div>
             <div class="flex-1">
@@ -5706,12 +5728,13 @@ We're looking for a senior Java developer..."></textarea>
                 <a href="#" onclick="router.navigate('candidate-detail', {id: '${m.candidateId}'}); return false;"
                    class="font-medium text-violet-600 hover:text-violet-700">${this.escapeHtml(m.candidateName || 'Unknown')}</a>
                 ${m.candidateRole ? `<span class="text-sm text-slate-500">${this.escapeHtml(m.candidateRole)}</span>` : ''}
+                ${wasSent ? '<span class="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Sent</span>' : ''}
               </div>
               ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
               <p class="text-sm text-slate-600 mt-1">${this.escapeHtml(m.reasoning)}</p>
             </div>
-          </div>
-          `).join('')}
+          </div>`;
+          }).join('')}
         </div>
         ` : `
         <p class="text-slate-500">No matching candidates found. Make sure candidates have uploaded resumes and click "Extract Resumes" in the Inbox tab.</p>
@@ -5846,6 +5869,43 @@ We're looking for a senior Java developer..."></textarea>
       alert('Error: ' + err.message);
       btn.disabled = false;
       btn.textContent = 'Save & Re-match';
+    }
+  },
+
+  async sendSelectedCandidates(requestId) {
+    const checkboxes = document.querySelectorAll('.match-select-cb:checked');
+    if (checkboxes.length === 0) {
+      alert('Select at least one candidate to send.');
+      return;
+    }
+    const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.dataset.index));
+    const btn = document.getElementById('send-selected-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    try {
+      const res = await fetch(`/api/requests/${requestId}/send-eml`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedIndices })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to generate email');
+      }
+      // Download the .eml file
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'candidate-proposal.eml';
+      a.click();
+      URL.revokeObjectURL(url);
+      // Refresh to show sent markers
+      await this.requestDetail(document.getElementById('app'), requestId);
+    } catch (err) {
+      alert('Error: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Send Selected via Outlook';
     }
   },
 

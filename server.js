@@ -201,7 +201,7 @@ app.use('/api/user-emails', requireAuth, require('./src/routes/user-emails'));
 app.use('/api/inbox', requireAuth, require('./src/routes/inbox')(uploadsDir));
 
 // Consultant Requests
-app.use('/api/requests', requireAuth, require('./src/routes/requests'));
+app.use('/api/requests', requireAuth, require('./src/routes/requests')(uploadsDir));
 
 // Archive routes
 app.use('/api/archive', requireAuth, require('./src/routes/archive'));

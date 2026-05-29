@@ -1,6 +1,11 @@
 const express = require('express');
-const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const data = require('../data');
+const { buildOutlookDraftEml } = require('../lib/eml-builder');
+
+module.exports = function(uploadsDir) {
+  const router = express.Router();
 
 // GET /api/requests - List all consultant requests
 router.get('/', (req, res) => {
@@ -86,6 +91,92 @@ router.post('/:id/rematch', async (req, res) => {
   }
 });
 
+// POST /api/requests/:id/send-eml - Generate Outlook draft with selected candidates
+router.post('/:id/send-eml', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const request = data.getConsultantRequestById(req.params.id, userId);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    const { selectedIndices } = req.body;
+    if (!selectedIndices || selectedIndices.length === 0) {
+      return res.status(400).json({ error: 'No candidates selected' });
+    }
+
+    const matches = request.matchedCandidates || [];
+    const selected = selectedIndices
+      .filter(i => i >= 0 && i < matches.length)
+      .map(i => matches[i]);
+
+    if (selected.length === 0) {
+      return res.status(400).json({ error: 'No valid candidates selected' });
+    }
+
+    // Build email body with candidate presentations
+    const bodyParts = [`Consultant proposal for: ${request.title}\n`];
+    if (request.role) bodyParts.push(`Role: ${request.role}`);
+    if (request.requiredSkills) bodyParts.push(`Required Skills: ${request.requiredSkills.replace(/\*\*/g, '')}\n`);
+    bodyParts.push(`--- Proposed Candidates ---\n`);
+
+    const attachments = [];
+
+    for (const match of selected) {
+      const candidate = data.getCandidateById(match.candidateId, userId);
+      if (!candidate) continue;
+
+      // Add candidate to email body
+      bodyParts.push(`${candidate.name}${candidate.role ? ' — ' + candidate.role : ''}`);
+      bodyParts.push(`Match Score: ${match.score}%`);
+      bodyParts.push(`${match.reasoning}\n`);
+
+      // Find and attach CV files
+      const files = data.getCandidateFiles(match.candidateId);
+      if (files && files.length > 0 && uploadsDir) {
+        for (const file of files) {
+          const filePath = path.join(uploadsDir, file.filename);
+          if (fs.existsSync(filePath)) {
+            const ext = path.extname(file.originalName || file.filename).toLowerCase();
+            const contentType = ext === '.pdf' ? 'application/pdf'
+              : ext === '.docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+              : ext === '.doc' ? 'application/msword'
+              : 'application/octet-stream';
+            attachments.push({
+              filename: file.originalName || file.filename,
+              content: fs.readFileSync(filePath),
+              contentType
+            });
+          }
+        }
+      }
+    }
+
+    const eml = buildOutlookDraftEml({
+      to: request.clientEmail || '',
+      subject: `Consultant Proposal: ${request.title}`,
+      body: bodyParts.join('\n'),
+      attachments
+    });
+
+    // Mark selected candidates as "sent" in the matched_candidates JSON
+    const updatedMatches = matches.map((m, i) => {
+      if (selectedIndices.includes(i)) {
+        return { ...m, sent: true };
+      }
+      return m;
+    });
+    data.updateConsultantRequest(req.params.id, { matchedCandidates: updatedMatches }, userId);
+
+    res.setHeader('Content-Type', 'message/rfc822');
+    res.setHeader('Content-Disposition', 'attachment; filename="candidate-proposal.eml"');
+    res.send(eml);
+  } catch (err) {
+    console.error('Error generating send EML:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/requests/:id - Delete a request
 router.delete('/:id', (req, res) => {
   try {
@@ -100,4 +191,5 @@ router.delete('/:id', (req, res) => {
   }
 });
 
-module.exports = router;
+  return router;
+};
