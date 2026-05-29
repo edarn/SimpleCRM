@@ -522,6 +522,10 @@ router.post('/:id/match-requests', async (req, res) => {
       temperature: 0,
       system: `You receive a candidate profile and a list of open consultant requests. Score how well the candidate matches EACH request (0-100). Only return requests where the score is 50 or higher.
 
+IMPORTANT: Match semantically, not literally. If a request asks for "AWS", the candidate matches if they mention ANY AWS service (S3, EC2, Lambda, DynamoDB, CloudWatch, ECS, EKS, etc.). Same for "Azure" (Azure DevOps, Azure Functions, etc.), "Kubernetes" (EKS, AKS, GKE, Helm), "CI/CD" (Jenkins, GitHub Actions, GitLab CI), "Cloud" (any cloud provider), "SQL" (PostgreSQL, MySQL, MSSQL), etc. Think about what the recruiter actually means, not just the exact keyword.
+
+Skills with version numbers like "Angular 14+" mean the technology itself — "Angular" or "Angular 16" both match.
+
 Respond with a JSON array (no markdown, just raw JSON):
 [{"id": 1, "score": 75, "reasoning": "Short explanation"}]
 

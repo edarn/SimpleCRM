@@ -52,11 +52,28 @@ PRIORITIZED SKILLS:
 Skills wrapped in **double asterisks** (e.g. **C++**, **Kubernetes**) are critical/must-have.
 These weigh MORE in scoring. Missing a prioritized skill is a bigger penalty than missing a normal one.
 
+TECHNOLOGY ECOSYSTEMS — MATCH SEMANTICALLY, NOT LITERALLY:
+When a skill is requested, match ANY evidence of experience within that technology ecosystem. Do NOT require the exact keyword. Examples:
+
+- "AWS" or "Cloud": matches if candidate mentions ANY AWS service (S3, EC2, Lambda, CloudWatch, DynamoDB, RDS, ECS, EKS, ECR, KMS, SQS, SNS, CloudFormation, CDK, IAM, Route53, API Gateway, etc.) or general cloud experience
+- "Azure": matches Azure Portal, Azure DevOps, Azure Functions, Blob Storage, AKS, App Service, etc.
+- "GCP": matches BigQuery, Cloud Run, GKE, Pub/Sub, Cloud Functions, etc.
+- "Kubernetes": matches K8s, EKS, AKS, GKE, Helm, kubectl, Docker orchestration, container orchestration
+- "CI/CD": matches Jenkins, GitHub Actions, GitLab CI, Azure DevOps pipelines, CircleCI, ArgoCD, Terraform, etc.
+- "SQL" or "databases": matches PostgreSQL, MySQL, MSSQL, MariaDB, SQLite, Oracle DB, etc.
+- "NoSQL": matches MongoDB, DynamoDB, Cassandra, Redis, Elasticsearch, etc.
+- "Frontend": matches React, Angular, Vue, Svelte, HTML/CSS/JS, etc.
+- "Backend": matches Node.js, .NET, Java/Spring, Python/Django/Flask, Go, etc.
+- "DevOps": matches Docker, Kubernetes, CI/CD, infrastructure as code, monitoring, etc.
+- "Testing": matches unit testing, integration testing, Jest, Mocha, pytest, JUnit, Cypress, Selenium, etc.
+
+Apply this same reasoning to ANY technology — think about what the recruiter actually means, not just the literal keyword.
+
 SCORING CRITERIA (apply consistently):
 - Required skills match: up to 50 points
   - Prioritized skills (**bold**): worth double the points of normal skills
   - Each matching skill = points proportional to 50 / weighted total
-  - Partial match (related but not exact technology) = half points
+  - Ecosystem match (e.g. S3 experience counts for "AWS") = full points, not partial
 - Role/seniority match: up to 20 points
   - Exact role match = 20, similar role = 10-15, different role = 0-5
 - Experience level: up to 15 points
