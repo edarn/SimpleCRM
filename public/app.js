@@ -526,12 +526,34 @@ const api = {
   }
 };
 
-// Simple router
+// Simple router with browser history support
 const router = {
   currentRoute: null,
+  _skipPush: false, // flag to prevent pushing state on popstate
+
+  // Build hash URL from route + params, e.g. #contacts, #contact-detail/abc123
+  _toHash(route, params) {
+    let hash = '#' + route;
+    if (params.id) hash += '/' + params.id;
+    return hash;
+  },
+
+  // Parse hash URL back to route + params
+  _fromHash(hash) {
+    if (!hash || hash === '#') return { route: 'contacts', params: {} };
+    const parts = hash.replace(/^#/, '').split('/');
+    const route = parts[0];
+    const params = {};
+    if (parts[1]) params.id = parts[1];
+    return { route, params };
+  },
 
   navigate(route, params = {}) {
     this.currentRoute = { route, params };
+    // Push to browser history unless we're handling a popstate event
+    if (!this._skipPush) {
+      history.pushState({ route, params }, '', this._toHash(route, params));
+    }
     this.render();
     this.updateNav();
   },
@@ -983,8 +1005,8 @@ const views = {
     // Already in split-view, just update the selection
     this.selectedContactId = id;
 
-    // Update URL for bookmarking
-    history.replaceState({}, '', `#contact/${id}`);
+    // Update URL for bookmarking (replaceState to avoid extra history entries for split-view clicks)
+    history.replaceState({ route: 'contact-detail', params: { id } }, '', `#contact-detail/${id}`);
 
     // Update selection highlight in list
     this.updateContactSelection(id);
@@ -1092,7 +1114,6 @@ const views = {
   // Close contact detail and return to full-width list
   closeContactDetail() {
     this.selectedContactId = null;
-    history.replaceState({}, '', '#contacts');
     router.navigate('contacts');
   },
 
@@ -5850,12 +5871,23 @@ We're looking for a senior Java developer..."></textarea>
 };
 
 // Initialize app - check auth first
+// Handle browser back/forward buttons
+window.addEventListener('popstate', (e) => {
+  if (!auth.currentUser) return; // not logged in, ignore
+  const { route, params } = e.state || router._fromHash(location.hash);
+  router._skipPush = true;
+  router.navigate(route || 'contacts', params || {});
+  router._skipPush = false;
+});
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize i18n for landing page
   i18n.init();
 
   const isAuthenticated = await auth.checkAuth();
   if (isAuthenticated) {
-    router.navigate('contacts');
+    // Restore route from URL hash if present, otherwise default to contacts
+    const { route, params } = router._fromHash(location.hash);
+    router.navigate(route, params);
   }
 });
