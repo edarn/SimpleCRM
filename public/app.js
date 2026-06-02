@@ -3209,7 +3209,8 @@ const views = {
       (c.email || '').toLowerCase().includes(query) ||
       (c.phone || '').toLowerCase().includes(query) ||
       (c.role || '').toLowerCase().includes(query) ||
-      (c.skills || '').toLowerCase().includes(query);
+      (c.skills || '').toLowerCase().includes(query) ||
+      (c.resumeText || '').toLowerCase().includes(query);
   },
 
   renderCandidateSeparatorRow(count) {

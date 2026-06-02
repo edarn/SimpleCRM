@@ -1562,6 +1562,7 @@ function formatCandidateRow(row) {
     category: row.category || '',
     resumeFilename: row.resume_filename,
     resumeOriginalName: row.resume_original_name,
+    resumeText: row.resume_text || '',
     archivedAt: row.archived_at,
     archiveCategory: row.archive_category,
     createdBy: row.created_by,
