@@ -1,20 +1,6 @@
 // Builds an RFC-822 message (.eml) that, when opened on Windows, makes Outlook
-// open it as a *draft* (because of the X-Unsent: 1 header). The message is
-// multipart/mixed so we can include both the contract .docx and the salary
-// attachment .pdf as base64 attachments.
-//
-// Usage from the route:
-//
-//   const eml = buildOutlookDraftEml({
-//     to: candidate.email, subject, body,
-//     attachments: [
-//       { filename: contractName, content: docxBuffer, contentType: 'application/vnd...' },
-//       { filename: pdfName, content: pdfBuffer, contentType: 'application/pdf' },
-//     ],
-//   });
-//   res.setHeader('Content-Type', 'message/rfc822');
-//   res.setHeader('Content-Disposition', `attachment; filename="${draftName}.eml"`);
-//   res.send(eml);
+// open it as a *draft* (because of the X-Unsent: 1 header). Supports both
+// plain text and HTML bodies with file attachments.
 
 const CRLF = '\r\n';
 
@@ -25,8 +11,6 @@ function generateBoundary() {
 // RFC 2047 encoded-word for non-ASCII header values.
 function encodeHeader(value) {
   const v = String(value || '');
-  // ASCII fast path
-  // eslint-disable-next-line no-control-regex
   if (/^[\x00-\x7F]*$/.test(v)) return v;
   return '=?UTF-8?B?' + Buffer.from(v, 'utf8').toString('base64') + '?=';
 }
@@ -39,8 +23,7 @@ function base64Wrap(buf) {
   return lines.join(CRLF);
 }
 
-// Encode the body as quoted-printable so non-ASCII characters survive but the
-// content stays readable.
+// Encode as quoted-printable for non-ASCII content.
 function quotedPrintable(text) {
   const buf = Buffer.from(text, 'utf8');
   const out = [];
@@ -49,18 +32,12 @@ function quotedPrintable(text) {
     const b = buf[i];
     let token;
     if (b === 0x0D && buf[i + 1] === 0x0A) {
-      out.push(CRLF);
-      lineLen = 0;
-      i++;
-      continue;
+      out.push(CRLF); lineLen = 0; i++; continue;
     }
     if (b === 0x0A) {
-      out.push(CRLF);
-      lineLen = 0;
-      continue;
+      out.push(CRLF); lineLen = 0; continue;
     }
     if ((b === 0x09 || b === 0x20) && (buf[i + 1] === 0x0D || buf[i + 1] === 0x0A || i === buf.length - 1)) {
-      // Trailing whitespace must be encoded.
       token = '=' + b.toString(16).toUpperCase().padStart(2, '0');
     } else if (b === 0x3D || b < 0x20 || b > 0x7E) {
       token = '=' + b.toString(16).toUpperCase().padStart(2, '0');
@@ -68,8 +45,7 @@ function quotedPrintable(text) {
       token = String.fromCharCode(b);
     }
     if (lineLen + token.length > 75) {
-      out.push('=' + CRLF);
-      lineLen = 0;
+      out.push('=' + CRLF); lineLen = 0;
     }
     out.push(token);
     lineLen += token.length;
@@ -81,18 +57,20 @@ function quotedPrintable(text) {
  * Build an Outlook-draft .eml message buffer.
  *
  * @param {Object} opts
- * @param {string} [opts.to]                — recipient address
- * @param {string} [opts.from]              — From header (some Outlook versions ignore this for drafts)
+ * @param {string} [opts.to]         — recipient address
+ * @param {string} [opts.from]       — From header
  * @param {string} opts.subject
- * @param {string} opts.body                — plain text (UTF-8)
+ * @param {string} [opts.body]       — plain text fallback (UTF-8)
+ * @param {string} [opts.htmlBody]   — HTML body (preferred by Outlook)
  * @param {Array<{filename:string, content:Buffer, contentType:string}>} [opts.attachments]
  * @returns {Buffer}
  */
 function buildOutlookDraftEml(opts) {
-  const boundary = generateBoundary();
+  const mixedBoundary = generateBoundary();
+  const altBoundary = generateBoundary();
   const headers = [
     `MIME-Version: 1.0`,
-    `X-Unsent: 1`, // Outlook reads this as "open as draft".
+    `X-Unsent: 1`,
     `Date: ${new Date().toUTCString()}`,
   ];
   if (opts.from) headers.push(`From: ${encodeHeader(opts.from)}`);
@@ -100,29 +78,50 @@ function buildOutlookDraftEml(opts) {
   headers.push(`Subject: ${encodeHeader(opts.subject || '')}`);
 
   const attachments = opts.attachments || [];
-  if (attachments.length === 0) {
+  const hasHtml = !!opts.htmlBody;
+  const plainText = opts.body || '';
+
+  // No attachments and no HTML — simple plain text
+  if (attachments.length === 0 && !hasHtml) {
     headers.push(`Content-Type: text/plain; charset="UTF-8"`);
     headers.push(`Content-Transfer-Encoding: quoted-printable`);
-    return Buffer.from(headers.join(CRLF) + CRLF + CRLF + quotedPrintable(opts.body || ''), 'utf8');
+    return Buffer.from(headers.join(CRLF) + CRLF + CRLF + quotedPrintable(plainText), 'utf8');
   }
 
-  headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+  headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
 
   const parts = [];
-  // Body part
-  parts.push(
-    `--${boundary}${CRLF}` +
-    `Content-Type: text/plain; charset="UTF-8"${CRLF}` +
-    `Content-Transfer-Encoding: quoted-printable${CRLF}${CRLF}` +
-    quotedPrintable(opts.body || '')
-  );
+
+  // Body: multipart/alternative (plain + HTML) or just plain
+  if (hasHtml) {
+    const altPart =
+      `--${mixedBoundary}${CRLF}` +
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"${CRLF}${CRLF}` +
+      `--${altBoundary}${CRLF}` +
+      `Content-Type: text/plain; charset="UTF-8"${CRLF}` +
+      `Content-Transfer-Encoding: quoted-printable${CRLF}${CRLF}` +
+      quotedPrintable(plainText) + CRLF +
+      `--${altBoundary}${CRLF}` +
+      `Content-Type: text/html; charset="UTF-8"${CRLF}` +
+      `Content-Transfer-Encoding: quoted-printable${CRLF}${CRLF}` +
+      quotedPrintable(opts.htmlBody) + CRLF +
+      `--${altBoundary}--`;
+    parts.push(altPart);
+  } else {
+    parts.push(
+      `--${mixedBoundary}${CRLF}` +
+      `Content-Type: text/plain; charset="UTF-8"${CRLF}` +
+      `Content-Transfer-Encoding: quoted-printable${CRLF}${CRLF}` +
+      quotedPrintable(plainText)
+    );
+  }
 
   // Attachment parts
   for (const att of attachments) {
     const filename = att.filename || 'attachment.bin';
     const ct = att.contentType || 'application/octet-stream';
     parts.push(
-      `--${boundary}${CRLF}` +
+      `--${mixedBoundary}${CRLF}` +
       `Content-Type: ${ct}; name="${encodeHeader(filename)}"${CRLF}` +
       `Content-Transfer-Encoding: base64${CRLF}` +
       `Content-Disposition: attachment; filename="${encodeHeader(filename)}"${CRLF}${CRLF}` +
@@ -130,7 +129,7 @@ function buildOutlookDraftEml(opts) {
     );
   }
 
-  const body = parts.join(CRLF) + CRLF + `--${boundary}--${CRLF}`;
+  const body = parts.join(CRLF) + CRLF + `--${mixedBoundary}--${CRLF}`;
   return Buffer.from(headers.join(CRLF) + CRLF + CRLF + body, 'utf8');
 }
 
