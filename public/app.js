@@ -5792,10 +5792,10 @@ We're looking for a senior Java developer..."></textarea>
           ${request.matchedCandidates.map((m, i) => {
             const wasSent = m.sent;
             return `
-          <div class="flex items-start gap-3 p-4 rounded-lg border ${wasSent ? 'border-sky-200 bg-sky-50/50' : i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50'}">
+          <div class="flex items-start gap-3 p-4 rounded-lg border ${wasSent ? 'border-blue-300 bg-blue-100' : i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50'}">
             <input type="checkbox" class="match-select-cb mt-1 h-5 w-5 text-violet-600 rounded border-slate-300 focus:ring-violet-500 cursor-pointer"
                    data-candidate-id="${m.candidateId}" data-index="${i}">
-            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${wasSent ? 'bg-sky-200 text-sky-800' : i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600'}">
+            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${wasSent ? 'bg-blue-300 text-blue-900' : i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600'}">
               ${m.score}%
             </div>
             <div class="flex-1">
@@ -5809,7 +5809,7 @@ We're looking for a senior Java developer..."></textarea>
                   m.candidateCategory === 'contact_later' ? 'bg-red-100 text-red-600' :
                   'bg-slate-100 text-slate-600'
                 }">${this.escapeHtml(this._candidateCategories[m.candidateCategory] || m.candidateCategory)}</span>` : ''}
-                ${wasSent ? '<span class="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Sent</span>' : ''}
+                ${wasSent ? '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 font-medium">Sent</span>' : ''}
               </div>
               ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
               ${m.strengths ? `<p class="text-sm text-emerald-700 mt-1">${this.escapeHtml(m.strengths)}</p>` : ''}
