@@ -162,14 +162,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 
 12. **AI Email Inbox**
    - Emails sent to the system are classified by Claude AI and trigger automatic
-     CRM actions based on content.
+     CRM actions based on content. A single email can produce **multiple actions**
+     (e.g. create a contact AND a consultant request AND a todo).
    - **Authorized sender addresses**: Each user registers their email addresses
      (work, personal, etc.) in Settings. Only emails from registered addresses
      are processed; unrecognized senders are silently discarded.
    - **Email classification**: Each incoming email is sent to Claude AI
-     (claude-sonnet-4-20250514) which classifies it as one of:
+     (claude-sonnet-4-20250514) which classifies it into one or more of:
      - `new_contact` — extract name, email, phone, title, company, department
-       and create a contact (and company if needed). Duplicates detected by email match.
+       and create a contact (and company if needed). Duplicates detected by email
+       match. The AI always creates contacts for external parties in conversations.
      - `consultant_request` — extract request details (title, description,
        required skills, role, client info, urgency) and create a consultant
        request entry. AI-powered candidate matching ranks all candidates with
@@ -177,26 +179,75 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      - `todo` — extract a task summary and create a ToDo. If the sender matches
        a known contact, the ToDo is linked to that contact; otherwise linked as
        `general` type.
+   - **Paste email UI**: A single textarea where raw email content is pasted
+     (headers, body, conversation threads). The AI parses sender, subject, and
+     content automatically. Will be replaced by a webhook endpoint once an
+     inbound email provider is configured.
    - **Confidence threshold**: classifications with confidence < 70% are marked
      for manual review instead of auto-executing.
-   - **Resume text extraction**: PDF (pdf-parse) and DOCX (mammoth) resumes are
-     parsed to text and cached in `candidates.resume_text` for AI matching.
-   - **Candidate matching**: For consultant requests, each candidate's resume
-     text + skills are sent to Claude AI alongside the request, producing a
-     ranked list with scores (0-100) and reasoning.
-   - **Temporary simulation UI**: A "Simulate Email" button in the Inbox tab
-     allows pasting an email (from, subject, body) to test the pipeline without
-     a real inbound email service. Will be replaced by a webhook endpoint
-     (SendGrid Inbound Parse, Mailgun, or Cloudflare Email Workers) once an
-     inbound email provider is configured.
-   - **Inbox tab**: Shows all received emails with status (pending/processing/
-     completed/failed/review), classification, action summary. Click for detail
-     view with original email, extracted data, and link to created entity.
-   - **Requests tab**: Lists all consultant requests with client, required skills,
-     match count, status (open/in_progress/filled/closed), and date. Detail view
-     shows matched candidates ranked by AI score with reasoning.
+   - **Inbox detail**: Shows original email, extracted data, and all actions taken.
+     Each action has a type badge, view link, and delete button (for unwanted
+     contacts created from long conversation threads).
    - **New dependencies**: `@anthropic-ai/sdk`, `pdf-parse`, `mammoth`
    - **New env var**: `ANTHROPIC_API_KEY`
+
+13. **Consultant Requests**
+   - Requests tab lists all consultant requests with client, required skills,
+     match count, status, and date.
+   - **Status lifecycle**: open → in_progress → filled/closed. Active requests
+     (open/in_progress) sort first; closed/filled requests are grayed out.
+   - **Editable skills**: Required skills displayed as interactive tags.
+     Click = toggle priority (bold = critical, weighs more in scoring).
+     Double-click = edit text inline. x = remove. + = add new.
+   - **Editable description**: Free-text description field.
+   - **Save & Re-match**: Saves skill/description changes and triggers fresh
+     AI candidate matching in one click.
+   - **Candidate matching scoring** (0–100):
+     - Skills match: 50 points (all skills equal weight)
+     - Priority bonus: 15 points (separate pool for **bold** skills only —
+       marking a skill as priority never lowers candidates who have it)
+     - Role/seniority: 20 points
+     - Overall fit: 15 points
+   - **Semantic matching**: version numbers (Angular 14+ = any Angular),
+     technology ecosystems (S3/Lambda/DynamoDB = AWS experience),
+     and related tools (Jenkins/GitHub Actions = CI/CD).
+   - **Match results**: Each candidate shows score, strengths (green), and
+     gaps (red) separately. Category badge shows availability status.
+   - **Send via Outlook**: Select candidates with checkboxes, click "Send
+     Selected via Outlook" to generate an .eml draft with HTML-formatted
+     candidate presentations (strengths/gaps) and CV files attached. Sent
+     candidates are marked with a blue "Sent" badge.
+   - **Matching uses simple numeric IDs** (not UUIDs) for reliable AI
+     round-trips. Results cached in DB and sorted by score descending.
+
+14. **CV Bulk Import**
+   - "Import CVs" button on the Candidates tab opens a modal to upload
+     multiple PDF/DOCX files (up to 20).
+   - User chooses category: new candidate (In Progress) or existing
+     employee (Anställd utan uppdrag).
+   - Claude AI extracts name, email, phone, role, and skills from each CV.
+   - Each auto-created profile gets a comment "Automatiskt skapad via CV import".
+   - Resume text is cached for AI matching. File is stored as candidate's resume.
+
+15. **Candidate-to-Request Matching**
+   - When viewing a candidate, cached matches against open consultant requests
+     are shown instantly (no AI delay on page load).
+   - Matches scoring >50% displayed as clickable cards with score, title,
+     role, and reasoning. Click navigates to the request.
+   - Cache invalidated when CV is uploaded (re-matches automatically in
+     background). Manual "Refresh" button for on-demand re-matching.
+   - File uploads auto-extract resume text for AI matching.
+
+16. **Resume Text Search**
+   - Candidate search in the list view now matches against the full extracted
+     CV text in addition to name, email, phone, role, and skills.
+
+17. **Browser History Support**
+   - Every navigation pushes to browser history with hash URLs
+     (e.g. #contacts, #candidate-detail/uuid, #request-detail/uuid).
+   - Back/forward buttons navigate between views correctly.
+   - Deep-linking and bookmarking URLs works — reload restores the view.
+   - Split-view contact clicks use replaceState to avoid history flooding.
 
 ### Non-Functional Requirements
 
@@ -226,6 +277,8 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 | AI Classification | @anthropic-ai/sdk | Claude AI email classification & candidate matching |
 | PDF text extraction | pdf-parse | Extract text from PDF resumes for AI matching |
 | DOCX text extraction | mammoth | Extract text from DOCX resumes for AI matching |
+| Security headers | helmet | CSP, HSTS, X-Frame-Options, nosniff |
+| Rate limiting | express-rate-limit | Auth (20/15min) and API (120/min) rate limits |
 
 ---
 
@@ -388,6 +441,8 @@ CREATE TABLE candidates (
   skills TEXT DEFAULT '',
   resume_filename TEXT DEFAULT '',
   resume_original_name TEXT DEFAULT '',
+  resume_text TEXT DEFAULT '',
+  request_matches TEXT DEFAULT '[]',
   team_id TEXT,
   created_by TEXT,
   created_at TEXT NOT NULL,
@@ -690,7 +745,13 @@ VibeCodingProject/
 │   │   ├── eml-builder.js        # Builds Outlook-draft .eml with attachments
 │   │   ├── email-classifier.js  # Claude AI email classification & extraction
 │   │   ├── resume-parser.js     # PDF/DOCX text extraction for resumes
-│   │   └── candidate-matcher.js # AI-powered candidate-to-request matching
+│   │   ├── candidate-matcher.js # AI-powered candidate-to-request matching
+│   │   ├── cv-parser.js         # AI-powered CV field extraction for bulk import
+│   │   └── security-logger.js   # Security event logging
+│   ├── middleware/
+│   │   ├── auth.js              # Authentication + team revalidation
+│   │   ├── validate.js          # Input field length limits
+│   │   └── file-validate.js     # Magic byte file validation
 │   ├── middleware/
 │   │   └── auth.js        # Authentication middleware
 │   └── routes/
@@ -829,6 +890,9 @@ VibeCodingProject/
 | POST | /api/candidates/:id/comments | Add comment |
 | PUT | /api/candidates/:id/comments/:commentId | Update comment |
 | DELETE | /api/candidates/:id/comments/:commentId | Delete comment |
+| GET | /api/candidates/:id/match-requests | Get cached request matches for candidate |
+| POST | /api/candidates/:id/match-requests | Run fresh AI matching against open requests |
+| POST | /api/candidates/import-cvs | Bulk import candidates from CV files (multipart) |
 
 ### Candidate Offers (Protected)
 
@@ -872,7 +936,9 @@ VibeCodingProject/
 |--------|----------|-------------|
 | GET | /api/requests | List all consultant requests |
 | GET | /api/requests/:id | Get single request with enriched match details |
-| PUT | /api/requests/:id | Update request (status, etc.) |
+| PUT | /api/requests/:id | Update request (status, skills, description) |
+| POST | /api/requests/:id/rematch | Re-run AI candidate matching |
+| POST | /api/requests/:id/send-eml | Generate Outlook draft with selected candidates |
 | DELETE | /api/requests/:id | Delete a request |
 
 ### Health Check
