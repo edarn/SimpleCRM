@@ -34,7 +34,8 @@ router.get('/:id', (req, res) => {
           ...match,
           candidateName: candidate ? candidate.name : 'Unknown',
           candidateRole: candidate ? candidate.role : '',
-          candidateSkills: candidate ? candidate.skills : ''
+          candidateSkills: candidate ? candidate.skills : '',
+          candidateCategory: candidate ? candidate.category : ''
         };
       });
     }

@@ -5767,6 +5767,12 @@ We're looking for a senior Java developer..."></textarea>
                 <a href="#" onclick="router.navigate('candidate-detail', {id: '${m.candidateId}'}); return false;"
                    class="font-medium text-violet-600 hover:text-violet-700">${this.escapeHtml(m.candidateName || 'Unknown')}</a>
                 ${m.candidateRole ? `<span class="text-sm text-slate-500">${this.escapeHtml(m.candidateRole)}</span>` : ''}
+                ${m.candidateCategory ? `<span class="text-xs px-2 py-0.5 rounded-full ${
+                  m.candidateCategory === 'in_progress' ? 'bg-emerald-100 text-emerald-700' :
+                  m.candidateCategory === 'employed_no_assignment' ? 'bg-emerald-200 text-emerald-900' :
+                  m.candidateCategory === 'contact_later' ? 'bg-red-100 text-red-600' :
+                  'bg-slate-100 text-slate-600'
+                }">${this.escapeHtml(this._candidateCategories[m.candidateCategory] || m.candidateCategory)}</span>` : ''}
                 ${wasSent ? '<span class="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Sent</span>' : ''}
               </div>
               ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
