@@ -89,7 +89,7 @@ RULES:
 - IMPORTANT: Use the candidate NUMBER (1, 2, 3...) as the "id" field. Do NOT invent or modify the number.
 
 Respond with a JSON array (no markdown, just raw JSON) ordered best to worst:
-[{"id": 1, "score": 85, "reasoning": "Strong match because..."}]
+[{"id": 1, "score": 85, "strengths": "What matches well — specific skills, experience, and qualities that fit the request.", "gaps": "What is missing or weak — specific skills or experience not found in the profile. Empty string if nothing is missing."}]
 
 Empty array [] if no candidates match.`,
     messages: [{
@@ -132,7 +132,9 @@ ${candidateSummaries}`
       return {
         candidateId: realId,
         score: m.score,
-        reasoning: m.reasoning
+        strengths: m.strengths || '',
+        gaps: m.gaps || '',
+        reasoning: m.reasoning || [m.strengths, m.gaps].filter(Boolean).join(' ')
       };
     })
     .filter(Boolean);

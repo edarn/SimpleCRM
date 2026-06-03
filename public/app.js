@@ -3522,7 +3522,9 @@ const views = {
             <div class="flex-1 min-w-0">
               <div class="font-medium text-violet-700 truncate">${this.escapeHtml(m.title)}</div>
               ${m.role ? `<div class="text-xs text-slate-500">${this.escapeHtml(m.role)}</div>` : ''}
-              <div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>
+              ${m.strengths ? `<div class="text-xs text-emerald-700 mt-0.5">${this.escapeHtml(m.strengths)}</div>` : ''}
+                ${m.gaps ? `<div class="text-xs text-red-500 mt-0.5">${this.escapeHtml(m.gaps)}</div>` : ''}
+                ${!m.strengths && m.reasoning ? `<div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>` : ''}
             </div>
             <svg class="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
@@ -5810,7 +5812,9 @@ We're looking for a senior Java developer..."></textarea>
                 ${wasSent ? '<span class="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Sent</span>' : ''}
               </div>
               ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
-              <p class="text-sm text-slate-600 mt-1">${this.escapeHtml(m.reasoning)}</p>
+              ${m.strengths ? `<p class="text-sm text-emerald-700 mt-1">${this.escapeHtml(m.strengths)}</p>` : ''}
+              ${m.gaps ? `<p class="text-sm text-red-500 mt-1">${this.escapeHtml(m.gaps)}</p>` : ''}
+              ${!m.strengths && m.reasoning ? `<p class="text-sm text-slate-600 mt-1">${this.escapeHtml(m.reasoning)}</p>` : ''}
             </div>
           </div>`;
           }).join('')}

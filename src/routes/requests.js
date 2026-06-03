@@ -133,16 +133,22 @@ router.post('/:id/send-eml', (req, res) => {
 
       // Plain text version
       plainParts.push(`${candidate.name}${candidate.role ? ' — ' + candidate.role : ''}`);
-      plainParts.push(`${match.reasoning}`);
+      if (match.strengths) plainParts.push(`+ ${match.strengths}`);
+      if (match.gaps) plainParts.push(`- ${match.gaps}`);
+      if (!match.strengths && match.reasoning) plainParts.push(match.reasoning);
       plainParts.push('');
 
       // HTML version
+      const strengthsHtml = match.strengths ? `<div style="font-size: 13px; color: #166534; margin-top: 8px; line-height: 1.5;">&#10003; ${esc(match.strengths)}</div>` : '';
+      const gapsHtml = match.gaps ? `<div style="font-size: 13px; color: #dc2626; margin-top: 4px; line-height: 1.5;">&#10007; ${esc(match.gaps)}</div>` : '';
+      const fallbackHtml = !match.strengths && match.reasoning ? `<div style="font-size: 13px; color: #475569; margin-top: 8px; line-height: 1.5;">${esc(match.reasoning)}</div>` : '';
+
       htmlCandidates += `
         <tr>
           <td style="padding: 16px; border-bottom: 1px solid #e2e8f0;">
             <div style="font-size: 16px; font-weight: 600; color: #1e293b;">${esc(candidate.name)}</div>
             ${candidate.role ? `<div style="font-size: 13px; color: #64748b; margin-top: 2px;">${esc(candidate.role)}</div>` : ''}
-            <div style="font-size: 13px; color: #475569; margin-top: 8px; line-height: 1.5;">${esc(match.reasoning)}</div>
+            ${strengthsHtml}${gapsHtml}${fallbackHtml}
             ${candidate.skills ? `<div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">Skills: ${esc(candidate.skills)}</div>` : ''}
           </td>
         </tr>`;
