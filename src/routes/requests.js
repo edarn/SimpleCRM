@@ -139,19 +139,12 @@ router.post('/:id/send-eml', (req, res) => {
       plainParts.push('');
 
       // HTML version
-      const strengthsHtml = match.strengths ? `<div style="font-size: 13px; color: #166534; margin-top: 8px; line-height: 1.5;">&#10003; ${esc(match.strengths)}</div>` : '';
-      const gapsHtml = match.gaps ? `<div style="font-size: 13px; color: #dc2626; margin-top: 4px; line-height: 1.5;">&#10007; ${esc(match.gaps)}</div>` : '';
-      const fallbackHtml = !match.strengths && match.reasoning ? `<div style="font-size: 13px; color: #475569; margin-top: 8px; line-height: 1.5;">${esc(match.reasoning)}</div>` : '';
-
-      htmlCandidates += `
-        <tr>
-          <td style="padding: 16px; border-bottom: 1px solid #e2e8f0;">
-            <div style="font-size: 16px; font-weight: 600; color: #1e293b;">${esc(candidate.name)}</div>
-            ${candidate.role ? `<div style="font-size: 13px; color: #64748b; margin-top: 2px;">${esc(candidate.role)}</div>` : ''}
-            ${strengthsHtml}${gapsHtml}${fallbackHtml}
-            ${candidate.skills ? `<div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">Skills: ${esc(candidate.skills)}</div>` : ''}
-          </td>
-        </tr>`;
+      htmlCandidates += `<h3 style="margin: 16px 0 4px 0; font-size: 15px; color: #1e293b;">${esc(candidate.name)}${candidate.role ? ` <span style="font-weight: normal; color: #64748b;">— ${esc(candidate.role)}</span>` : ''}</h3>\n`;
+      if (match.strengths) htmlCandidates += `<p style="margin: 4px 0; color: #166534;">&#10003; ${esc(match.strengths)}</p>\n`;
+      if (match.gaps) htmlCandidates += `<p style="margin: 4px 0; color: #dc2626;">&#10007; ${esc(match.gaps)}</p>\n`;
+      if (!match.strengths && match.reasoning) htmlCandidates += `<p style="margin: 4px 0; color: #475569;">${esc(match.reasoning)}</p>\n`;
+      if (candidate.skills) htmlCandidates += `<p style="margin: 4px 0; font-size: 12px; color: #94a3b8;">Skills: ${esc(candidate.skills)}</p>\n`;
+      htmlCandidates += `<hr style="border: none; border-top: 1px solid #e2e8f0; margin: 12px 0;">\n`;
 
       // Attach CV files
       const files = data.getCandidateFiles(match.candidateId);
@@ -176,34 +169,15 @@ router.post('/:id/send-eml', (req, res) => {
 
     const htmlBody = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
-<body style="margin: 0; padding: 0; font-family: Calibri, Arial, sans-serif; background-color: #f8fafc;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 640px; margin: 0 auto; background-color: #ffffff;">
-    <tr>
-      <td style="padding: 24px 24px 16px; border-bottom: 2px solid #7c3aed;">
-        <div style="font-size: 20px; font-weight: 700; color: #1e293b;">Consultant Proposal</div>
-        <div style="font-size: 15px; color: #475569; margin-top: 4px;">${esc(request.title)}</div>
-        ${request.role ? `<div style="font-size: 13px; color: #64748b; margin-top: 2px;">Role: ${esc(request.role)}</div>` : ''}
-        ${skills ? `<div style="font-size: 13px; color: #64748b; margin-top: 2px;">Required: ${esc(skills)}</div>` : ''}
-      </td>
-    </tr>
-    <tr>
-      <td style="padding: 16px 24px 8px;">
-        <div style="font-size: 14px; font-weight: 600; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.05em;">Proposed Candidates (${selected.length})</div>
-      </td>
-    </tr>
-    <tr>
-      <td style="padding: 0 24px;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
-          ${htmlCandidates}
-        </table>
-      </td>
-    </tr>
-    <tr>
-      <td style="padding: 16px 24px; font-size: 12px; color: #94a3b8;">
-        CVs are attached to this email. Please review and let me know if you'd like to proceed with any of the candidates.
-      </td>
-    </tr>
-  </table>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #1e293b;">
+<h2 style="color: #7c3aed; margin-bottom: 4px;">Consultant Proposal</h2>
+<p style="margin: 2px 0;"><b>${esc(request.title)}</b></p>
+${request.role ? `<p style="margin: 2px 0; color: #64748b;">Role: ${esc(request.role)}</p>` : ''}
+${skills ? `<p style="margin: 2px 0; color: #64748b;">Required: ${esc(skills)}</p>` : ''}
+<br>
+<p style="font-size: 13px; font-weight: 600; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.05em;">Proposed Candidates (${selected.length})</p>
+${htmlCandidates}
+<p style="font-size: 12px; color: #94a3b8;">CVs are attached to this email.</p>
 </body></html>`;
 
     const eml = buildOutlookDraftEml({
