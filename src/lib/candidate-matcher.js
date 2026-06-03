@@ -50,7 +50,7 @@ A candidate listing "Angular" or "Angular 17" matches "Angular 14+". Focus on th
 
 PRIORITIZED SKILLS:
 Skills wrapped in **double asterisks** (e.g. **C++**, **Kubernetes**) are critical/must-have.
-These weigh MORE in scoring. Missing a prioritized skill is a bigger penalty than missing a normal one.
+These do NOT change the base skills scoring. Instead they unlock a separate BONUS (see scoring below).
 
 TECHNOLOGY ECOSYSTEMS — MATCH SEMANTICALLY, NOT LITERALLY:
 When a skill is requested, match ANY evidence of experience within that technology ecosystem. Do NOT require the exact keyword. Examples:
@@ -71,14 +71,18 @@ Apply this same reasoning to ANY technology — think about what the recruiter a
 
 SCORING CRITERIA (apply consistently):
 - Required skills match: up to 50 points
-  - Prioritized skills (**bold**): worth double the points of normal skills
-  - Each matching skill = points proportional to 50 / weighted total
+  - ALL skills (bold or not) are treated equally in this pool
+  - Each matching skill = 50 / number of required skills
   - Ecosystem match (e.g. S3 experience counts for "AWS") = full points, not partial
+- Priority bonus: up to 15 points (SEPARATE from the 50 above)
+  - Only awarded based on **bold** prioritized skills
+  - If there are N prioritized skills, each one matched = 15/N bonus points
+  - Matching ALL prioritized skills = full 15 points
+  - No prioritized skills in the request = skip this category, redistribute 15 points to skills (making it 65 points for skills)
+  - CRITICAL: marking a skill as prioritized must NEVER lower the score of a candidate who HAS that skill
 - Role/seniority match: up to 20 points
   - Exact role match = 20, similar role = 10-15, different role = 0-5
-- Experience level: up to 15 points
-  - Matches requested seniority = 15, one level off = 8, far off = 0-3
-- Overall profile fit (language, location, availability, soft skills): up to 15 points
+- Overall profile fit (language, experience level, location, soft skills): up to 15 points
 
 RULES:
 - Be consistent: the same candidate with the same request must always get approximately the same score.
@@ -137,7 +141,8 @@ ${candidateSummaries}`
         reasoning: m.reasoning || [m.strengths, m.gaps].filter(Boolean).join(' ')
       };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
 }
 
 module.exports = { matchCandidates };
