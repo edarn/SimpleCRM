@@ -266,10 +266,20 @@ router.post('/:id/files', upload.single('file'), (req, res) => {
       return res.status(400).json({ error: result.error });
     }
 
-    // Auto-extract resume text in the background for AI matching
+    // Auto-extract resume text and run request matching in the background
     const { extractTextFromFile } = require('../lib/resume-parser');
-    extractTextFromFile(path.join(uploadsDir, req.file.filename)).then(text => {
-      if (text) data.updateCandidateResumeText(req.params.id, text);
+    const candidateId = req.params.id;
+    extractTextFromFile(path.join(uploadsDir, req.file.filename)).then(async (text) => {
+      if (text) {
+        data.updateCandidateResumeText(candidateId, text);
+        // Trigger request matching with fresh text
+        const candidate = data.getCandidateById(candidateId, userId);
+        if (candidate) {
+          await runCandidateRequestMatching(candidateId, candidate, userId).catch(e =>
+            console.error('Background request matching error:', e.message)
+          );
+        }
+      }
     }).catch(err => console.error('Resume text extraction error:', err.message));
 
     res.status(201).json(result);
@@ -466,7 +476,21 @@ router.delete('/:id/comments/:commentId', (req, res) => {
   }
 });
 
-// POST /api/candidates/:id/match-requests - Match candidate against open requests
+// GET /api/candidates/:id/match-requests - Get cached request matches
+router.get('/:id/match-requests', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const candidate = data.getCandidateById(req.params.id, userId);
+    if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+    const matches = data.getCandidateRequestMatches(req.params.id);
+    res.json({ matches, cached: true });
+  } catch (err) {
+    console.error('Error getting cached matches:', err);
+    res.json({ matches: [], cached: true });
+  }
+});
+
+// POST /api/candidates/:id/match-requests - Run fresh AI matching and cache results
 router.post('/:id/match-requests', async (req, res) => {
   try {
     const userId = req.session.userId;
@@ -475,52 +499,59 @@ router.post('/:id/match-requests', async (req, res) => {
       return res.status(404).json({ error: 'Candidate not found' });
     }
 
-    const openRequests = data.getOpenConsultantRequests(userId);
-    if (openRequests.length === 0) {
-      return res.json({ matches: [] });
-    }
+    const matches = await runCandidateRequestMatching(req.params.id, candidate, userId);
+    res.json({ matches, cached: false });
+  } catch (err) {
+    console.error('Error matching requests:', err);
+    res.json({ matches: [], cached: false });
+  }
+});
 
-    // Make sure we have resume text
-    let resumeText = '';
-    const db = require('../database');
-    const row = db.prepare('SELECT resume_text FROM candidates WHERE id = ?').get(req.params.id);
-    resumeText = row?.resume_text || '';
+// Shared matching logic — used by the endpoint and by file upload trigger
+async function runCandidateRequestMatching(candidateId, candidate, userId) {
+  const openRequests = data.getOpenConsultantRequests(userId);
+  if (openRequests.length === 0) {
+    data.updateCandidateRequestMatches(candidateId, []);
+    return [];
+  }
 
-    // If no resume text, try to extract from files now
-    if (!resumeText) {
-      const files = data.getCandidateFiles(req.params.id);
-      if (files.length > 0 && uploadsDir) {
-        const { extractTextFromFile } = require('../lib/resume-parser');
-        for (const f of files) {
-          const filePath = path.join(uploadsDir, f.filename);
-          if (fs.existsSync(filePath)) {
-            resumeText = await extractTextFromFile(filePath);
-            if (resumeText) {
-              data.updateCandidateResumeText(req.params.id, resumeText);
-              break;
-            }
+  const db = require('../database');
+  const row = db.prepare('SELECT resume_text FROM candidates WHERE id = ?').get(candidateId);
+  let resumeText = row?.resume_text || '';
+
+  if (!resumeText) {
+    const files = data.getCandidateFiles(candidateId);
+    if (files.length > 0 && uploadsDir) {
+      const { extractTextFromFile } = require('../lib/resume-parser');
+      for (const f of files) {
+        const filePath = path.join(uploadsDir, f.filename);
+        if (fs.existsSync(filePath)) {
+          resumeText = await extractTextFromFile(filePath);
+          if (resumeText) {
+            data.updateCandidateResumeText(candidateId, resumeText);
+            break;
           }
         }
       }
     }
+  }
 
-    const candidateProfile = `${candidate.name}\nRole: ${candidate.role || 'Not specified'}\nSkills: ${candidate.skills || 'Not specified'}${resumeText ? '\nResume:\n' + resumeText.substring(0, 4000) : ''}`;
+  const candidateProfile = `${candidate.name}\nRole: ${candidate.role || 'Not specified'}\nSkills: ${candidate.skills || 'Not specified'}${resumeText ? '\nResume:\n' + resumeText.substring(0, 4000) : ''}`;
 
-    // Match candidate against each open request using AI
-    const Anthropic = require('@anthropic-ai/sdk');
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return res.json({ matches: [] });
+  const Anthropic = require('@anthropic-ai/sdk');
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return [];
 
-    const client = new Anthropic({ apiKey });
-    const requestSummaries = openRequests.map((r, i) => (
-      `[${i + 1}] ${r.title}\nRole: ${r.role || ''}\nSkills: ${(r.requiredSkills || '').replace(/\*\*/g, '')}\nDescription: ${(r.description || '').substring(0, 500)}`
-    )).join('\n\n---\n\n');
+  const client = new Anthropic({ apiKey });
+  const requestSummaries = openRequests.map((r, i) => (
+    `[${i + 1}] ${r.title}\nRole: ${r.role || ''}\nSkills: ${(r.requiredSkills || '').replace(/\*\*/g, '')}\nDescription: ${(r.description || '').substring(0, 500)}`
+  )).join('\n\n---\n\n');
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      temperature: 0,
-      system: `You receive a candidate profile and a list of open consultant requests. Score how well the candidate matches EACH request (0-100). Only return requests where the score is 50 or higher.
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2000,
+    temperature: 0,
+    system: `You receive a candidate profile and a list of open consultant requests. Score how well the candidate matches EACH request (0-100). Only return requests where the score is 50 or higher.
 
 IMPORTANT: Match semantically, not literally. If a request asks for "AWS", the candidate matches if they mention ANY AWS service (S3, EC2, Lambda, DynamoDB, CloudWatch, ECS, EKS, etc.). Same for "Azure" (Azure DevOps, Azure Functions, etc.), "Kubernetes" (EKS, AKS, GKE, Helm), "CI/CD" (Jenkins, GitHub Actions, GitLab CI), "Cloud" (any cloud provider), "SQL" (PostgreSQL, MySQL, MSSQL), etc. Think about what the recruiter actually means, not just the exact keyword.
 
@@ -530,38 +561,35 @@ Respond with a JSON array (no markdown, just raw JSON):
 [{"id": 1, "score": 75, "reasoning": "Short explanation"}]
 
 Empty array [] if no request matches above 50.`,
-      messages: [{
-        role: 'user',
-        content: `## Candidate\n${candidateProfile}\n\n## Open Requests\n\n${requestSummaries}`
-      }]
-    });
+    messages: [{
+      role: 'user',
+      content: `## Candidate\n${candidateProfile}\n\n## Open Requests\n\n${requestSummaries}`
+    }]
+  });
 
-    const text = response.content[0].text.trim();
-    let aiMatches;
-    try {
-      aiMatches = JSON.parse(text);
-    } catch (_) {
-      const m = text.match(/\[[\s\S]*\]/);
-      aiMatches = m ? JSON.parse(m[0]) : [];
-    }
-
-    // Map numeric IDs back to request data
-    const matches = aiMatches
-      .map(m => {
-        const idx = Number(m.id) - 1;
-        const req = openRequests[idx];
-        if (!req) return null;
-        return { requestId: req.id, title: req.title, role: req.role, score: m.score, reasoning: m.reasoning };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.score - a.score);
-
-    res.json({ matches });
-  } catch (err) {
-    console.error('Error matching requests:', err);
-    res.json({ matches: [] });
+  const text = response.content[0].text.trim();
+  let aiMatches;
+  try {
+    aiMatches = JSON.parse(text);
+  } catch (_) {
+    const m = text.match(/\[[\s\S]*\]/);
+    aiMatches = m ? JSON.parse(m[0]) : [];
   }
-});
+
+  const matches = aiMatches
+    .map(m => {
+      const idx = Number(m.id) - 1;
+      const r = openRequests[idx];
+      if (!r) return null;
+      return { requestId: r.id, title: r.title, role: r.role, score: m.score, reasoning: m.reasoning };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+
+  // Cache results
+  data.updateCandidateRequestMatches(candidateId, matches);
+  return matches;
+}
 
 // POST /api/candidates/import-cvs - Bulk import candidates from CV files
 router.post('/import-cvs', upload.array('cvFiles', 20), async (req, res) => {

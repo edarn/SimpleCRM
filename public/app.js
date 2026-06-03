@@ -3469,34 +3469,68 @@ const views = {
     const container = document.getElementById('candidate-request-matches');
     if (!container) return;
     try {
-      const result = await api.post(`/api/candidates/${candidateId}/match-requests`);
-      if (!result.matches || result.matches.length === 0) return;
-
-      container.classList.remove('hidden');
-      container.innerHTML = `
-        <h3 class="text-sm font-medium text-slate-500 mb-2">Matching Open Requests</h3>
-        <div class="space-y-2">
-          ${result.matches.map(m => `
-            <a href="#" onclick="router.navigate('request-detail', {id: '${m.requestId}'}); return false;"
-               class="flex items-center gap-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 hover:bg-violet-100/50 transition-colors">
-              <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-violet-200 text-violet-800">
-                ${m.score}%
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="font-medium text-violet-700 truncate">${this.escapeHtml(m.title)}</div>
-                ${m.role ? `<div class="text-xs text-slate-500">${this.escapeHtml(m.role)}</div>` : ''}
-                <div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>
-              </div>
-              <svg class="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-              </svg>
-            </a>
-          `).join('')}
-        </div>
-      `;
+      // Load cached results instantly (GET)
+      const result = await api.get(`/api/candidates/${candidateId}/match-requests`);
+      this._renderRequestMatches(container, result.matches, candidateId);
     } catch (err) {
       console.error('Error loading request matches:', err);
     }
+  },
+
+  async refreshCandidateRequestMatches(candidateId) {
+    const container = document.getElementById('candidate-request-matches');
+    if (!container) return;
+    const btn = document.getElementById('refresh-matches-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Matching...'; }
+    try {
+      const result = await api.post(`/api/candidates/${candidateId}/match-requests`);
+      this._renderRequestMatches(container, result.matches, candidateId);
+    } catch (err) {
+      console.error('Error refreshing request matches:', err);
+      if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+    }
+  },
+
+  _renderRequestMatches(container, matches, candidateId) {
+    if (!matches || matches.length === 0) {
+      container.classList.remove('hidden');
+      container.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-medium text-slate-500">Matching Open Requests</h3>
+          <button id="refresh-matches-btn" onclick="views.refreshCandidateRequestMatches('${candidateId}')"
+                  class="text-xs text-violet-600 hover:text-violet-700 font-medium">Refresh</button>
+        </div>
+        <p class="text-xs text-slate-400">No matching requests found.</p>
+      `;
+      return;
+    }
+
+    container.classList.remove('hidden');
+    container.innerHTML = `
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-medium text-slate-500">Matching Open Requests</h3>
+        <button id="refresh-matches-btn" onclick="views.refreshCandidateRequestMatches('${candidateId}')"
+                class="text-xs text-violet-600 hover:text-violet-700 font-medium">Refresh</button>
+      </div>
+      <div class="space-y-2">
+        ${matches.map(m => `
+          <a href="#" onclick="router.navigate('request-detail', {id: '${m.requestId}'}); return false;"
+             class="flex items-center gap-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 hover:bg-violet-100/50 transition-colors">
+            <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-violet-200 text-violet-800">
+              ${m.score}%
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-violet-700 truncate">${this.escapeHtml(m.title)}</div>
+              ${m.role ? `<div class="text-xs text-slate-500">${this.escapeHtml(m.role)}</div>` : ''}
+              <div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>
+            </div>
+            <svg class="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+          </a>
+        `).join('')}
+      </div>
+    `;
   },
 
   async loadOffersList(candidateId) {

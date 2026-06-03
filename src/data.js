@@ -2209,7 +2209,17 @@ function deleteConsultantRequest(requestId, userId) {
 // ============ Candidate Resume Text ============
 
 function updateCandidateResumeText(candidateId, resumeText) {
-  db.prepare('UPDATE candidates SET resume_text = ? WHERE id = ?').run(resumeText, candidateId);
+  db.prepare('UPDATE candidates SET resume_text = ?, request_matches = \'[]\' WHERE id = ?').run(resumeText, candidateId);
+}
+
+function getCandidateRequestMatches(candidateId) {
+  const row = db.prepare('SELECT request_matches FROM candidates WHERE id = ?').get(candidateId);
+  if (!row || !row.request_matches) return [];
+  try { return JSON.parse(row.request_matches); } catch (_) { return []; }
+}
+
+function updateCandidateRequestMatches(candidateId, matches) {
+  db.prepare('UPDATE candidates SET request_matches = ? WHERE id = ?').run(JSON.stringify(matches), candidateId);
 }
 
 function getCandidatesWithResumes(userId) {
@@ -2361,5 +2371,7 @@ module.exports = {
 
   // Candidate Resume Text
   updateCandidateResumeText,
+  getCandidateRequestMatches,
+  updateCandidateRequestMatches,
   getCandidatesWithResumes
 };

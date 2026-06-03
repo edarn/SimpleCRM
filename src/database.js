@@ -563,6 +563,9 @@ function migrateExistingData() {
   // Add expires_at column to team_invitations for expiration
   addColumnIfNotExists('team_invitations', 'expires_at', 'TEXT');
 
+  // Add request_matches column to candidates for caching AI match results
+  addColumnIfNotExists('candidates', 'request_matches', "TEXT DEFAULT '[]'");
+
   // Add resume_text column to candidates for caching extracted text
   addColumnIfNotExists('candidates', 'resume_text', "TEXT DEFAULT ''");
 
