@@ -3001,7 +3001,6 @@ const views = {
           <span class="text-xs text-slate-500 self-center">Sort:</span>
           <button onclick="views.sortCandidates('name')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Name <span id="sort-candidate-name-m" class="text-rose-600"></span></button>
           <button onclick="views.sortCandidates('role')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Role <span id="sort-candidate-role-m"></span></button>
-          <button onclick="views.sortCandidates('skills')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Skills <span id="sort-candidate-skills-m"></span></button>
         </div>
         <table class="min-w-full divide-y divide-slate-200 responsive-table">
           <thead class="bg-gradient-to-r from-slate-50 to-slate-100">
@@ -3016,10 +3015,6 @@ const views = {
               </th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                 Category
-              </th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
-                  onclick="views.sortCandidates('skills')">
-                Skills <span id="sort-candidate-skills"></span>
               </th>
               ${hasTeam ? `<th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Added By</th>` : ''}
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
@@ -3046,13 +3041,13 @@ const views = {
     const content = document.getElementById('modal-content');
     content.innerHTML = `
       <h3 class="text-lg font-semibold text-slate-800 mb-4">Import CVs</h3>
-      <p class="text-sm text-slate-500 mb-4">Upload one or more CV files (PDF or Word). The AI will extract candidate information automatically.</p>
+      <p class="text-sm text-slate-500 mb-4">Upload CV files (PDF or Word). The AI will extract candidate information automatically.</p>
       <form onsubmit="views.submitCVImport(event)">
         <div class="mb-4">
           <label class="block text-sm font-medium text-slate-700 mb-1">CV Files *</label>
           <input type="file" id="cv-import-files" multiple required accept=".pdf,.doc,.docx"
                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 text-sm">
-          <p class="text-xs text-slate-400 mt-1">PDF, DOC, DOCX. Max 20 files.</p>
+          <p class="text-xs text-slate-400 mt-1">PDF, DOC, DOCX. Up to 50 files.</p>
         </div>
         <div class="mb-4">
           <label class="block text-sm font-medium text-slate-700 mb-2">Category</label>
@@ -3069,13 +3064,13 @@ const views = {
         </div>
         <div id="cv-import-progress" class="hidden mb-4">
           <div class="text-sm text-slate-600 mb-1" id="cv-import-status">Processing...</div>
-          <div class="w-full bg-slate-200 rounded-full h-2">
-            <div id="cv-import-bar" class="bg-violet-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+          <div class="w-full bg-slate-200 rounded-full h-2.5">
+            <div id="cv-import-bar" class="bg-violet-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
           </div>
         </div>
-        <div id="cv-import-results" class="hidden mb-4 max-h-48 overflow-y-auto"></div>
+        <div id="cv-import-results" class="hidden mb-4 max-h-64 overflow-y-auto space-y-1"></div>
         <div class="flex justify-end gap-2">
-          <button type="button" onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
+          <button type="button" onclick="modal.hide()" id="cv-import-close" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
           <button type="submit" id="cv-import-btn" class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm">
             Import
           </button>
@@ -3093,68 +3088,111 @@ const views = {
 
     const category = document.querySelector('input[name="cv-import-category"]:checked').value;
     const btn = document.getElementById('cv-import-btn');
-    const progress = document.getElementById('cv-import-progress');
+    const progressDiv = document.getElementById('cv-import-progress');
     const statusEl = document.getElementById('cv-import-status');
     const bar = document.getElementById('cv-import-bar');
     const resultsEl = document.getElementById('cv-import-results');
 
     btn.disabled = true;
-    btn.textContent = 'Importing...';
-    progress.classList.remove('hidden');
-    statusEl.textContent = `Uploading ${files.length} file(s) and processing with AI...`;
-    bar.style.width = '10%';
+    btn.textContent = 'Uploading...';
+    progressDiv.classList.remove('hidden');
+    resultsEl.classList.remove('hidden');
+    resultsEl.innerHTML = '';
+    statusEl.textContent = `Uploading ${files.length} file(s)...`;
+    bar.style.width = '5%';
+
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('cvFiles', file);
+    }
+    formData.append('category', category);
 
     try {
-      const formData = new FormData();
-      for (const file of files) {
-        formData.append('cvFiles', file);
-      }
-      formData.append('category', category);
-
-      bar.style.width = '30%';
-
-      const res = await fetch('/api/candidates/import-cvs', {
+      const response = await fetch('/api/candidates/import-cvs', {
         method: 'POST',
         body: formData
       });
-      const data = await res.json();
 
-      bar.style.width = '100%';
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Import failed');
+      if (!response.ok && response.headers.get('content-type')?.includes('application/json')) {
+        const err = await response.json();
+        throw new Error(err.error || 'Import failed');
       }
 
-      statusEl.textContent = data.message;
-      resultsEl.classList.remove('hidden');
-      resultsEl.innerHTML = data.results.map(r => {
-        if (r.status === 'created') {
-          return `<div class="flex items-center gap-2 py-1 text-sm">
-            <span class="text-emerald-500">&#10003;</span>
-            <a href="#" onclick="modal.hide(); router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">${this.escapeHtml(r.name)}</a>
-            <span class="text-slate-400">${this.escapeHtml(r.role)}</span>
-          </div>`;
-        } else {
-          return `<div class="flex items-center gap-2 py-1 text-sm">
-            <span class="text-red-500">&#10007;</span>
-            <span class="text-slate-700">${this.escapeHtml(r.file)}</span>
-            <span class="text-red-500 text-xs">${this.escapeHtml(r.error || r.status)}</span>
-          </div>`;
-        }
-      }).join('');
+      btn.textContent = 'Processing...';
+      bar.style.width = '10%';
 
-      btn.textContent = 'Done';
-      // Refresh candidate list after a short delay
-      setTimeout(() => {
-        modal.hide();
-        router.navigate('candidates');
-      }, 3000);
+      // Read SSE stream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete line
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            this._handleImportEvent(evt, statusEl, bar, resultsEl, btn);
+          } catch (_) {}
+        }
+      }
     } catch (err) {
       bar.style.width = '0%';
-      progress.classList.add('hidden');
+      progressDiv.classList.add('hidden');
       btn.disabled = false;
       btn.textContent = 'Import';
       alert('Error: ' + err.message);
+    }
+  },
+
+  _handleImportEvent(evt, statusEl, bar, resultsEl, btn) {
+    if (evt.type === 'start') {
+      statusEl.textContent = `Processing ${evt.total} file(s)...`;
+      return;
+    }
+
+    if (evt.type === 'progress') {
+      const pct = Math.round(((evt.index + 1) / evt.total) * 100);
+      bar.style.width = pct + '%';
+
+      if (evt.status === 'extracting') {
+        statusEl.textContent = `Extracting text: ${this.escapeHtml(evt.file)} (${evt.index + 1}/${evt.total})`;
+      } else if (evt.status === 'parsing') {
+        statusEl.textContent = `AI parsing: ${this.escapeHtml(evt.file)} (${evt.index + 1}/${evt.total})`;
+      } else if (evt.status === 'created') {
+        statusEl.textContent = `Created: ${this.escapeHtml(evt.name)} (${evt.index + 1}/${evt.total})`;
+        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm">
+          <span class="text-emerald-500">&#10003;</span>
+          <a href="#" onclick="modal.hide(); router.navigate('candidate-detail', {id: '${evt.candidateId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">${this.escapeHtml(evt.name)}</a>
+          <span class="text-slate-400">${this.escapeHtml(evt.role || '')}</span>
+        </div>`;
+        resultsEl.scrollTop = resultsEl.scrollHeight;
+      } else if (evt.status === 'skipped' || evt.status === 'error') {
+        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm">
+          <span class="text-red-500">&#10007;</span>
+          <span class="text-slate-700">${this.escapeHtml(evt.file)}</span>
+          <span class="text-red-500 text-xs">${this.escapeHtml(evt.error || evt.status)}</span>
+        </div>`;
+        resultsEl.scrollTop = resultsEl.scrollHeight;
+      }
+      return;
+    }
+
+    if (evt.type === 'done') {
+      bar.style.width = '100%';
+      statusEl.textContent = `Done: ${evt.created} created` + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`;
+      btn.textContent = 'Done';
+      const closeBtn = document.getElementById('cv-import-close');
+      if (closeBtn) {
+        closeBtn.textContent = 'Close';
+        closeBtn.onclick = () => { modal.hide(); router.navigate('candidates'); };
+      }
     }
   },
 
@@ -3173,7 +3211,7 @@ const views = {
   renderCandidateRows(candidates) {
     const categoryLabels = this._candidateCategories;
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
-    const colspan = hasTeam ? 6 : 5;
+    const colspan = hasTeam ? 5 : 4;
     if (candidates.length === 0) {
       return `<tr><td colspan="${colspan}" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
     }
@@ -3185,17 +3223,16 @@ const views = {
       const categoryLabel = c.category ? (categoryLabels[c.category] || c.category) : '-';
       return `
       <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
-        <td class="px-6 py-4 whitespace-nowrap">
+        <td class="px-6 py-3">
           <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
-          ${c.email ? `<div class="text-sm text-slate-500">${this.escapeHtml(c.email)}</div>` : ''}
+          ${c.skills ? `<div class="text-xs text-slate-400 mt-0.5 truncate max-w-md">${this.escapeHtml(c.skills)}</div>` : ''}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Role">${this.escapeHtml(c.role || '-')}</td>
-        <td class="px-6 py-4 whitespace-nowrap" data-label="Category">
+        <td class="px-6 py-3 whitespace-nowrap text-slate-600" data-label="Role">${this.escapeHtml(c.role || '-')}</td>
+        <td class="px-6 py-3 whitespace-nowrap" data-label="Category">
           ${c.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(c.category)}">${this.escapeHtml(categoryLabels[c.category] || c.category)}</span>` : '<span class="text-slate-400">-</span>'}
         </td>
-        <td class="px-6 py-4 text-slate-600" data-label="Skills">${this.escapeHtml(c.skills || '-')}</td>
-        ${hasTeam ? `<td class="px-6 py-4 whitespace-nowrap text-slate-600" data-label="Added By">${this.escapeHtml(c.createdByUsername || '-')}</td>` : ''}
-        <td class="px-6 py-4 whitespace-nowrap" data-label="Status">
+        ${hasTeam ? `<td class="px-6 py-3 whitespace-nowrap text-slate-600" data-label="Added By">${this.escapeHtml(c.createdByUsername || '-')}</td>` : ''}
+        <td class="px-6 py-3 whitespace-nowrap" data-label="Status">
           <div class="text-xs text-slate-700 leading-tight">${this.escapeHtml(ownerLabel)}</div>
           <div class="text-xs text-slate-500 leading-tight">${this.escapeHtml(categoryLabel)}</div>
         </td>
@@ -3215,7 +3252,7 @@ const views = {
 
   renderCandidateSeparatorRow(count) {
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
-    const colspan = hasTeam ? 6 : 5;
+    const colspan = hasTeam ? 5 : 4;
     return `<tr class="bg-slate-50">
       <td colspan="${colspan}" class="px-6 py-2 text-xs text-slate-500 italic border-t border-slate-200">
         Other matches across all candidates and categories (${count})

@@ -209,6 +209,16 @@ app.use('/api/archive', requireAuth, require('./src/routes/archive'));
 // Backup routes (export/import)
 app.use('/api/backup', requireAuth, require('./src/routes/backup')(uploadsDir));
 
+// Handle multer and other errors as JSON instead of HTML
+app.use((err, req, res, next) => {
+  if (err) {
+    console.error('Express error:', err.message);
+    const status = err.status || err.statusCode || 500;
+    return res.status(status).json({ error: err.message || 'Internal server error' });
+  }
+  next();
+});
+
 // Serve index.html for SPA routes
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

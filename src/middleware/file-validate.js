@@ -4,19 +4,23 @@ const path = require('path');
 // Magic byte signatures for allowed file types
 const MAGIC_BYTES = {
   // PDF: %PDF
-  pdf: { bytes: [0x25, 0x50, 0x44, 0x46], ext: '.pdf' },
-  // DOC: D0 CF 11 E0 (OLE2 compound document)
-  doc: { bytes: [0xD0, 0xCF, 0x11, 0xE0], ext: '.doc' },
-  // DOCX/ZIP: PK (50 4B 03 04)
-  docx: { bytes: [0x50, 0x4B, 0x03, 0x04], ext: '.docx' },
+  pdf: [{ bytes: [0x25, 0x50, 0x44, 0x46] }],
+  // DOC: D0 CF 11 E0 (OLE2 compound document — also used by .xls, .ppt)
+  doc: [{ bytes: [0xD0, 0xCF, 0x11, 0xE0] }],
+  // DOCX: ZIP archive variants (PK header with different version bytes)
+  docx: [
+    { bytes: [0x50, 0x4B, 0x03, 0x04] }, // Standard ZIP local file header
+    { bytes: [0x50, 0x4B, 0x05, 0x06] }, // Empty archive / end of central directory
+    { bytes: [0x50, 0x4B, 0x07, 0x08] }, // Spanned archive
+  ],
   // PNG: 89 50 4E 47
-  png: { bytes: [0x89, 0x50, 0x4E, 0x47], ext: '.png' },
+  png: [{ bytes: [0x89, 0x50, 0x4E, 0x47] }],
   // JPEG: FF D8 FF
-  jpg: { bytes: [0xFF, 0xD8, 0xFF], ext: '.jpg' },
+  jpg: [{ bytes: [0xFF, 0xD8, 0xFF] }],
   // GIF: GIF87a or GIF89a
-  gif: { bytes: [0x47, 0x49, 0x46], ext: '.gif' },
+  gif: [{ bytes: [0x47, 0x49, 0x46] }],
   // WebP: RIFF....WEBP
-  webp: { bytes: [0x52, 0x49, 0x46, 0x46], ext: '.webp' },
+  webp: [{ bytes: [0x52, 0x49, 0x46, 0x46] }],
 };
 
 function matchesMagicBytes(buffer, signature) {
@@ -37,19 +41,22 @@ function validateFileMagic(filePath, originalExt) {
 
     const ext = originalExt.toLowerCase();
 
-    // Map extension to expected magic bytes
-    const expectedSignatures = [];
-    if (ext === '.pdf') expectedSignatures.push(MAGIC_BYTES.pdf);
-    if (ext === '.doc') expectedSignatures.push(MAGIC_BYTES.doc);
-    if (ext === '.docx') expectedSignatures.push(MAGIC_BYTES.docx);
-    if (ext === '.png') expectedSignatures.push(MAGIC_BYTES.png);
-    if (ext === '.jpg' || ext === '.jpeg') expectedSignatures.push(MAGIC_BYTES.jpg);
-    if (ext === '.gif') expectedSignatures.push(MAGIC_BYTES.gif);
-    if (ext === '.webp') expectedSignatures.push(MAGIC_BYTES.webp);
+    // Map extension to expected signature arrays
+    const extMap = {
+      '.pdf': MAGIC_BYTES.pdf,
+      '.doc': MAGIC_BYTES.doc,
+      '.docx': MAGIC_BYTES.docx,
+      '.png': MAGIC_BYTES.png,
+      '.jpg': MAGIC_BYTES.jpg,
+      '.jpeg': MAGIC_BYTES.jpg,
+      '.gif': MAGIC_BYTES.gif,
+      '.webp': MAGIC_BYTES.webp,
+    };
 
-    if (expectedSignatures.length === 0) return true; // Unknown extension, skip
+    const signatures = extMap[ext];
+    if (!signatures) return true; // Unknown extension, skip
 
-    return expectedSignatures.some(sig => matchesMagicBytes(buf, sig.bytes));
+    return signatures.some(sig => matchesMagicBytes(buf, sig.bytes));
   } catch (err) {
     console.error('Magic byte validation error:', err.message);
     return false;
