@@ -2060,9 +2060,9 @@ function getAllInboxEmails(userId) {
   const teamId = getUserTeamId(userId);
   let rows;
   if (teamId) {
-    rows = db.prepare('SELECT * FROM email_inbox WHERE team_id = ? ORDER BY created_at DESC').all(teamId);
+    rows = db.prepare('SELECT e.*, u.username as created_by_username FROM email_inbox e LEFT JOIN users u ON u.id = e.user_id WHERE e.team_id = ? ORDER BY e.created_at DESC').all(teamId);
   } else {
-    rows = db.prepare('SELECT * FROM email_inbox WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+    rows = db.prepare('SELECT e.*, u.username as created_by_username FROM email_inbox e LEFT JOIN users u ON u.id = e.user_id WHERE e.user_id = ? ORDER BY e.created_at DESC').all(userId);
   }
   return rows.map(r => {
     const obj = toCamelCase(r);
@@ -2143,9 +2143,9 @@ function getAllConsultantRequests(userId) {
   const teamId = getUserTeamId(userId);
   let rows;
   if (teamId) {
-    rows = db.prepare('SELECT * FROM consultant_requests WHERE team_id = ? ORDER BY created_at DESC').all(teamId);
+    rows = db.prepare('SELECT r.*, u.username as created_by_username FROM consultant_requests r LEFT JOIN users u ON u.id = r.created_by WHERE r.team_id = ? ORDER BY r.created_at DESC').all(teamId);
   } else {
-    rows = db.prepare('SELECT * FROM consultant_requests WHERE created_by = ? ORDER BY created_at DESC').all(userId);
+    rows = db.prepare('SELECT r.*, u.username as created_by_username FROM consultant_requests r LEFT JOIN users u ON u.id = r.created_by WHERE r.created_by = ? ORDER BY r.created_at DESC').all(userId);
   }
   return rows.map(r => {
     const obj = toCamelCase(r);

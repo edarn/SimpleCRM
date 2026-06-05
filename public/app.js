@@ -5412,7 +5412,10 @@ const views = {
           <div class="text-sm text-slate-500 mt-1 truncate">${this.escapeHtml(e.body.substring(0, 120))}${e.body.length > 120 ? '...' : ''}</div>
           ${e.actionSummary ? `<div class="text-xs text-indigo-600 mt-1">${this.escapeHtml(e.actionSummary)}</div>` : ''}
         </div>
-        <div class="text-xs text-slate-400 ml-4 mt-1 shrink-0">${formatDateTime(e.createdAt)}</div>
+        <div class="text-xs text-slate-400 ml-4 mt-1 shrink-0 text-right">
+          <div>${formatDateTime(e.createdAt)}</div>
+          ${e.createdByUsername ? `<div class="text-slate-500">${this.escapeHtml(e.createdByUsername)}</div>` : ''}
+        </div>
       </div>`;
     }).join('');
   },
@@ -5745,7 +5748,10 @@ We're looking for a senior Java developer..."></textarea>
                     : '<span class="text-slate-400">None</span>'}
                 </td>
                 <td class="px-6 py-4" data-label="Status"><span class="text-xs px-2 py-1 rounded-full ${statusColor}">${r.status}</span></td>
-                <td class="px-6 py-4 text-sm text-slate-500" data-label="Date">${formatDateTime(r.createdAt)}</td>
+                <td class="px-6 py-4 text-sm text-slate-500" data-label="Date">
+                  <div>${formatDateTime(r.createdAt)}</div>
+                  ${r.createdByUsername ? `<div class="text-xs text-slate-400">${this.escapeHtml(r.createdByUsername)}</div>` : ''}
+                </td>
               </tr>`;
             }).join('')}
           </tbody>
