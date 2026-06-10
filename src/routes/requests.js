@@ -126,10 +126,13 @@ router.post('/:id/send-eml', (req, res) => {
 
     let htmlCandidates = '';
     const attachments = [];
+    const sentCandidateIds = [];
 
     for (const match of selected) {
       const candidate = data.getCandidateById(match.candidateId, userId);
       if (!candidate) continue;
+
+      sentCandidateIds.push(candidate.id);
 
       // Plain text version
       plainParts.push(`${candidate.name}${candidate.role ? ' — ' + candidate.role : ''}`);
@@ -196,6 +199,17 @@ ${htmlCandidates}
       return m;
     });
     data.updateConsultantRequest(req.params.id, { matchedCandidates: updatedMatches }, userId);
+
+    // Log a small note in each sent candidate's history. Guarded so a note
+    // failure never blocks the .eml download.
+    const noteText = `Skickad till uppdrag: ${request.title}${request.clientName ? ` (${request.clientName})` : ''}`;
+    for (const candidateId of sentCandidateIds) {
+      try {
+        data.createCandidateComment(candidateId, noteText, userId);
+      } catch (noteErr) {
+        console.error('Error adding sent-to-request note for candidate', candidateId, noteErr);
+      }
+    }
 
     res.setHeader('Content-Type', 'message/rfc822');
     res.setHeader('Content-Disposition', 'attachment; filename="candidate-proposal.eml"');

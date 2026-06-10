@@ -216,7 +216,9 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Send via Outlook**: Select candidates with checkboxes, click "Send
      Selected via Outlook" to generate an .eml draft with HTML-formatted
      candidate presentations (strengths/gaps) and CV files attached. Sent
-     candidates are marked with a blue "Sent" badge.
+     candidates are marked with a blue "Sent" badge, and a note
+     ("Skickad till uppdrag: \<title\> (\<client\>)") is added to each sent
+     candidate's history (Comments & ToDos list).
    - **Matching uses simple numeric IDs** (not UUIDs) for reliable AI
      round-trips. Results cached in DB and sorted by score descending.
 
