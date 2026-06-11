@@ -85,9 +85,17 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 
 7. **ToDo Management**
    - ToDos view accessible from main navigation
-   - Add ToDos linked to a Company, Contact, or Candidate
+   - Add ToDos optionally linked to a Company, Contact, or Candidate
+   - **Default unlinked**: In the Add/Edit ToDo modal the "Link to" field
+     defaults to **None (no link)** — a ToDo is not tied to any person,
+     company, or candidate unless one is explicitly chosen. Unlinked ToDos are
+     stored with `linked_type = 'general'` and shown as "(No link)" in the list.
+   - **Quick add (inline)**: The top row of the ToDos list is an always-present
+     empty input. Type a title there and press Enter to create an unlinked ToDo
+     instantly, without opening the Add ToDo modal. Focus returns to the input
+     so several ToDos can be added in a row.
    - ToDos can be added from:
-     - The ToDos list view
+     - The ToDos list view (Add ToDo modal or the inline quick-add row)
      - Contact detail view (via "Make this a ToDo" checkbox)
      - Company detail view
    - ToDo fields: title, description, dueDate, completed status, linked entity, optional checklist
@@ -701,10 +709,12 @@ Main navigation tabs: **Contacts | Companies | Candidates | ToDos | Inbox | Requ
 
 9. **ToDos List**
    - All ToDos across contacts and companies
+   - Inline quick-add row at the top: type a title + Enter to create an
+     unlinked ToDo without opening the modal
    - Filters: All / Active / Completed
    - Checkbox to toggle completion
-   - "Add ToDo" button
-   - Click to navigate to linked entity
+   - "Add ToDo" button (link to entity is optional, defaults to None)
+   - Click to navigate to linked entity (unlinked ToDos have no "View" link)
 
 10. **Archive View**
     - Accessible from user dropdown menu

@@ -2057,6 +2057,12 @@ const views = {
       </div>
 
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+        <div class="flex items-center px-4 sm:px-6 py-3 border-b border-slate-100 bg-emerald-50/30">
+          <span class="h-5 w-5 rounded border border-dashed border-slate-300 shrink-0" aria-hidden="true"></span>
+          <input type="text" id="quick-add-todo" placeholder="Skriv en ny ToDo och tryck Enter…"
+                 onkeydown="views.quickAddTodoKey(event)" autocomplete="off"
+                 class="ml-4 flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-slate-800 placeholder-slate-400 text-sm">
+        </div>
         <div id="todos-list" class="divide-y divide-slate-100">
           ${this.renderTodoRows(todos)}
         </div>
@@ -2074,7 +2080,7 @@ const views = {
     return todos.map(t => {
       const linkedLabel = t.linkedType === 'contact' ? `${this.escapeHtml(t.linkedName)} @ ${this.escapeHtml(t.linkedCompanyName || '')}` :
                           t.linkedType === 'candidate' ? `${this.escapeHtml(t.linkedName)} (Candidate)` :
-                          t.linkedType === 'general' ? '(From email)' :
+                          t.linkedType === 'general' ? (t.linkedId === 'email' ? '(From email)' : '(No link)') :
                           this.escapeHtml(t.linkedName);
       const hasChecklist = t.checklistItemsState && t.checklistItemsState.length > 0;
       const checkedCount = hasChecklist ? t.checklistItemsState.filter(i => i.checked).length : 0;
@@ -2113,7 +2119,7 @@ const views = {
           </div>
         </div>
         <div class="flex gap-2 ml-9 sm:ml-0 mt-2 sm:mt-0">
-          <button onclick="views.navigateToLinked('${t.linkedType}', '${t.linkedId}')" class="text-emerald-600 hover:text-emerald-700 text-sm font-medium">View</button>
+          ${t.linkedType !== 'general' ? `<button onclick="views.navigateToLinked('${t.linkedType}', '${t.linkedId}')" class="text-emerald-600 hover:text-emerald-700 text-sm font-medium">View</button>` : ''}
           <button onclick="views.editTodo('${t.id}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
           <button onclick="views.deleteTodo('${t.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
         </div>
@@ -2149,6 +2155,39 @@ const views = {
     }
 
     document.getElementById('todos-list').innerHTML = this.renderTodoRows(filtered);
+  },
+
+  // Quick-add: create an unlinked (general) ToDo straight from the top row of
+  // the list, without opening the modal. Enter submits; focus returns to the
+  // input so several todos can be added in a row.
+  async quickAddTodoKey(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const input = event.target;
+    const title = input.value.trim();
+    if (!title) return;
+
+    input.disabled = true;
+    try {
+      await api.post('/api/todos', {
+        title,
+        description: '',
+        dueDate: new Date().toISOString(),
+        linkedType: 'general',
+        linkedId: 'none',
+        checklistId: null
+      });
+    } catch (err) {
+      input.disabled = false;
+      input.focus();
+      alert('Could not create ToDo: ' + (err.message || err));
+      return;
+    }
+
+    const container = document.getElementById('app');
+    if (container) await this.todoList(container);
+    const fresh = document.getElementById('quick-add-todo');
+    if (fresh) fresh.focus();
   },
 
   async toggleTodo(id, completed) {
@@ -2187,18 +2226,19 @@ const views = {
         </div>
 
         <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 mb-1.5">Link to *</label>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Link to</label>
           <select id="todo-linked-type" onchange="views.updateLinkedOptions()"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="general" ${(!linkedType || linkedType === 'general') ? 'selected' : ''}>None (no link)</option>
             <option value="contact" ${linkedType === 'contact' ? 'selected' : ''}>Contact</option>
             <option value="company" ${linkedType === 'company' ? 'selected' : ''}>Company</option>
             <option value="candidate" ${linkedType === 'candidate' ? 'selected' : ''}>Candidate</option>
           </select>
         </div>
 
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select *</label>
-          <select id="todo-linked-id" required
+        <div id="todo-link-target" class="mb-4" ${(!linkedType || linkedType === 'general') ? 'style="display:none"' : ''}>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select</label>
+          <select id="todo-linked-id"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
             ${linkedType === 'company' ?
               companies.map(c => `<option value="${c.id}" ${c.id === linkedId ? 'selected' : ''}>${this.escapeHtml(c.name)}</option>`).join('') :
@@ -2252,7 +2292,14 @@ const views = {
 
   updateLinkedOptions() {
     const type = document.getElementById('todo-linked-type').value;
+    const target = document.getElementById('todo-link-target');
     const select = document.getElementById('todo-linked-id');
+
+    if (type === 'general') {
+      if (target) target.style.display = 'none';
+      return;
+    }
+    if (target) target.style.display = '';
 
     if (type === 'company') {
       select.innerHTML = this._modalCompanies.map(c =>
@@ -2274,12 +2321,22 @@ const views = {
 
     const dueDateInput = document.getElementById('todo-due-date').value;
     const checklistId = document.getElementById('todo-checklist-id').value;
+    const linkedType = document.getElementById('todo-linked-type').value;
+    const linkedId = linkedType === 'general'
+      ? 'none'
+      : document.getElementById('todo-linked-id').value;
+
+    if (linkedType !== 'general' && !linkedId) {
+      alert('Please choose what to link this ToDo to (or pick "None").');
+      return;
+    }
+
     const data = {
       title: document.getElementById('todo-title').value,
       description: document.getElementById('todo-description').value,
       dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : new Date().toISOString(),
-      linkedType: document.getElementById('todo-linked-type').value,
-      linkedId: document.getElementById('todo-linked-id').value,
+      linkedType,
+      linkedId,
       checklistId: checklistId || null
     };
 
@@ -2323,15 +2380,16 @@ const views = {
           <label class="block text-sm font-medium text-slate-700 mb-1.5">Link to *</label>
           <select id="edit-todo-linked-type" onchange="views.updateEditLinkedOptions()"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="general" ${todo.linkedType === 'general' ? 'selected' : ''}>None (no link)</option>
             <option value="contact" ${todo.linkedType === 'contact' ? 'selected' : ''}>Contact</option>
             <option value="company" ${todo.linkedType === 'company' ? 'selected' : ''}>Company</option>
             <option value="candidate" ${todo.linkedType === 'candidate' ? 'selected' : ''}>Candidate</option>
           </select>
         </div>
 
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select *</label>
-          <select id="edit-todo-linked-id" required
+        <div id="edit-todo-link-target" class="mb-4" ${todo.linkedType === 'general' ? 'style="display:none"' : ''}>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select</label>
+          <select id="edit-todo-linked-id"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
             ${renderLinkedOptions(todo.linkedType, todo.linkedId)}
           </select>
@@ -2374,7 +2432,14 @@ const views = {
 
   updateEditLinkedOptions() {
     const type = document.getElementById('edit-todo-linked-type').value;
+    const target = document.getElementById('edit-todo-link-target');
     const select = document.getElementById('edit-todo-linked-id');
+
+    if (type === 'general') {
+      if (target) target.style.display = 'none';
+      return;
+    }
+    if (target) target.style.display = '';
 
     if (type === 'company') {
       select.innerHTML = this._editModalCompanies.map(c =>
@@ -2401,12 +2466,13 @@ const views = {
     const newChecklistId = document.getElementById('edit-todo-checklist-id').value || null;
     const original = this._editTodoOriginal;
 
+    const newLinkedType = document.getElementById('edit-todo-linked-type').value;
     const updateData = {
       title,
       description: document.getElementById('edit-todo-description').value,
       dueDate: dueDateInput ? new Date(dueDateInput).toISOString() : null,
-      linkedType: document.getElementById('edit-todo-linked-type').value,
-      linkedId: document.getElementById('edit-todo-linked-id').value
+      linkedType: newLinkedType,
+      linkedId: newLinkedType === 'general' ? 'none' : document.getElementById('edit-todo-linked-id').value
     };
 
     // Only send checklistId if it changed (to trigger rebuild of items)
@@ -2832,15 +2898,16 @@ const views = {
           <label class="block text-sm font-medium text-slate-700 mb-1.5">Link to *</label>
           <select id="edit-todo-linked-type" onchange="views.updateEditLinkedOptions()"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+            <option value="general" ${todo.linkedType === 'general' ? 'selected' : ''}>None (no link)</option>
             <option value="contact" ${todo.linkedType === 'contact' ? 'selected' : ''}>Contact</option>
             <option value="company" ${todo.linkedType === 'company' ? 'selected' : ''}>Company</option>
             <option value="candidate" ${todo.linkedType === 'candidate' ? 'selected' : ''}>Candidate</option>
           </select>
         </div>
 
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select *</label>
-          <select id="edit-todo-linked-id" required
+        <div id="edit-todo-link-target" class="mb-4" ${todo.linkedType === 'general' ? 'style="display:none"' : ''}>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Select</label>
+          <select id="edit-todo-linked-id"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
             ${renderLinkedOptions(todo.linkedType, todo.linkedId)}
           </select>
@@ -2891,7 +2958,7 @@ const views = {
     const newChecklistId = document.getElementById('edit-todo-checklist-id').value || null;
     const original = this._editTodoOriginal;
     const newLinkedType = document.getElementById('edit-todo-linked-type').value;
-    const newLinkedId = document.getElementById('edit-todo-linked-id').value;
+    const newLinkedId = newLinkedType === 'general' ? 'none' : document.getElementById('edit-todo-linked-id').value;
 
     const updateData = {
       title,
