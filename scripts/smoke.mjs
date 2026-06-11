@@ -48,6 +48,9 @@ async function api(method, path, body, opts = {}) {
   const res = await fetch(`${BASE}${path}`, { method, headers, body: payload, redirect: 'manual' });
   const setCookie = res.headers.get('set-cookie');
   if (setCookie) cookie = setCookie.split(';')[0];
+  if (opts.raw) {
+    return { status: res.status, buffer: Buffer.from(await res.arrayBuffer()) };
+  }
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); } catch { json = text; }

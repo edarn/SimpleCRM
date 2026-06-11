@@ -130,12 +130,24 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Notes use soft delete (deleted_at timestamp) - hidden but recoverable in database
    - Permissions: owner can archive any, member only own creations
 
-9. **Data Backup**
-   - Export all data as JSON file (owner/solo users only)
-   - Import data from previously exported backup files
-   - Import adds to existing data (doesn't replace)
-   - Exports include: companies, contacts, notes, todos, candidates, comments
-   - Available in Team Settings page
+9. **Data Backup** (owner/solo users only; in Team Settings)
+   - **Download Backup (ZIP, portable export, version 3)**: exports the team's
+     (or solo user's) business data and re-homes it to the importing account on
+     restore. Includes: companies, contacts, notes, todos, checklists,
+     candidates, candidate comments, candidate files, **consultant requests +
+     their candidate matchings**, **AI inbox emails**, **authorized sender
+     addresses (user_emails)**, **employment offers** — plus all uploaded files
+     (resumes, contract .docx, salary .pdf) inside the ZIP.
+   - **Import** (JSON or ZIP) adds to existing data (doesn't replace) inside a
+     single transaction. Cross-entity references are remapped to the new ids:
+     `matched_candidates` candidate ids, offer/comment/file candidate ids,
+     todo/note links, checklist links, and request→inbox links. Backup versions
+     1, 2 and 3 are all accepted (older versions simply lack the newer sections).
+   - **Download Full Database (disaster recovery)**: a one-click, consistent
+     snapshot of the *entire* SQLite database (every table — users, teams,
+     sessions, all of the above) via better-sqlite3's online backup. Restoring it
+     is an ops step (replace the server's `data/crm.db` and restart). Contains all
+     teams' data and password hashes, so it is restricted to owner/solo users.
 
 10. **Data Storage**
    - SQLite database for structured data storage
@@ -911,8 +923,10 @@ VibeCodingProject/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | /api/backup/export | Export all data as JSON file |
-| POST | /api/backup/import | Import data from JSON backup |
+| GET | /api/backup/export | Export business data + files as a ZIP (version 3) |
+| GET | /api/backup/db-snapshot | Download a full SQLite database snapshot (disaster recovery) |
+| POST | /api/backup/import | Import data from a JSON backup |
+| POST | /api/backup/import-zip | Import data + files from a ZIP backup |
 
 ### Notes (Protected)
 

@@ -4989,9 +4989,13 @@ const views = {
             <!-- Export -->
             <div class="flex-1 p-4 bg-slate-50 rounded-lg border border-slate-200">
               <h4 class="font-medium text-slate-700 mb-2">Export Data</h4>
-              <p class="text-sm text-slate-500 mb-3">Download all your data and candidate files as a ZIP archive.</p>
+              <p class="text-sm text-slate-500 mb-3">Download your data as a ZIP — companies, contacts, candidates, notes, ToDos, checklists, consultant requests &amp; matches, AI inbox emails, employment offers, and all uploaded files. Restorable via Import.</p>
               <button onclick="views.exportData()" class="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-4 py-2 rounded-lg hover:from-emerald-600 hover:to-teal-600 transition-all font-medium shadow-sm">
                 Download Backup
+              </button>
+              <p class="text-xs text-slate-400 mt-3 mb-2">Full database snapshot — an exact copy of the entire database (incl. users &amp; teams) for disaster recovery. Restore by replacing the server's database file.</p>
+              <button onclick="views.downloadDbSnapshot()" class="w-full bg-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300 transition-all font-medium text-sm">
+                Download Full Database
               </button>
             </div>
 
@@ -5293,6 +5297,31 @@ const views = {
     } catch (err) {
       console.error('Export error:', err);
       this.showBackupMessage('Export failed: ' + err.message, 'error');
+    }
+  },
+
+  async downloadDbSnapshot() {
+    try {
+      this.showBackupMessage('Preparing full database snapshot…', 'success');
+      const response = await fetch('/api/backup/db-snapshot', { method: 'GET', credentials: 'include' });
+      if (!response.ok) {
+        let msg = 'Snapshot failed';
+        try { msg = (await response.json()).error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `simple-crm-full-db-${new Date().toISOString().split('T')[0]}.db`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      this.showBackupMessage('Full database snapshot downloaded.', 'success');
+    } catch (err) {
+      console.error('DB snapshot error:', err);
+      this.showBackupMessage('Snapshot failed: ' + err.message, 'error');
     }
   },
 
