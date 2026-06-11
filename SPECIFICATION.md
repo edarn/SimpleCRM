@@ -208,6 +208,11 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 13. **Consultant Requests**
    - Requests tab lists all consultant requests with client, required skills,
      match count, status, and date.
+   - **Search + keyboard navigation**: a search box filters requests by title,
+     role, client, skills, description, or status. While a query is active the
+     top match is highlighted; ↓/↑ move through the filtered rows and Enter opens
+     the highlighted request — without leaving the search box (same pattern as
+     the candidates list).
    - **Status lifecycle**: open → in_progress → filled/closed. Active requests
      (open/in_progress) sort first; closed/filled requests are grayed out.
    - **Editable skills**: Required skills displayed as interactive tags.

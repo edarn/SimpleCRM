@@ -5846,6 +5846,12 @@ We're looking for a senior Java developer..."></textarea>
         </div>
       </div>
 
+      <div class="mb-4">
+        <input type="text" id="request-search-input" placeholder="Search requests..." autofocus
+               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition-colors"
+               oninput="views.filterRequests()" onkeydown="views.requestSearchKey(event)" autocomplete="off">
+      </div>
+
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
         <table class="responsive-table min-w-full">
           <thead class="bg-slate-50 border-b border-slate-200">
@@ -5858,37 +5864,108 @@ We're looking for a senior Java developer..."></textarea>
               <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${sorted.length === 0 ? `
-              <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No consultant requests yet. They are created automatically when the AI Inbox receives a request email.</td></tr>
-            ` : sorted.map(r => {
-              const isClosed = r.status === 'closed' || r.status === 'filled';
-              const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[r.status] || 'bg-slate-100 text-slate-600';
-              const urgencyIcon = { urgent: '🔴', high: '🟠', normal: '', low: '🔵' }[r.urgency] || '';
-              return `
-              <tr class="${isClosed ? 'opacity-50' : 'hover:bg-violet-50/30'} transition-colors cursor-pointer" onclick="router.navigate('request-detail', {id: '${r.id}'})">
-                <td class="px-6 py-4" data-label="Request">
-                  <div class="font-medium ${isClosed ? 'text-slate-400 line-through' : 'text-slate-800'}">${urgencyIcon} ${this.escapeHtml(r.title)}</div>
-                  ${r.role ? `<div class="text-sm text-slate-500">${this.escapeHtml(r.role)}</div>` : ''}
-                </td>
-                <td class="px-6 py-4 text-slate-600" data-label="Client">${this.escapeHtml(r.clientName || r.clientEmail || '-')}</td>
-                <td class="px-6 py-4 text-sm text-slate-600" data-label="Skills">${this.escapeHtml((r.requiredSkills || '').replace(/\*\*/g, '').substring(0, 60))}${(r.requiredSkills || '').length > 60 ? '...' : ''}</td>
-                <td class="px-6 py-4" data-label="Matches">
-                  ${r.matchedCandidates && r.matchedCandidates.length > 0
-                    ? `<span class="text-violet-600 font-medium">${r.matchedCandidates.length} match(es)</span>`
-                    : '<span class="text-slate-400">None</span>'}
-                </td>
-                <td class="px-6 py-4" data-label="Status"><span class="text-xs px-2 py-1 rounded-full ${statusColor}">${r.status}</span></td>
-                <td class="px-6 py-4 text-sm text-slate-500" data-label="Date">
-                  <div>${formatDateTime(r.createdAt)}</div>
-                  ${r.createdByUsername ? `<div class="text-xs text-slate-400">${this.escapeHtml(r.createdByUsername)}</div>` : ''}
-                </td>
-              </tr>`;
-            }).join('')}
+          <tbody id="requests-table" class="divide-y divide-slate-100">
+            ${sorted.length === 0
+              ? `<tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No consultant requests yet. They are created automatically when the AI Inbox receives a request email.</td></tr>`
+              : this.renderRequestRows(sorted)}
           </tbody>
         </table>
       </div>
     `;
+
+    this._requests = sorted;
+    this._requestActiveIndex = -1;
+  },
+
+  renderRequestRows(requests) {
+    if (!requests || requests.length === 0) {
+      return `<tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">No matching requests</td></tr>`;
+    }
+    return requests.map(r => {
+      const isClosed = r.status === 'closed' || r.status === 'filled';
+      const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[r.status] || 'bg-slate-100 text-slate-600';
+      const urgencyIcon = { urgent: '🔴', high: '🟠', normal: '', low: '🔵' }[r.urgency] || '';
+      return `
+      <tr class="${isClosed ? 'opacity-50' : 'hover:bg-violet-50/30'} transition-colors cursor-pointer" data-request-id="${r.id}" onclick="router.navigate('request-detail', {id: '${r.id}'})">
+        <td class="px-6 py-4" data-label="Request">
+          <div class="font-medium ${isClosed ? 'text-slate-400 line-through' : 'text-slate-800'}">${urgencyIcon} ${this.escapeHtml(r.title)}</div>
+          ${r.role ? `<div class="text-sm text-slate-500">${this.escapeHtml(r.role)}</div>` : ''}
+        </td>
+        <td class="px-6 py-4 text-slate-600" data-label="Client">${this.escapeHtml(r.clientName || r.clientEmail || '-')}</td>
+        <td class="px-6 py-4 text-sm text-slate-600" data-label="Skills">${this.escapeHtml((r.requiredSkills || '').replace(/\*\*/g, '').substring(0, 60))}${(r.requiredSkills || '').length > 60 ? '...' : ''}</td>
+        <td class="px-6 py-4" data-label="Matches">
+          ${r.matchedCandidates && r.matchedCandidates.length > 0
+            ? `<span class="text-violet-600 font-medium">${r.matchedCandidates.length} match(es)</span>`
+            : '<span class="text-slate-400">None</span>'}
+        </td>
+        <td class="px-6 py-4" data-label="Status"><span class="text-xs px-2 py-1 rounded-full ${statusColor}">${r.status}</span></td>
+        <td class="px-6 py-4 text-sm text-slate-500" data-label="Date">
+          <div>${formatDateTime(r.createdAt)}</div>
+          ${r.createdByUsername ? `<div class="text-xs text-slate-400">${this.escapeHtml(r.createdByUsername)}</div>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  },
+
+  _requestMatchesQuery(r, query) {
+    return (r.title || '').toLowerCase().includes(query) ||
+      (r.role || '').toLowerCase().includes(query) ||
+      (r.clientName || '').toLowerCase().includes(query) ||
+      (r.clientEmail || '').toLowerCase().includes(query) ||
+      (r.requiredSkills || '').replace(/\*\*/g, '').toLowerCase().includes(query) ||
+      (r.description || '').toLowerCase().includes(query) ||
+      (r.status || '').toLowerCase().includes(query);
+  },
+
+  filterRequests() {
+    const input = document.getElementById('request-search-input');
+    const tbody = document.getElementById('requests-table');
+    if (!tbody) return;
+    const all = this._requests || [];
+    if (all.length === 0) return; // keep the "no requests yet" message
+    const query = (input ? input.value : '').toLowerCase();
+    const filtered = query ? all.filter(r => this._requestMatchesQuery(r, query)) : all;
+    tbody.innerHTML = this.renderRequestRows(filtered);
+
+    if (query && filtered.length) {
+      this._highlightRequest(0);
+    } else {
+      this._requestRows().forEach(r => r.classList.remove('bg-violet-100'));
+      this._requestActiveIndex = -1;
+    }
+  },
+
+  // Selectable request <tr> rows (excludes the empty-state row)
+  _requestRows() {
+    const tbody = document.getElementById('requests-table');
+    return tbody ? Array.from(tbody.querySelectorAll('tr[data-request-id]')) : [];
+  },
+
+  _highlightRequest(index) {
+    const rows = this._requestRows();
+    rows.forEach(r => r.classList.remove('bg-violet-100'));
+    if (rows.length === 0) { this._requestActiveIndex = -1; return; }
+    const i = Math.max(0, Math.min(index, rows.length - 1));
+    rows[i].classList.add('bg-violet-100');
+    rows[i].scrollIntoView({ block: 'nearest' });
+    this._requestActiveIndex = i;
+  },
+
+  // ↓/↑ move the highlight through the filtered requests; Enter opens the
+  // highlighted request — without leaving the search box.
+  requestSearchKey(event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this._highlightRequest((this._requestActiveIndex ?? -1) + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      this._highlightRequest((this._requestActiveIndex ?? 0) - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const rows = this._requestRows();
+      const el = rows[this._requestActiveIndex ?? 0] || rows[0];
+      if (el) router.navigate('request-detail', { id: el.getAttribute('data-request-id') });
+    }
   },
 
   async requestDetail(container, requestId) {
