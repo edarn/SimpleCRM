@@ -15,7 +15,7 @@ async function parseCV(resumeText) {
   const anthropic = getClient();
 
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1500,
     system: `You are an AI assistant that extracts structured candidate information from a CV/resume.
 

@@ -32,8 +32,8 @@ async function matchCandidates(request, candidates) {
   }).join('\n\n---\n\n');
 
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 4000,
+    model: 'claude-sonnet-4-6',
+    max_tokens: 8000,
     temperature: 0,
     system: `You are an AI recruiter assistant. You will receive a consultant/resource request and a list of candidates. Each candidate has a number in brackets like [1], [2], [3] etc.
 

@@ -2289,8 +2289,17 @@ function reconcileRequestMatches(requestId, evaluatedCandidateIds, newMatches, u
   const request = getConsultantRequestById(requestId, userId);
   if (!request) return false;
 
-  const evaluated = new Set(evaluatedCandidateIds || []);
   const existing = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
+
+  // Safety net: an empty result is almost always a transient AI/parse failure
+  // (truncated or unparseable response), NOT a real "nobody matches". Never let
+  // it wipe a populated list — preserve what's there and let the user re-run.
+  // A genuine empty request (no prior matches) is a no-op either way.
+  if (!newMatches || newMatches.length === 0) {
+    return false;
+  }
+
+  const evaluated = new Set(evaluatedCandidateIds || []);
 
   // Preserve entries for candidates this run did not evaluate (e.g. added
   // concurrently and self-inserted via addCandidateToRequestMatches).

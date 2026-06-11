@@ -577,7 +577,7 @@ async function runCandidateRequestMatching(candidateId, candidate, userId) {
   )).join('\n\n---\n\n');
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 2000,
     temperature: 0,
     system: `You receive a candidate profile and a list of open consultant requests. Score how well the candidate matches EACH request (0-100). Only return requests where the score is 50 or higher.

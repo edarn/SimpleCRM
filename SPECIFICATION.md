@@ -182,7 +182,7 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      (work, personal, etc.) in Settings. Only emails from registered addresses
      are processed; unrecognized senders are silently discarded.
    - **Email classification**: Each incoming email is sent to Claude AI
-     (claude-sonnet-4-20250514) which classifies it into one or more of:
+     (claude-sonnet-4-6) which classifies it into one or more of:
      - `new_contact` — extract name, email, phone, title, company, department
        and create a contact (and company if needed). Duplicates detected by email
        match. The AI always creates contacts for external parties in conversations.
@@ -279,6 +279,11 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      candidate already marked "Sent" is kept so the Sent history is preserved).
      The write is an atomic read-modify-write, so concurrent matches (e.g. a
      bulk import) can't clobber each other.
+   - **Empty match result never wipes the list**: If a request-side (re)match
+     returns zero candidates (almost always a transient AI/parse failure, not a
+     real "nobody matches"), the existing `matched_candidates` list is preserved
+     rather than cleared. This prevents a failed "Save & Re-match" from emptying
+     a previously full list.
    - **Request-side matching merges, never blind-overwrites**: When a request is
      (re)matched against all candidates (AI email import, the "Save & Re-match"
      button), the fresh full ranking is **merged** into `matched_candidates`
