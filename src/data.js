@@ -1630,6 +1630,32 @@ function getCandidateById(candidateId, userId) {
   };
 }
 
+// Find an existing (non-archived) candidate with the same email, within the
+// caller's scope (whole team for team users, own candidates for solo users).
+// Used to avoid creating duplicate profiles for the same person. Returns the
+// formatted candidate or null. Empty email => null (can't dedup without one).
+// excludeId lets the edit flow ignore the candidate being edited.
+function findCandidateByEmail(email, userId, excludeId = null) {
+  if (!email || !email.trim()) return null;
+  const normalized = email.trim().toLowerCase();
+  const teamId = getUserTeamId(userId);
+  let row;
+  if (teamId) {
+    row = db.prepare(`
+      SELECT * FROM candidates
+      WHERE team_id = ? AND archived_at IS NULL AND LOWER(email) = ? AND id != ?
+      LIMIT 1
+    `).get(teamId, normalized, excludeId || '');
+  } else {
+    row = db.prepare(`
+      SELECT * FROM candidates
+      WHERE created_by = ? AND team_id IS NULL AND archived_at IS NULL AND LOWER(email) = ? AND id != ?
+      LIMIT 1
+    `).get(userId, normalized, excludeId || '');
+  }
+  return row ? formatCandidateRow(row) : null;
+}
+
 function createCandidate({ name, email, phone, role, skills, category, resumeFilename, resumeOriginalName }, userId) {
   const teamId = getUserTeamId(userId);
   const id = generateId();
@@ -2351,6 +2377,7 @@ module.exports = {
   // Candidates
   getAllCandidates,
   getCandidateById,
+  findCandidateByEmail,
   createCandidate,
   updateCandidate,
   transferCandidate,

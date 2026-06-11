@@ -60,6 +60,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 5. **Candidate Management**
    - Separate tab for managing job candidates (independent from contacts)
    - Candidate fields: name, email, phone, role, skills
+   - **Duplicate prevention (email)**: Creating a candidate whose email already
+     belongs to another candidate in scope (the whole team for team users, the
+     user's own candidates for solo users; case-insensitive) is blocked with a
+     409 and a pointer to the existing profile — the Add form offers to open it.
+     Editing a candidate's email to one another candidate already uses is
+     likewise blocked. Candidates without an email are never deduped.
    - **Employment offers** (see section 11)
    - Resume file upload (PDF, DOC, DOCX, max 10MB)
    - Resume download functionality
@@ -238,6 +244,13 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Claude AI extracts name, email, phone, role, and skills from each CV.
    - Each auto-created profile gets a comment "Automatiskt skapad via CV import".
    - Resume text is cached for AI matching. File is stored as candidate's resume.
+   - **Email dedup / merge**: If an imported CV's email matches an existing
+     candidate in scope, the import does **not** create a duplicate — it merges
+     into the existing profile instead: attaches the new CV, refreshes the
+     cached resume text, fills in only previously-empty fields (never overwrites
+     existing data), adds a "CV uppdaterat via import" comment, and re-matches
+     the profile against open requests. The progress UI shows these as "merged"
+     and the summary reports `N created, M merged`.
 
 15. **Candidate-to-Request Matching**
    - When viewing a candidate, cached matches against open consultant requests

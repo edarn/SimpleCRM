@@ -61,6 +61,20 @@ router.post('/', upload.single('resume'), (req, res) => {
       return res.status(400).json({ error: 'Candidate name is required' });
     }
 
+    // Avoid duplicate profiles: if a candidate with this email already exists
+    // in the user's scope, block creation and point at the existing one.
+    if (email && email.trim()) {
+      const dup = data.findCandidateByEmail(email, userId);
+      if (dup) {
+        if (req.file) { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+        return res.status(409).json({
+          error: `A candidate with this email already exists: ${dup.name}`,
+          existingId: dup.id,
+          existingName: dup.name
+        });
+      }
+    }
+
     let resumeFilename = '';
     let resumeOriginalName = '';
 
@@ -132,6 +146,19 @@ router.put('/:id', upload.single('resume'), (req, res) => {
     const existing = data.getCandidateById(req.params.id, userId);
     if (!existing) {
       return res.status(404).json({ error: 'Candidate not found' });
+    }
+
+    // Avoid duplicates: block changing the email to one another candidate uses.
+    if (email && email.trim()) {
+      const dup = data.findCandidateByEmail(email, userId, req.params.id);
+      if (dup) {
+        if (req.file) { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+        return res.status(409).json({
+          error: `Another candidate already uses this email: ${dup.name}`,
+          existingId: dup.id,
+          existingName: dup.name
+        });
+      }
     }
 
     let resumeFilename = existing.resumeFilename;
@@ -667,6 +694,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   const { parseCV } = require('../lib/cv-parser');
   let created = 0;
   let failed = 0;
+  let merged = 0;
   const createdIds = [];
 
   for (let i = 0; i < req.files.length; i++) {
@@ -702,6 +730,31 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
         continue;
       }
 
+      // Dedup by email: if a candidate with this email already exists, merge
+      // the new CV into that profile instead of creating a duplicate.
+      const dup = parsed.email ? data.findCandidateByEmail(parsed.email, userId) : null;
+      if (dup) {
+        data.addCandidateFile(dup.id, {
+          filename: file.filename,
+          originalName,
+          fileSize: file.size,
+          mimeType: file.mimetype
+        }, userId);
+        data.updateCandidateResumeText(dup.id, resumeText);
+        // Fill in only fields that were empty — never overwrite existing data.
+        const fill = {};
+        if (!dup.role && parsed.role) fill.role = parsed.role;
+        if (!dup.skills && parsed.skills) fill.skills = parsed.skills;
+        if (!dup.phone && parsed.phone) fill.phone = parsed.phone;
+        if (Object.keys(fill).length > 0) data.updateCandidate(dup.id, fill, userId);
+        data.createCandidateComment(dup.id, 'CV uppdaterat via import (matchade befintlig e-postadress)', userId);
+
+        merged++;
+        createdIds.push(dup.id); // re-match the updated profile against open requests
+        sendEvent({ ...progress, status: 'duplicate', candidateId: dup.id, name: dup.name, role: dup.role || parsed.role || '' });
+        continue;
+      }
+
       const candidate = data.createCandidate({
         name: parsed.name,
         email: parsed.email || '',
@@ -733,7 +786,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
     }
   }
 
-  sendEvent({ type: 'done', created, failed, total });
+  sendEvent({ type: 'done', created, merged, failed, total });
   res.end();
 
   // Background: match each imported candidate against open requests, run

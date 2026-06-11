@@ -3240,6 +3240,14 @@ const views = {
           <span class="text-slate-400">${this.escapeHtml(evt.role || '')}</span>
         </div>`;
         resultsEl.scrollTop = resultsEl.scrollHeight;
+      } else if (evt.status === 'duplicate') {
+        statusEl.textContent = `Merged into existing: ${this.escapeHtml(evt.name)} (${evt.index + 1}/${evt.total})`;
+        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm">
+          <span class="text-blue-500" title="Matched an existing candidate by email">&#8635;</span>
+          <a href="#" onclick="modal.hide(); router.navigate('candidate-detail', {id: '${evt.candidateId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">${this.escapeHtml(evt.name)}</a>
+          <span class="text-blue-500 text-xs">merged (existing email)</span>
+        </div>`;
+        resultsEl.scrollTop = resultsEl.scrollHeight;
       } else if (evt.status === 'skipped' || evt.status === 'error') {
         resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm">
           <span class="text-red-500">&#10007;</span>
@@ -3253,7 +3261,7 @@ const views = {
 
     if (evt.type === 'done') {
       bar.style.width = '100%';
-      statusEl.textContent = `Done: ${evt.created} created` + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`;
+      statusEl.textContent = `Done: ${evt.created} created` + (evt.merged > 0 ? `, ${evt.merged} merged` : '') + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`;
       // Repurpose the primary button into a working "Done": it was a disabled
       // submit button, which is why clicking "Done" did nothing. Turn it into a
       // plain button that closes the modal and refreshes the candidates list.
@@ -4761,6 +4769,15 @@ const views = {
       if (response.status === 401) {
         auth.showLoginModal();
         throw new Error('Authentication required');
+      }
+
+      // Duplicate email — offer to open the existing candidate instead.
+      if (response.status === 409) {
+        const data = await response.json();
+        if (data.existingId && confirm(`${data.error}\n\nOpen the existing candidate?`)) {
+          router.navigate('candidate-detail', { id: data.existingId });
+        }
+        return;
       }
 
       if (!response.ok) {
