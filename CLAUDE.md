@@ -15,6 +15,22 @@ Act as a senior developer. Make decisions autonomously, run tests, and execute w
 - Test changes when practical (start server, run API calls, verify behavior).
 - Keep changes focused - don't refactor or "improve" code beyond what was asked.
 
+### Testing / verification (avoid approval-prompt spam)
+
+Do **not** verify changes with ad-hoc shell commands (`DATABASE_PATH=... node server.js`,
+`kill`/`pkill`/`lsof`, lots of one-off `curl`s) — each variation triggers a manual
+permission prompt. Instead use the single-command smoke harness:
+
+1. Put the assertions for the current change in `scripts/smoke.checks.mjs`
+   (gitignored scratch file; export a default `async ({ api, check, log }) => {}`).
+2. Run the whole thing with **`node scripts/smoke.mjs`** — it spawns the server on
+   a throwaway DB + port, waits for it to listen, runs the checks, tears down, and
+   prints pass/fail. One `node` command, covered by the existing allow rule.
+
+Pure data-layer logic can still be checked with a single `node -e "..."` /
+`node scripts/<name>.mjs`. The point is: one `node` invocation, not a stream of
+server/kill/curl commands.
+
 ## Tech Stack
 
 - **Backend**: Node.js, Express, better-sqlite3

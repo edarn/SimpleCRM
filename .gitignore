@@ -20,3 +20,6 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local scratch checks for the smoke-test harness (scripts/smoke.mjs)
+scripts/smoke.checks.mjs
