@@ -3254,12 +3254,16 @@ const views = {
     if (evt.type === 'done') {
       bar.style.width = '100%';
       statusEl.textContent = `Done: ${evt.created} created` + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`;
+      // Repurpose the primary button into a working "Done": it was a disabled
+      // submit button, which is why clicking "Done" did nothing. Turn it into a
+      // plain button that closes the modal and refreshes the candidates list.
       btn.textContent = 'Done';
+      btn.disabled = false;
+      btn.type = 'button';
+      btn.onclick = () => { modal.hide(); router.navigate('candidates'); };
+      // The Cancel button is now redundant — hide it.
       const closeBtn = document.getElementById('cv-import-close');
-      if (closeBtn) {
-        closeBtn.textContent = 'Close';
-        closeBtn.onclick = () => { modal.hide(); router.navigate('candidates'); };
-      }
+      if (closeBtn) closeBtn.classList.add('hidden');
     }
   },
 
