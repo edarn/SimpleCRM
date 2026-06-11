@@ -247,6 +247,18 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Cache invalidated when CV is uploaded (re-matches automatically in
      background). Manual "Refresh" button for on-demand re-matching.
    - File uploads auto-extract resume text for AI matching.
+   - **Auto-match on add**: Creating a candidate (single Add Candidate form or
+     bulk CV import) automatically runs matching against the open requests in
+     the background — no manual step needed.
+   - **Two-way sync into the request's matched list**: Whenever a candidate is
+     matched/re-matched, the candidate is inserted into each matching request's
+     `matched_candidates` list, **sorted by score**, so the request detail page
+     shows the newly added candidate correctly placed among the previously
+     matched candidates. Re-matching reconciles the request side: a candidate is
+     upserted where it now matches and removed where it no longer does (a
+     candidate already marked "Sent" is kept so the Sent history is preserved).
+     The write is an atomic read-modify-write, so concurrent matches (e.g. a
+     bulk import) can't clobber each other.
 
 16. **Resume Text Search**
    - Candidate search in the list view now matches against the full extracted

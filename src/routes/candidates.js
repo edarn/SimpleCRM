@@ -91,6 +91,7 @@ router.post('/', upload.single('resume'), (req, res) => {
           mimeType: req.file.mimetype
         }, userId);
         const updated = data.getCandidateById(newCandidate.id, userId);
+        triggerRequestMatchingInBackground(newCandidate.id, userId);
         return res.status(201).json(updated);
       }
     } catch (dbErr) {
@@ -101,6 +102,7 @@ router.post('/', upload.single('resume'), (req, res) => {
       throw dbErr;
     }
 
+    triggerRequestMatchingInBackground(newCandidate.id, userId);
     res.status(201).json(newCandidate);
   } catch (err) {
     console.error('Error creating candidate:', err);
@@ -586,9 +588,52 @@ Empty array [] if no request matches above 50.`,
     .filter(Boolean)
     .sort((a, b) => b.score - a.score);
 
-  // Cache results
+  // Cache results on the candidate side
   data.updateCandidateRequestMatches(candidateId, matches);
+
+  // Sync the candidate into the request-side matched lists so each open
+  // request's detail page shows this candidate, sorted into the previously
+  // matched candidates. Reconcile across every open request we evaluated:
+  // upsert where it matched, remove where it no longer does.
+  const matchedById = new Map(matches.map(m => [m.requestId, m]));
+  for (const r of openRequests) {
+    const m = matchedById.get(r.id);
+    try {
+      if (m) {
+        data.addCandidateToRequestMatches(r.id, {
+          candidateId,
+          score: m.score,
+          reasoning: m.reasoning || '',
+          strengths: '',
+          gaps: ''
+        }, userId);
+      } else {
+        data.removeCandidateFromRequestMatches(r.id, candidateId, userId);
+      }
+    } catch (e) {
+      console.error('Error syncing candidate into request matches:', e.message);
+    }
+  }
+
   return matches;
+}
+
+// Fire-and-forget: run candidate→request matching in the background so the HTTP
+// response isn't blocked by the AI call. Re-fetches the candidate so it picks up
+// any resume text extracted just before. Safe no-op when there are no open
+// requests or no ANTHROPIC_API_KEY.
+function triggerRequestMatchingInBackground(candidateId, userId) {
+  setImmediate(() => {
+    try {
+      const candidate = data.getCandidateById(candidateId, userId);
+      if (!candidate) return;
+      runCandidateRequestMatching(candidateId, candidate, userId).catch(e =>
+        console.error('Background request matching error:', e.message)
+      );
+    } catch (e) {
+      console.error('Background request matching error:', e.message);
+    }
+  });
 }
 
 // POST /api/candidates/import-cvs - Bulk import with SSE progress streaming
@@ -619,6 +664,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   const { parseCV } = require('../lib/cv-parser');
   let created = 0;
   let failed = 0;
+  const createdIds = [];
 
   for (let i = 0; i < req.files.length; i++) {
     const file = req.files[i];
@@ -675,6 +721,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
       data.createCandidateComment(candidate.id, 'Automatiskt skapad via CV import', userId);
 
       created++;
+      createdIds.push(candidate.id);
       sendEvent({ ...progress, status: 'created', candidateId: candidate.id, name: parsed.name, role: parsed.role || '' });
     } catch (err) {
       console.error(`Error processing CV ${originalName}:`, err.message);
@@ -685,6 +732,22 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
 
   sendEvent({ type: 'done', created, failed, total });
   res.end();
+
+  // Background: match each imported candidate against open requests, run
+  // sequentially to avoid a burst of concurrent AI calls. This updates both the
+  // candidate-side cache and each open request's matched_candidates list.
+  if (createdIds.length > 0) {
+    setImmediate(async () => {
+      for (const cid of createdIds) {
+        try {
+          const candidate = data.getCandidateById(cid, userId);
+          if (candidate) await runCandidateRequestMatching(cid, candidate, userId);
+        } catch (e) {
+          console.error('Background CV-import matching error:', e.message);
+        }
+      }
+    });
+  }
 });
 
   return router;

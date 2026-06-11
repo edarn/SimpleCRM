@@ -2196,6 +2196,56 @@ function updateConsultantRequest(requestId, updates, userId) {
   return getConsultantRequestById(requestId, userId);
 }
 
+// Upsert a single candidate into a request's matched_candidates list, keeping
+// the list sorted by score (desc). Used when (re)matching a candidate against
+// open requests so the candidate shows up — correctly sorted — on the request
+// detail page. Synchronous read-modify-write: atomic under Node's single thread,
+// so concurrent candidate matches can't clobber each other's inserts. Preserves
+// any existing strengths/gaps/reasoning and the "sent" flag for this candidate.
+function addCandidateToRequestMatches(requestId, candidateMatch, userId) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return false;
+
+  const list = Array.isArray(request.matchedCandidates) ? request.matchedCandidates.slice() : [];
+  const existing = list.find(m => m.candidateId === candidateMatch.candidateId);
+
+  const merged = {
+    candidateId: candidateMatch.candidateId,
+    score: candidateMatch.score,
+    strengths: candidateMatch.strengths || (existing && existing.strengths) || '',
+    gaps: candidateMatch.gaps || (existing && existing.gaps) || '',
+    reasoning: candidateMatch.reasoning || (existing && existing.reasoning) || ''
+  };
+  if (existing && existing.sent) merged.sent = true;
+
+  const next = list.filter(m => m.candidateId !== candidateMatch.candidateId);
+  next.push(merged);
+  next.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  const now = getTimestamp();
+  db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(next), now, requestId);
+  return true;
+}
+
+// Remove a candidate from a request's matched_candidates list (used when a
+// re-match shows the candidate no longer matches a previously-matched request).
+// Candidates already marked "sent" are kept so the Sent history is preserved.
+function removeCandidateFromRequestMatches(requestId, candidateId, userId) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return false;
+
+  const list = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
+  const target = list.find(m => m.candidateId === candidateId);
+  if (!target || target.sent) return false;
+
+  const next = list.filter(m => m.candidateId !== candidateId);
+  const now = getTimestamp();
+  db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(next), now, requestId);
+  return true;
+}
+
 function deleteConsultantRequest(requestId, userId) {
   const request = getConsultantRequestById(requestId, userId);
   if (!request) return { error: 'Request not found' };
@@ -2373,5 +2423,7 @@ module.exports = {
   updateCandidateResumeText,
   getCandidateRequestMatches,
   updateCandidateRequestMatches,
+  addCandidateToRequestMatches,
+  removeCandidateFromRequestMatches,
   getCandidatesWithResumes
 };
