@@ -574,9 +574,12 @@ Empty array [] if no request matches above 50.`,
   try {
     aiMatches = JSON.parse(text);
   } catch (_) {
+    // Guard the fallback parse too — a malformed array must degrade to "no
+    // matches" rather than throw.
     const m = text.match(/\[[\s\S]*\]/);
-    aiMatches = m ? JSON.parse(m[0]) : [];
+    try { aiMatches = m ? JSON.parse(m[0]) : []; } catch (_2) { aiMatches = []; }
   }
+  if (!Array.isArray(aiMatches)) aiMatches = [];
 
   const matches = aiMatches
     .map(m => {

@@ -266,9 +266,17 @@ module.exports = function(uploadsDir) {
           }
           default:
             summaries.push(`Unknown action: ${action.classification}`);
+            actionTypes.push(action.classification || 'unknown');
+            actionIds.push('');
         }
       } catch (err) {
+        // Keep the three arrays aligned: every action must push exactly one
+        // entry to summaries, actionTypes and actionIds — otherwise the inbox
+        // detail view (which zips them by index) mislabels a failed action with
+        // another action's type and drops the other summaries.
         summaries.push(`Error: ${err.message}`);
+        actionTypes.push(action.classification || 'error');
+        actionIds.push('');
       }
     }
 

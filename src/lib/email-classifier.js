@@ -93,10 +93,15 @@ Always extract as much information as possible. If a field is not available, use
   try {
     return JSON.parse(text);
   } catch (err) {
-    // Try to extract JSON from the response
+    // Try to extract a JSON object from the response. Guard the fallback parse
+    // so a malformed match still produces a clear error message instead of a
+    // cryptic low-level one like "Unexpected non-whitespace character after
+    // JSON at position 4".
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (err2) { /* fall through to clean error */ }
     }
     throw new Error('Failed to parse AI classification response: ' + text.substring(0, 200));
   }

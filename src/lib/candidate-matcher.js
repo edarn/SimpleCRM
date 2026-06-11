@@ -115,14 +115,22 @@ ${candidateSummaries}`
   try {
     matches = JSON.parse(text);
   } catch (err) {
+    // Fallback: pull the first JSON array out of the response. Wrapped in its
+    // own try/catch so a malformed array (e.g. the model added trailing prose)
+    // degrades to "no matches" instead of throwing and failing the whole
+    // request action in the AI inbox.
     const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      matches = JSON.parse(jsonMatch[0]);
-    } else {
+    try {
+      matches = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    } catch (err2) {
+      matches = [];
+    }
+    if (!Array.isArray(matches) || matches.length === 0) {
       console.error('Failed to parse candidate matching response:', text.substring(0, 200));
       return [];
     }
   }
+  if (!Array.isArray(matches)) return [];
 
   // Map simple numeric IDs back to real UUIDs
   return matches
