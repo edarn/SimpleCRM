@@ -192,10 +192,12 @@ ${htmlCandidates}
       attachments
     });
 
-    // Mark selected candidates as "sent" in the matched_candidates JSON
+    // Mark selected candidates as "sent" in the matched_candidates JSON. "sent"
+    // is the primary status on send; an existing client status (e.g. interview)
+    // is preserved if the candidate is re-sent.
     const updatedMatches = matches.map((m, i) => {
       if (selectedIndices.includes(i)) {
-        return { ...m, sent: true };
+        return { ...m, sent: true, status: m.status || 'sent' };
       }
       return m;
     });
@@ -217,6 +219,26 @@ ${htmlCandidates}
     res.send(eml);
   } catch (err) {
     console.error('Error generating send EML:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/requests/:id/candidates/:candidateId/status - Update a sent
+// candidate's client-response status (sent / declined / interview / accepted)
+router.put('/:id/candidates/:candidateId/status', (req, res) => {
+  try {
+    const { status } = req.body;
+    const updated = data.setRequestCandidateStatus(
+      req.params.id, req.params.candidateId, status, req.session.userId
+    );
+    if (!updated) {
+      return res.status(400).json({
+        error: 'Invalid status, request not found, or candidate has not been sent'
+      });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating candidate status:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

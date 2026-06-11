@@ -230,9 +230,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Send via Outlook**: Select candidates with checkboxes, click "Send
      Selected via Outlook" to generate an .eml draft with HTML-formatted
      candidate presentations (strengths/gaps) and CV files attached. Sent
-     candidates are marked with a blue "Sent" badge, and a note
+     candidates are marked (status "sent", blue), and a note
      ("Skickad till uppdrag: \<title\> (\<client\>)") is added to each sent
      candidate's history (Comments & ToDos list).
+   - **Client-response status (sent candidates)**: Each sent candidate row in
+     the match list has a status dropdown on the right to record the client's
+     response: **Sent** (default on send, blue), **Declined** (faint red),
+     **Interview** (amber), **Accepted** (green). Changing it recolors the row
+     and persists on the request's `matched_candidates` entry. The status is
+     preserved across re-matches (a fresh match updates the score but keeps the
+     status). Only candidates that have been sent get the dropdown.
    - **Matching uses simple numeric IDs** (not UUIDs) for reliable AI
      round-trips. Results cached in DB and sorted by score descending.
 
@@ -985,6 +992,7 @@ VibeCodingProject/
 | PUT | /api/requests/:id | Update request (status, skills, description) |
 | POST | /api/requests/:id/rematch | Re-run AI candidate matching |
 | POST | /api/requests/:id/send-eml | Generate Outlook draft with selected candidates |
+| PUT | /api/requests/:id/candidates/:candidateId/status | Set a sent candidate's client-response status (sent/declined/interview/accepted) |
 | DELETE | /api/requests/:id | Delete a request |
 
 ### Health Check

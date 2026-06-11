@@ -5921,15 +5921,18 @@ We're looking for a senior Java developer..."></textarea>
         ${request.matchedCandidates && request.matchedCandidates.length > 0 ? `
         <div class="space-y-3">
           ${request.matchedCandidates.map((m, i) => {
-            const wasSent = m.sent;
+            const status = m.sent ? (m.status || 'sent') : null;
+            const sm = status ? this._matchStatusMeta[status] : null;
+            const rowCls = sm ? sm.border : (i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50');
+            const avatarCls = sm ? sm.avatar : (i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600');
             return `
-          <div class="flex items-start gap-3 p-4 rounded-lg border ${wasSent ? 'border-blue-300 bg-blue-100' : i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50'}">
+          <div class="flex items-start gap-3 p-4 rounded-lg border ${rowCls}">
             <input type="checkbox" class="match-select-cb mt-1 h-5 w-5 text-violet-600 rounded border-slate-300 focus:ring-violet-500 cursor-pointer"
                    data-candidate-id="${m.candidateId}" data-index="${i}">
-            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${wasSent ? 'bg-blue-300 text-blue-900' : i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600'}">
+            <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${avatarCls}">
               ${m.score}%
             </div>
-            <div class="flex-1">
+            <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <a href="#" onclick="router.navigate('candidate-detail', {id: '${m.candidateId}'}); return false;"
                    class="font-medium text-violet-600 hover:text-violet-700">${this.escapeHtml(m.candidateName || 'Unknown')}</a>
@@ -5940,13 +5943,22 @@ We're looking for a senior Java developer..."></textarea>
                   m.candidateCategory === 'contact_later' ? 'bg-red-100 text-red-600' :
                   'bg-slate-100 text-slate-600'
                 }">${this.escapeHtml(this._candidateCategories[m.candidateCategory] || m.candidateCategory)}</span>` : ''}
-                ${wasSent ? '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 font-medium">Sent</span>' : ''}
               </div>
               ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
               ${m.strengths ? `<p class="text-sm text-emerald-700 mt-1">${this.escapeHtml(m.strengths)}</p>` : ''}
               ${m.gaps ? `<p class="text-sm text-red-500 mt-1">${this.escapeHtml(m.gaps)}</p>` : ''}
               ${!m.strengths && m.reasoning ? `<p class="text-sm text-slate-600 mt-1">${this.escapeHtml(m.reasoning)}</p>` : ''}
             </div>
+            ${status ? `
+            <div class="flex-shrink-0 self-center">
+              <select onchange="views.setCandidateStatus('${request.id}', '${m.candidateId}', this.value)"
+                      class="text-xs px-2 py-1 rounded-lg border font-medium cursor-pointer focus:ring-2 focus:ring-violet-400 ${sm.badge}"
+                      title="Client response status">
+                ${['sent','declined','interview','accepted'].map(s =>
+                  `<option value="${s}" ${s === status ? 'selected' : ''}>${this._matchStatusMeta[s].label}</option>`
+                ).join('')}
+              </select>
+            </div>` : ''}
           </div>`;
           }).join('')}
         </div>
@@ -5965,6 +5977,23 @@ We're looking for a senior Java developer..."></textarea>
       await api.put(`/api/requests/${requestId}`, { status });
     } catch (err) {
       alert('Error: ' + err.message);
+    }
+  },
+
+  // Client-response status styling for sent candidates in a request's match list
+  _matchStatusMeta: {
+    sent:      { label: 'Sent',      border: 'border-blue-300 bg-blue-100',       avatar: 'bg-blue-300 text-blue-900',       badge: 'bg-blue-200 text-blue-800' },
+    declined:  { label: 'Declined',  border: 'border-red-200 bg-red-50',          avatar: 'bg-red-200 text-red-800',         badge: 'bg-red-100 text-red-700' },
+    interview: { label: 'Interview', border: 'border-amber-200 bg-amber-50',      avatar: 'bg-amber-200 text-amber-900',     badge: 'bg-amber-100 text-amber-700' },
+    accepted:  { label: 'Accepted',  border: 'border-emerald-300 bg-emerald-50',  avatar: 'bg-emerald-200 text-emerald-900', badge: 'bg-emerald-100 text-emerald-700' },
+  },
+
+  async setCandidateStatus(requestId, candidateId, status) {
+    try {
+      await api.put(`/api/requests/${requestId}/candidates/${candidateId}/status`, { status });
+      await this.requestDetail(document.getElementById('app'), requestId);
+    } catch (err) {
+      alert('Error: ' + (err.message || err));
     }
   },
 

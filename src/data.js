@@ -2243,6 +2243,7 @@ function addCandidateToRequestMatches(requestId, candidateMatch, userId) {
     reasoning: candidateMatch.reasoning || (existing && existing.reasoning) || ''
   };
   if (existing && existing.sent) merged.sent = true;
+  if (existing && existing.status) merged.status = existing.status;
 
   const next = list.filter(m => m.candidateId !== candidateMatch.candidateId);
   next.push(merged);
@@ -2295,11 +2296,16 @@ function reconcileRequestMatches(requestId, evaluatedCandidateIds, newMatches, u
   // concurrently and self-inserted via addCandidateToRequestMatches).
   const preserved = existing.filter(m => !evaluated.has(m.candidateId));
 
-  // Carry over the "sent" flag for evaluated candidates from their old entry.
-  const sentBy = new Set(existing.filter(m => m.sent).map(m => m.candidateId));
-  const fresh = (newMatches || []).map(m =>
-    sentBy.has(m.candidateId) ? { ...m, sent: true } : m
-  );
+  // Carry over the "sent" flag and client status for evaluated candidates from
+  // their old entry (a fresh match must not reset a sent/declined/etc. status).
+  const prevById = new Map(existing.map(m => [m.candidateId, m]));
+  const fresh = (newMatches || []).map(m => {
+    const prev = prevById.get(m.candidateId);
+    if (prev && prev.sent) {
+      return { ...m, sent: true, ...(prev.status ? { status: prev.status } : {}) };
+    }
+    return m;
+  });
 
   const merged = [...preserved, ...fresh];
   merged.sort((a, b) => (b.score || 0) - (a.score || 0));
@@ -2308,6 +2314,29 @@ function reconcileRequestMatches(requestId, evaluatedCandidateIds, newMatches, u
   db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(merged), now, requestId);
   return true;
+}
+
+// Set the client-response status of a candidate that has been sent for a
+// request (sent / declined / interview / accepted). Only applies to candidates
+// already marked sent. Atomic read-modify-write. Returns the updated request or
+// null if the request or the sent candidate entry isn't found.
+const REQUEST_CANDIDATE_STATUSES = ['sent', 'declined', 'interview', 'accepted'];
+function setRequestCandidateStatus(requestId, candidateId, status, userId) {
+  if (!REQUEST_CANDIDATE_STATUSES.includes(status)) return null;
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return null;
+
+  const list = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
+  const target = list.find(m => m.candidateId === candidateId);
+  if (!target || !target.sent) return null; // status only applies to sent candidates
+
+  const next = list.map(m =>
+    m.candidateId === candidateId ? { ...m, sent: true, status } : m
+  );
+  const now = getTimestamp();
+  db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(next), now, requestId);
+  return getConsultantRequestById(requestId, userId);
 }
 
 function deleteConsultantRequest(requestId, userId) {
@@ -2491,5 +2520,6 @@ module.exports = {
   addCandidateToRequestMatches,
   removeCandidateFromRequestMatches,
   reconcileRequestMatches,
+  setRequestCandidateStatus,
   getCandidatesWithResumes
 };
