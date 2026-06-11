@@ -1,0 +1,10 @@
+# Railway builds this app with Nixpacks. Nixpacks sets the legacy
+# NPM_CONFIG_PRODUCTION flag during install, which makes npm 10 print:
+#   npm warn config production Use `--omit=dev` instead.
+#
+# Clearing that legacy flag and using the modern equivalent (NPM_CONFIG_OMIT=dev)
+# silences the warning. This is purely cosmetic — the project has no
+# devDependencies, so nothing about what gets installed changes.
+[variables]
+NPM_CONFIG_PRODUCTION = ""
+NPM_CONFIG_OMIT = "dev"
