@@ -3050,7 +3050,7 @@ const views = {
       <div class="mb-4 flex flex-col sm:flex-row gap-3">
         <input type="text" id="candidate-search-input" placeholder="Search candidates..." autofocus
                class="w-full sm:flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"
-               oninput="views.filterCandidates()">
+               oninput="views.filterCandidates()" onkeydown="views.candidateSearchKey(event)" autocomplete="off">
         ${ownerFilterHtml}
         <select id="candidate-category-filter"
                 class="px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white text-slate-700"
@@ -3301,7 +3301,7 @@ const views = {
         : (c.createdByUsername || '-');
       const categoryLabel = c.category ? (categoryLabels[c.category] || c.category) : '-';
       return `
-      <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
+      <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" data-candidate-id="${c.id}" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
         <td class="px-6 py-3">
           <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
           ${c.skills ? `<div class="text-xs text-slate-400 mt-0.5 truncate max-w-md">${this.escapeHtml(c.skills)}</div>` : ''}
@@ -3378,6 +3378,49 @@ const views = {
       (secondary.length
         ? this.renderCandidateSeparatorRow(secondary.length) + this.renderCandidateRows(secondary)
         : '');
+
+    // While searching, pre-highlight the top match so ↓/↑/Enter can drive the
+    // list straight from the search box. With no query, clear the highlight.
+    if (query) {
+      this._highlightCandidate(0);
+    } else {
+      this._candidateRows().forEach(r => r.classList.remove('bg-rose-100'));
+      this._candidateActiveIndex = -1;
+    }
+  },
+
+  // Returns the selectable candidate <tr> rows (excludes separator / empty rows)
+  _candidateRows() {
+    const tbody = document.getElementById('candidates-table');
+    return tbody ? Array.from(tbody.querySelectorAll('tr[data-candidate-id]')) : [];
+  },
+
+  // Highlight the candidate row at `index` (clamped) and scroll it into view
+  _highlightCandidate(index) {
+    const rows = this._candidateRows();
+    rows.forEach(r => r.classList.remove('bg-rose-100'));
+    if (rows.length === 0) { this._candidateActiveIndex = -1; return; }
+    const i = Math.max(0, Math.min(index, rows.length - 1));
+    rows[i].classList.add('bg-rose-100');
+    rows[i].scrollIntoView({ block: 'nearest' });
+    this._candidateActiveIndex = i;
+  },
+
+  // ↓/↑ move the highlight through the filtered list; Enter opens the highlighted
+  // candidate — all without leaving the search box.
+  candidateSearchKey(event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this._highlightCandidate((this._candidateActiveIndex ?? -1) + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      this._highlightCandidate((this._candidateActiveIndex ?? 0) - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const rows = this._candidateRows();
+      const el = rows[this._candidateActiveIndex ?? 0] || rows[0];
+      if (el) router.navigate('candidate-detail', { id: el.getAttribute('data-candidate-id') });
+    }
   },
 
   sortCandidates(field) {

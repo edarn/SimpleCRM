@@ -739,6 +739,10 @@ Main navigation tabs: **Contacts | Companies | Candidates | ToDos | Inbox | Requ
    - Table: Name, Role, Category, Skills, Added By (team only), Status (owner + category, two lines)
    - Sortable columns
    - Full-text search across all fields, with primary (filter-matching) and secondary (all-team / all-categories) result groups separated by a divider row
+   - **Keyboard navigation from the search box**: while a query is active the top
+     match is highlighted; ↓/↑ move the highlight through the filtered rows
+     (scrolling into view) and Enter opens the highlighted candidate — without
+     leaving the search input.
    - "Add Candidate" button
    - Click row to view details
 
