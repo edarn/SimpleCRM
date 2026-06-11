@@ -272,6 +272,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      candidate already marked "Sent" is kept so the Sent history is preserved).
      The write is an atomic read-modify-write, so concurrent matches (e.g. a
      bulk import) can't clobber each other.
+   - **Request-side matching merges, never blind-overwrites**: When a request is
+     (re)matched against all candidates (AI email import, the "Save & Re-match"
+     button), the fresh full ranking is **merged** into `matched_candidates`
+     rather than replacing it. Entries for the candidates actually scored in this
+     run are refreshed; entries for any candidate NOT in this run's snapshot
+     (e.g. a profile added concurrently that already self-inserted) are
+     preserved. This fixes a race where adding a candidate while an email-import
+     was matching a request could wipe the new candidate from the request's list
+     even though the candidate's own profile showed it as a top match.
 
 16. **Resume Text Search**
    - Candidate search in the list view now matches against the full extracted

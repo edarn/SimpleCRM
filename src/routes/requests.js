@@ -83,7 +83,8 @@ router.post('/:id/rematch', async (req, res) => {
       }, candidates);
     }
 
-    data.updateConsultantRequest(req.params.id, { matchedCandidates: matches }, userId);
+    // Merge instead of overwrite so a candidate added concurrently isn't wiped.
+    data.reconcileRequestMatches(req.params.id, candidates.map(c => c.id), matches, userId);
 
     res.json({ message: `Matched ${matches.length} candidate(s)`, matchCount: matches.length });
   } catch (err) {

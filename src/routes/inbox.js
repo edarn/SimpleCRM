@@ -399,7 +399,10 @@ module.exports = function(uploadsDir) {
       }, candidates);
     }
 
-    data.updateConsultantRequest(request.id, { matchedCandidates: matches }, userId);
+    // Merge instead of overwrite: preserves any candidate that inserted itself
+    // into this request concurrently (e.g. a profile added while this email was
+    // being processed) — see reconcileRequestMatches.
+    data.reconcileRequestMatches(request.id, candidates.map(c => c.id), matches, userId);
 
     const matchSummary = matches.length > 0
       ? ` Matched ${matches.length} candidate(s), best: ${matches[0].score}% fit.`

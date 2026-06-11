@@ -2272,6 +2272,44 @@ function removeCandidateFromRequestMatches(requestId, candidateId, userId) {
   return true;
 }
 
+// Merge a freshly computed full ranking (newMatches) into a request's
+// matched_candidates WITHOUT clobbering entries for candidates that weren't part
+// of this matching run. This replaces the old blind overwrite, which had a race:
+// when a candidate is added at the same time a request is being matched, the
+// candidate inserts itself into the request via addCandidateToRequestMatches,
+// and a blind overwrite from the (older) request-side snapshot would wipe it.
+//
+// evaluatedCandidateIds = the candidates this run actually scored (the snapshot
+// passed to the matcher). Their entries are replaced by newMatches; entries for
+// any other candidate (e.g. one added concurrently) are preserved. The "sent"
+// flag is carried over. Synchronous read-modify-write => atomic under Node's
+// single thread, so it can't interleave with the per-candidate atomic inserts.
+function reconcileRequestMatches(requestId, evaluatedCandidateIds, newMatches, userId) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return false;
+
+  const evaluated = new Set(evaluatedCandidateIds || []);
+  const existing = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
+
+  // Preserve entries for candidates this run did not evaluate (e.g. added
+  // concurrently and self-inserted via addCandidateToRequestMatches).
+  const preserved = existing.filter(m => !evaluated.has(m.candidateId));
+
+  // Carry over the "sent" flag for evaluated candidates from their old entry.
+  const sentBy = new Set(existing.filter(m => m.sent).map(m => m.candidateId));
+  const fresh = (newMatches || []).map(m =>
+    sentBy.has(m.candidateId) ? { ...m, sent: true } : m
+  );
+
+  const merged = [...preserved, ...fresh];
+  merged.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  const now = getTimestamp();
+  db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(merged), now, requestId);
+  return true;
+}
+
 function deleteConsultantRequest(requestId, userId) {
   const request = getConsultantRequestById(requestId, userId);
   if (!request) return { error: 'Request not found' };
@@ -2452,5 +2490,6 @@ module.exports = {
   updateCandidateRequestMatches,
   addCandidateToRequestMatches,
   removeCandidateFromRequestMatches,
+  reconcileRequestMatches,
   getCandidatesWithResumes
 };
