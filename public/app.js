@@ -5913,11 +5913,13 @@ We're looking for a senior Java developer..."></textarea>
     return requests.map(r => {
       const isClosed = r.status === 'closed' || r.status === 'filled';
       const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[r.status] || 'bg-slate-100 text-slate-600';
-      const urgencyIcon = { urgent: '🔴', high: '🟠', normal: '', low: '🔵' }[r.urgency] || '';
+      const ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : Infinity;
+      const isNew = ageMs >= 0 && ageMs < 3 * 24 * 60 * 60 * 1000;
+      const newBadge = isNew ? `<span class="text-xs font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded mr-1 align-middle">New</span>` : '';
       return `
       <tr class="${isClosed ? 'opacity-50' : 'hover:bg-violet-50/30'} transition-colors cursor-pointer" data-request-id="${r.id}" onclick="router.navigate('request-detail', {id: '${r.id}'})">
         <td class="px-6 py-4" data-label="Request">
-          <div class="font-medium ${isClosed ? 'text-slate-400 line-through' : 'text-slate-800'}">${urgencyIcon} ${this.escapeHtml(r.title)}</div>
+          <div class="font-medium ${isClosed ? 'text-slate-400 line-through' : 'text-slate-800'}">${newBadge}${this.escapeHtml(r.title)}</div>
           ${r.role ? `<div class="text-sm text-slate-500">${this.escapeHtml(r.role)}</div>` : ''}
         </td>
         <td class="px-6 py-4 text-slate-600" data-label="Client">${this.escapeHtml(r.clientName || r.clientEmail || '-')}</td>
