@@ -310,6 +310,18 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      preserved. This fixes a race where adding a candidate while an email-import
      was matching a request could wipe the new candidate from the request's list
      even though the candidate's own profile showed it as a top match.
+   - **AI concurrency gate (`src/lib/ai-client.js`)**: Every Anthropic call in the
+     app (email classification, candidate matching, CV parsing) runs server-side
+     under one API key, so all users/tabs share one rate limit. All calls go
+     through a single shared `createMessage()` that caps in-flight requests to
+     `AI_MAX_CONCURRENCY` (default 4); excess calls queue FIFO and run as slots
+     free. This prevents bursts of simultaneous email simulations from firing too
+     many parallel calls at once (which trip 429/529 → slow SDK retries → an inbox
+     email stuck at "processing"). The shared client also sets bounded SDK retries
+     (`AI_MAX_RETRIES`, default 3; respects `retry-after`) and a per-attempt
+     `timeout` (`AI_REQUEST_TIMEOUT_MS`, default 120000) so a dead connection
+     releases its gate slot instead of blocking the queue. Tune the concurrency
+     cap to your Anthropic tier.
 
 16. **Resume Text Search**
    - Candidate search in the list view now matches against the full extracted
@@ -822,6 +834,7 @@ VibeCodingProject/
 │   │   ├── contract-template.js  # Fills the contract docx template
 │   │   ├── offer-pdf.js          # Renders the salary attachment PDF (pdfkit)
 │   │   ├── eml-builder.js        # Builds Outlook-draft .eml with attachments
+│   │   ├── ai-client.js        # Shared Anthropic client + concurrency gate (see below)
 │   │   ├── email-classifier.js  # Claude AI email classification & extraction
 │   │   ├── resume-parser.js     # PDF/DOCX text extraction for resumes
 │   │   ├── candidate-matcher.js # AI-powered candidate-to-request matching

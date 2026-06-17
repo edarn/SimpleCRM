@@ -1,20 +1,7 @@
-const Anthropic = require('@anthropic-ai/sdk');
-
-let client = null;
-
-function getClient() {
-  if (!client) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set');
-    client = new Anthropic({ apiKey });
-  }
-  return client;
-}
+const { createMessage } = require('./ai-client');
 
 async function matchCandidates(request, candidates) {
   if (!candidates || candidates.length === 0) return [];
-
-  const anthropic = getClient();
 
   // Use simple numeric IDs (1, 2, 3...) that the AI can reliably return
   // Then map back to real UUIDs after
@@ -31,7 +18,7 @@ async function matchCandidates(request, candidates) {
     return summary;
   }).join('\n\n---\n\n');
 
-  const response = await anthropic.messages.create({
+  const response = await createMessage({
     model: 'claude-sonnet-4-6',
     max_tokens: 8000,
     temperature: 0,
