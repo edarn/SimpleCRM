@@ -322,6 +322,26 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      `timeout` (`AI_REQUEST_TIMEOUT_MS`, default 120000) so a dead connection
      releases its gate slot instead of blocking the queue. Tune the concurrency
      cap to your Anthropic tier.
+   - **Startup recovery of orphaned work**: Background AI processing runs in
+     fire-and-forget promises, so a server restart/crash loses any in-flight job
+     while its DB row stays mid-flight forever. On boot (`src/database.js`) any
+     `email_inbox` row left in `processing`/`pending` is flipped to `failed` (with
+     a "interrupted by a server restart" message, so it can be reprocessed), and
+     any candidate stuck in `match_status = 'pending'` is reset to `done`.
+   - **Idempotent email reprocessing**: Reprocessing an email no longer creates a
+     duplicate consultant request. `handleConsultantRequest` looks up the existing
+     request by `email_inbox_id` (`getConsultantRequestByEmailInboxId`) and updates
+     it in place — preserving the request id, its `matched_candidates`, and any
+     "Sent" history — instead of inserting a new one.
+   - **Candidate auto-match runs in the background, UI polls**: After a candidate
+     is created/imported, request matching runs asynchronously (it includes an AI
+     call). The candidate carries a `match_status` (`pending` → `done`); the
+     `GET /api/candidates/:id/match-requests` response includes it, and the detail
+     view shows a "Matching against open requests…" spinner and polls until `done`
+     rather than showing an empty list that needs a manual Refresh. The candidate
+     side and request side stay linked: a completed candidate match upserts the
+     candidate into each open request's `matched_candidates` (so the same
+     candidate↔request pair isn't scored twice).
 
 16. **Resume Text Search**
    - Candidate search in the list view now matches against the full extracted

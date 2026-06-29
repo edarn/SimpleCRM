@@ -512,7 +512,8 @@ router.get('/:id/match-requests', (req, res) => {
     const candidate = data.getCandidateById(req.params.id, userId);
     if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
     const matches = data.getCandidateRequestMatches(req.params.id);
-    res.json({ matches, cached: true });
+    const status = data.getCandidateMatchStatus(req.params.id);
+    res.json({ matches, cached: true, status });
   } catch (err) {
     console.error('Error getting cached matches:', err);
     res.json({ matches: [], cached: true });
@@ -536,8 +537,19 @@ router.post('/:id/match-requests', async (req, res) => {
   }
 });
 
-// Shared matching logic — used by the endpoint and by file upload trigger
+// Shared matching logic — used by the endpoint and by file upload trigger.
+// The wrapper marks match_status 'pending' for the duration so the UI can poll
+// (and stop showing an empty list) while the async AI match runs, then 'done'.
 async function runCandidateRequestMatching(candidateId, candidate, userId) {
+  data.setCandidateMatchStatus(candidateId, 'pending');
+  try {
+    return await _runCandidateRequestMatching(candidateId, candidate, userId);
+  } finally {
+    data.setCandidateMatchStatus(candidateId, 'done');
+  }
+}
+
+async function _runCandidateRequestMatching(candidateId, candidate, userId) {
   const openRequests = data.getOpenConsultantRequests(userId);
   if (openRequests.length === 0) {
     data.updateCandidateRequestMatches(candidateId, []);
@@ -567,16 +579,16 @@ async function runCandidateRequestMatching(candidateId, candidate, userId) {
 
   const candidateProfile = `${candidate.name}\nRole: ${candidate.role || 'Not specified'}\nSkills: ${candidate.skills || 'Not specified'}${resumeText ? '\nResume:\n' + resumeText.substring(0, 4000) : ''}`;
 
-  const Anthropic = require('@anthropic-ai/sdk');
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return [];
+  if (!process.env.ANTHROPIC_API_KEY) return [];
 
-  const client = new Anthropic({ apiKey });
+  // Route through the shared concurrency gate (src/lib/ai-client.js) so this
+  // call counts against the same in-flight cap as email classification/matching.
+  const { createMessage } = require('../lib/ai-client');
   const requestSummaries = openRequests.map((r, i) => (
     `[${i + 1}] ${r.title}\nRole: ${r.role || ''}\nSkills: ${(r.requiredSkills || '').replace(/\*\*/g, '')}\nDescription: ${(r.description || '').substring(0, 500)}`
   )).join('\n\n---\n\n');
 
-  const response = await client.messages.create({
+  const response = await createMessage({
     model: 'claude-sonnet-4-6',
     max_tokens: 2000,
     temperature: 0,
@@ -653,6 +665,10 @@ Empty array [] if no request matches above 50.`,
 // any resume text extracted just before. Safe no-op when there are no open
 // requests or no ANTHROPIC_API_KEY.
 function triggerRequestMatchingInBackground(candidateId, userId) {
+  // Mark pending synchronously (before the event loop yields) so a client that
+  // navigates to the candidate immediately after import sees 'pending' and polls,
+  // instead of reading an empty cache once and giving up.
+  try { data.setCandidateMatchStatus(candidateId, 'pending'); } catch (_) {}
   setImmediate(() => {
     try {
       const candidate = data.getCandidateById(candidateId, userId);

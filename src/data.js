@@ -2194,6 +2194,25 @@ function getConsultantRequestById(requestId, userId) {
   return obj;
 }
 
+// Find the request that was created from a given inbox email (if any). Used to
+// make email reprocessing idempotent: reprocessing must update the existing
+// request rather than create a duplicate. Returns the oldest match if somehow
+// more than one exists.
+function getConsultantRequestByEmailInboxId(emailInboxId, userId) {
+  if (!emailInboxId) return null;
+  const teamId = getUserTeamId(userId);
+  let row;
+  if (teamId) {
+    row = db.prepare('SELECT * FROM consultant_requests WHERE email_inbox_id = ? AND team_id = ? ORDER BY created_at ASC LIMIT 1').get(emailInboxId, teamId);
+  } else {
+    row = db.prepare('SELECT * FROM consultant_requests WHERE email_inbox_id = ? AND created_by = ? ORDER BY created_at ASC LIMIT 1').get(emailInboxId, userId);
+  }
+  if (!row) return null;
+  const obj = toCamelCase(row);
+  obj.matchedCandidates = JSON.parse(row.matched_candidates || '[]');
+  return obj;
+}
+
 function createConsultantRequest({ title, description, requiredSkills, role, clientName, clientEmail, urgency, emailInboxId }, userId) {
   const teamId = getUserTeamId(userId);
   const id = generateId();
@@ -2215,6 +2234,9 @@ function updateConsultantRequest(requestId, updates, userId) {
   if (updates.description !== undefined) { sets.push('description = ?'); values.push(updates.description); }
   if (updates.requiredSkills !== undefined) { sets.push('required_skills = ?'); values.push(updates.requiredSkills); }
   if (updates.role !== undefined) { sets.push('role = ?'); values.push(updates.role); }
+  if (updates.clientName !== undefined) { sets.push('client_name = ?'); values.push(updates.clientName); }
+  if (updates.clientEmail !== undefined) { sets.push('client_email = ?'); values.push(updates.clientEmail); }
+  if (updates.urgency !== undefined) { sets.push('urgency = ?'); values.push(updates.urgency); }
   if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
   if (updates.matchedCandidates !== undefined) { sets.push('matched_candidates = ?'); values.push(JSON.stringify(updates.matchedCandidates)); }
   values.push(requestId);
@@ -2368,6 +2390,18 @@ function getCandidateRequestMatches(candidateId) {
   const row = db.prepare('SELECT request_matches FROM candidates WHERE id = ?').get(candidateId);
   if (!row || !row.request_matches) return [];
   try { return JSON.parse(row.request_matches); } catch (_) { return []; }
+}
+
+// Tracks whether a background candidate→request auto-match is in flight, so the
+// UI can poll instead of showing an empty list before matching finishes.
+// 'pending' = running, 'done' = finished (matches cached). null = never run.
+function setCandidateMatchStatus(candidateId, status) {
+  db.prepare('UPDATE candidates SET match_status = ? WHERE id = ?').run(status, candidateId);
+}
+
+function getCandidateMatchStatus(candidateId) {
+  const row = db.prepare('SELECT match_status FROM candidates WHERE id = ?').get(candidateId);
+  return row ? row.match_status : null;
 }
 
 function updateCandidateRequestMatches(candidateId, matches) {
@@ -2526,6 +2560,9 @@ module.exports = {
   updateCandidateResumeText,
   getCandidateRequestMatches,
   updateCandidateRequestMatches,
+  setCandidateMatchStatus,
+  getCandidateMatchStatus,
+  getConsultantRequestByEmailInboxId,
   addCandidateToRequestMatches,
   removeCandidateFromRequestMatches,
   reconcileRequestMatches,

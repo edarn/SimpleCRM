@@ -3630,10 +3630,51 @@ const views = {
     try {
       // Load cached results instantly (GET)
       const result = await api.get(`/api/candidates/${candidateId}/match-requests`);
+      // A background auto-match may still be running (e.g. just after importing
+      // this candidate). Show a spinner and poll until it finishes, so the user
+      // doesn't see an empty list and have to click Refresh manually.
+      if (result.status === 'pending') {
+        this._renderMatchesPending(container);
+        this.pollCandidateRequestMatches(candidateId);
+        return;
+      }
       this._renderRequestMatches(container, result.matches, candidateId);
     } catch (err) {
       console.error('Error loading request matches:', err);
     }
+  },
+
+  async pollCandidateRequestMatches(candidateId) {
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      if (attempts > 40) return; // give up after ~60s; cached list stays shown
+      // Stop if the user navigated away from this candidate's detail view.
+      const container = document.getElementById('candidate-request-matches');
+      if (!container) return;
+      try {
+        const result = await api.get(`/api/candidates/${candidateId}/match-requests`);
+        if (result.status !== 'pending') {
+          this._renderRequestMatches(container, result.matches, candidateId);
+          return;
+        }
+      } catch (_) { /* transient — keep polling */ }
+      setTimeout(poll, 1500);
+    };
+    setTimeout(poll, 1500);
+  },
+
+  _renderMatchesPending(container) {
+    container.classList.remove('hidden');
+    container.innerHTML = `
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-medium text-slate-500">Matching Open Requests</h3>
+      </div>
+      <p class="text-xs text-slate-400 flex items-center gap-2">
+        <span class="inline-block w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"></span>
+        Matching against open requests…
+      </p>
+    `;
   },
 
   async refreshCandidateRequestMatches(candidateId) {

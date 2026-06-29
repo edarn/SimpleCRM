@@ -347,16 +347,31 @@ module.exports = function(uploadsDir) {
   }
 
   async function handleConsultantRequest(extracted, email, userId, emailId) {
-    const request = data.createConsultantRequest({
+    const fields = {
       title: extracted.title || email.subject || 'Consultant Request',
       description: extracted.description || '',
       requiredSkills: extracted.required_skills || '',
       role: extracted.role || '',
       clientName: extracted.client_name || email.fromName || '',
       clientEmail: extracted.client_email || email.fromEmail,
-      urgency: extracted.urgency || 'normal',
-      emailInboxId: emailId
-    }, userId);
+      urgency: extracted.urgency || 'normal'
+    };
+
+    // Idempotent: reprocessing an email must update the request it already
+    // created, not spawn a duplicate. Reuse the existing request (preserving its
+    // id, matched_candidates and any "Sent" history) if one is linked to this
+    // inbox email; otherwise create a fresh one.
+    const existing = data.getConsultantRequestByEmailInboxId(emailId, userId);
+    let request;
+    let verb;
+    if (existing) {
+      data.updateConsultantRequest(existing.id, fields, userId);
+      request = data.getConsultantRequestById(existing.id, userId);
+      verb = 'Updated';
+    } else {
+      request = data.createConsultantRequest({ ...fields, emailInboxId: emailId }, userId);
+      verb = 'Created';
+    }
 
     // Extract resume text for candidates that don't have it yet
     const db = require('../database');
@@ -408,7 +423,7 @@ module.exports = function(uploadsDir) {
       ? ` Matched ${matches.length} candidate(s), best: ${matches[0].score}% fit.`
       : ' No matching candidates found.';
 
-    return { type: 'consultant_request', id: request.id, summary: `Created request "${request.title}".${matchSummary}` };
+    return { type: 'consultant_request', id: request.id, summary: `${verb} request "${request.title}".${matchSummary}` };
   }
 
   async function handleTodo(extracted, email, userId) {

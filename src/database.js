@@ -566,11 +566,45 @@ function migrateExistingData() {
   // Add request_matches column to candidates for caching AI match results
   addColumnIfNotExists('candidates', 'request_matches', "TEXT DEFAULT '[]'");
 
+  // Track background candidate→request auto-match progress ('pending'/'done'/NULL)
+  // so the UI can poll instead of showing an empty list before matching finishes.
+  addColumnIfNotExists('candidates', 'match_status', 'TEXT DEFAULT NULL');
+
   // Add resume_text column to candidates for caching extracted text
   addColumnIfNotExists('candidates', 'resume_text', "TEXT DEFAULT ''");
 
   // Migrate todos linked_type to also allow 'general' for email-generated todos
   migrateTodosLinkedTypeGeneral();
+
+  // Recover work orphaned by a server restart/crash. Background AI processing
+  // runs in-memory (fire-and-forget promises); a restart loses those promises
+  // while the DB row stays mid-flight forever. Flip stuck rows to a terminal
+  // state on boot so they surface in the UI (and can be reprocessed) instead of
+  // appearing to hang indefinitely.
+  try {
+    const recovered = db.prepare(`
+      UPDATE email_inbox
+      SET status = 'failed',
+          error_message = 'Processing was interrupted by a server restart. Please reprocess this email.',
+          processed_at = ?
+      WHERE status IN ('processing', 'pending')
+    `).run(new Date().toISOString());
+    if (recovered.changes > 0) {
+      console.log(`Recovered ${recovered.changes} inbox email(s) stuck in processing/pending after restart`);
+    }
+  } catch (err) {
+    console.log('Inbox recovery error:', err.message);
+  }
+  try {
+    // Candidates whose auto-match was interrupted: clear the 'pending' flag so
+    // the UI stops waiting and shows whatever matches were already cached.
+    const fixed = db.prepare("UPDATE candidates SET match_status = 'done' WHERE match_status = 'pending'").run();
+    if (fixed.changes > 0) {
+      console.log(`Cleared ${fixed.changes} candidate(s) stuck in 'pending' match status after restart`);
+    }
+  } catch (err) {
+    console.log('Candidate match-status recovery error:', err.message);
+  }
 
   // Find the first user to assign orphaned data to
   const firstUser = db.prepare('SELECT id FROM users ORDER BY created_at ASC LIMIT 1').get();
