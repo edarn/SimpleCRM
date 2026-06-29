@@ -577,7 +577,13 @@ async function _runCandidateRequestMatching(candidateId, candidate, userId) {
     }
   }
 
-  const candidateProfile = `${candidate.name}\nRole: ${candidate.role || 'Not specified'}\nSkills: ${candidate.skills || 'Not specified'}${resumeText ? '\nResume:\n' + resumeText.substring(0, 4000) : ''}`;
+  // Pseudonymize the CV text before it leaves for the AI — the match is driven
+  // by skills/experience, not identity (see src/lib/pseudonymize.js).
+  const { scrubPII } = require('../lib/pseudonymize');
+  const scrubbedResume = resumeText
+    ? scrubPII(resumeText, { name: candidate.name, email: candidate.email, phone: candidate.phone })
+    : '';
+  const candidateProfile = `Kandidat\nRole: ${candidate.role || 'Not specified'}\nSkills: ${candidate.skills || 'Not specified'}${scrubbedResume ? '\nResume:\n' + scrubbedResume.substring(0, 4000) : ''}`;
 
   if (!process.env.ANTHROPIC_API_KEY) return [];
 

@@ -1,19 +1,22 @@
 const { createMessage } = require('./ai-client');
+const { scrubPII } = require('./pseudonymize');
 
 async function matchCandidates(request, candidates) {
   if (!candidates || candidates.length === 0) return [];
 
   // Use simple numeric IDs (1, 2, 3...) that the AI can reliably return
-  // Then map back to real UUIDs after
+  // Then map back to real UUIDs after. The AI never needs the name — we
+  // re-identify locally — so we pseudonymize before sending (see pseudonymize.js).
   const idToUuid = {};
   const candidateSummaries = candidates.map((c, i) => {
     const simpleId = i + 1;
     idToUuid[simpleId] = c.id;
 
-    let summary = `[${simpleId}] ${c.name}\nRole: ${c.role || 'Not specified'}\nSkills: ${c.skills || 'Not specified'}`;
+    let summary = `[${simpleId}] Kandidat ${simpleId}\nRole: ${c.role || 'Not specified'}\nSkills: ${c.skills || 'Not specified'}`;
     if (c.resumeText) {
       // Use up to 4000 chars per candidate to capture experience sections, not just the header
-      summary += `\nResume:\n${c.resumeText.substring(0, 4000)}`;
+      const scrubbed = scrubPII(c.resumeText, { name: c.name, email: c.email, phone: c.phone });
+      summary += `\nResume:\n${scrubbed.substring(0, 4000)}`;
     }
     return summary;
   }).join('\n\n---\n\n');
