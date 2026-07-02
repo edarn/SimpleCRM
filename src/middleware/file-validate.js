@@ -31,19 +31,34 @@ function matchesMagicBytes(buffer, signature) {
   return true;
 }
 
+// Per the PDF spec (ISO 32000-1 §7.5.2) the "%PDF-" header should be at the
+// start of the file, but every real reader tolerates leading bytes (a UTF-8
+// BOM, whitespace, or other junk) and scans roughly the first 1024 bytes for
+// the signature. A file with such a prefix opens fine everywhere, so requiring
+// the marker at offset 0 would wrongly reject valid PDFs. Scan this window for
+// PDFs; other formats (ZIP/OLE/images) genuinely require offset 0, so stay
+// strict there.
+const PDF_SCAN_BYTES = 1024;
+
 // Validate uploaded file's magic bytes match its extension
 function validateFileMagic(filePath, originalExt) {
   try {
     const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(16);
-    fs.readSync(fd, buf, 0, 16, 0);
+    const buf = Buffer.alloc(PDF_SCAN_BYTES);
+    const bytesRead = fs.readSync(fd, buf, 0, PDF_SCAN_BYTES, 0);
     fs.closeSync(fd);
+    const head = buf.subarray(0, bytesRead);
 
     const ext = originalExt.toLowerCase();
 
-    // Map extension to expected signature arrays
+    if (ext === '.pdf') {
+      // Accept "%PDF" anywhere within the scan window, matching PDF readers.
+      const sig = Buffer.from(MAGIC_BYTES.pdf[0].bytes);
+      return head.indexOf(sig) !== -1;
+    }
+
+    // Map extension to expected signature arrays (must match at offset 0)
     const extMap = {
-      '.pdf': MAGIC_BYTES.pdf,
       '.doc': MAGIC_BYTES.doc,
       '.docx': MAGIC_BYTES.docx,
       '.png': MAGIC_BYTES.png,
@@ -56,7 +71,7 @@ function validateFileMagic(filePath, originalExt) {
     const signatures = extMap[ext];
     if (!signatures) return true; // Unknown extension, skip
 
-    return signatures.some(sig => matchesMagicBytes(buf, sig.bytes));
+    return signatures.some(sig => matchesMagicBytes(head, sig.bytes));
   } catch (err) {
     console.error('Magic byte validation error:', err.message);
     return false;
