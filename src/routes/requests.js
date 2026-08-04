@@ -74,17 +74,20 @@ router.post('/:id/rematch', async (req, res) => {
     const candidates = data.getCandidatesWithResumes(userId);
 
     let matches = [];
+    let evaluatedIds = [];
     if (candidates.length > 0) {
-      matches = await matchCandidates({
+      ({ matches, evaluatedIds } = await matchCandidates({
         title: request.title,
         description: request.description,
         requiredSkills: request.requiredSkills,
         role: request.role
-      }, candidates);
+      }, candidates));
     }
 
     // Merge instead of overwrite so a candidate added concurrently isn't wiped.
-    data.reconcileRequestMatches(req.params.id, candidates.map(c => c.id), matches, userId);
+    // Pass only the candidates actually scored — a failed chunk must not read as
+    // "these candidates no longer match".
+    data.reconcileRequestMatches(req.params.id, evaluatedIds, matches, userId);
 
     res.json({ message: `Matched ${matches.length} candidate(s)`, matchCount: matches.length });
   } catch (err) {

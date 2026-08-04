@@ -6,6 +6,7 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const multer = require('multer');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const { requireAuth } = require('./src/middleware/auth');
 const { enforceFieldLimits } = require('./src/middleware/validate');
 
@@ -142,12 +143,28 @@ const authLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// Keyed on the logged-in user, not the IP. A whole team commonly shares one
+// office egress IP, so an IP-keyed budget makes colleagues throttle each other
+// — and the inbox/candidate status pollers spend a real share of it. Falls back
+// to IP for unauthenticated calls.
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 120, // 120 requests per minute
+  max: 240, // per user per minute
   message: { error: 'Too many requests, please slow down' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  // ipKeyGenerator takes the IP *string* (it normalises IPv6 to a /56 subnet).
+  // Passing the request object instead returns the object, which every
+  // unauthenticated caller would then share as a single key.
+  keyGenerator: (req) => req.session?.userId || ipKeyGenerator(req.ip),
+  // Status polling is cheap and read-only; excluding it means a long-running
+  // AI job can never exhaust the caller's budget for real work. Anchored so it
+  // covers ONLY the two poll endpoints — notably not /candidates/:id/resume,
+  // which serves files and must stay limited.
+  skip: (req) => req.method === 'GET' && (
+    /^\/inbox\/[^/]+$/.test(req.path) ||
+    /^\/candidates\/[^/]+\/match-requests$/.test(req.path)
+  )
 });
 
 // Limit request body size

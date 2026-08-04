@@ -3,7 +3,14 @@ const path = require('path');
 const data = require('../data');
 const { classifyEmail } = require('../lib/email-classifier');
 const { matchCandidates } = require('../lib/candidate-matcher');
-const { extractTextFromFile } = require('../lib/resume-parser');
+const { extractTextFromFile, yieldToEventLoop } = require('../lib/resume-parser');
+
+// Cap on how many un-extracted CVs a single email job will parse inline.
+// PDF parsing is CPU-bound and blocks the whole server; an unbounded loop over
+// a growing CV library turns every consultant-request email into a multi-minute
+// server-wide stall. Anything beyond the cap is picked up by the next job or by
+// the explicit "Extract Resumes" button.
+const RESUME_BACKFILL_LIMIT = Math.max(0, Number(process.env.RESUME_BACKFILL_LIMIT || 10));
 
 module.exports = function(uploadsDir) {
   const router = express.Router();
@@ -65,14 +72,7 @@ module.exports = function(uploadsDir) {
       res.status(201).json(inboxEntry);
 
       // Process in background
-      processEmail(inboxEntry.id, userId).catch(err => {
-        console.error('Error processing email:', err);
-        data.updateInboxEmail(inboxEntry.id, {
-          status: 'failed',
-          errorMessage: err.message,
-          processedAt: new Date().toISOString()
-        });
-      });
+      startProcessing(inboxEntry.id, userId);
     } catch (err) {
       console.error('Error simulating email:', err);
       res.status(500).json({ error: 'Internal server error' });
@@ -87,17 +87,17 @@ module.exports = function(uploadsDir) {
         return res.status(404).json({ error: 'Email not found' });
       }
 
-      data.updateInboxEmail(req.params.id, { status: 'pending' });
-      res.json({ message: 'Reprocessing started' });
+      // The inbox is team-scoped: another member may already have this email in
+      // flight. Reject instead of starting a second run that would duplicate
+      // every side effect (a second ToDo, a second contact, ...).
+      if (email.status === 'processing') {
+        return res.status(409).json({ error: 'This email is already being processed.' });
+      }
 
-      processEmail(req.params.id, email.userId).catch(err => {
-        console.error('Error reprocessing email:', err);
-        data.updateInboxEmail(req.params.id, {
-          status: 'failed',
-          errorMessage: err.message,
-          processedAt: new Date().toISOString()
-        });
-      });
+      if (!startProcessing(req.params.id, email.userId)) {
+        return res.status(409).json({ error: 'This email is already being processed.' });
+      }
+      res.json({ message: 'Reprocessing started' });
     } catch (err) {
       console.error('Error reprocessing:', err);
       res.status(500).json({ error: 'Internal server error' });
@@ -118,73 +118,122 @@ module.exports = function(uploadsDir) {
     }
   });
 
-  // POST /api/inbox/extract-resumes - Trigger resume text extraction for all candidates
+  // POST /api/inbox/extract-resumes - Backfill resume text for candidates that
+  // have never been extracted.
+  //
+  // Runs a bounded batch per call and reports what is left, rather than parsing
+  // the entire library inline. The old version awaited every PDF before
+  // responding, so with a few hundred CVs the request blocked Node's single
+  // thread for minutes — freezing the app for every other user, not just the
+  // caller.
   router.post('/extract-resumes', async (req, res) => {
     try {
       const userId = req.session.userId;
-      const teamId = data.getUserTeamId(userId);
+      const batchSize = Math.min(
+        Math.max(1, Number(req.body?.batchSize) || 25),
+        100
+      );
 
-      // Get all candidates that have files but no extracted text
-      // Check both candidate_files table and legacy resume_filename column
-      const db = require('../database');
-      const whereClause = teamId ? 'c.team_id = ?' : 'c.created_by = ?';
-      const param = teamId || userId;
+      const { extracted, empty, remaining } = await backfillResumeText(userId, batchSize);
 
-      const candidates = db.prepare(`
-        SELECT DISTINCT c.id, c.name, c.skills, c.resume_filename,
-               cf.filename AS file_filename, cf.original_name AS file_original_name
-        FROM candidates c
-        LEFT JOIN candidate_files cf ON cf.candidate_id = c.id
-        WHERE ${whereClause} AND (c.resume_text IS NULL OR c.resume_text = '')
-      `).all(param);
+      const parts = [`Extracted text from ${extracted} resume(s)`];
+      if (empty > 0) parts.push(`${empty} had no extractable content`);
+      if (remaining > 0) parts.push(`${remaining} still pending — click again to continue`);
 
-      let extracted = 0;
-      let skipped = 0;
-      for (const c of candidates) {
-        // Try candidate_files first, fall back to legacy resume_filename
-        const filename = c.file_filename || c.resume_filename;
-        let text = '';
-
-        if (uploadsDir && filename) {
-          const filePath = path.join(uploadsDir, filename);
-          try {
-            text = await extractTextFromFile(filePath);
-          } catch (err) {
-            console.error(`Error extracting resume for ${c.name} (${c.id}):`, err.message);
-          }
-        }
-
-        // If file extraction failed (e.g. .doc format), use skills as fallback
-        if (!text && c.skills) {
-          text = `Skills: ${c.skills}`;
-        }
-
-        if (text) {
-          data.updateCandidateResumeText(c.id, text);
-          extracted++;
-        } else {
-          skipped++;
-        }
-      }
-
-      res.json({ message: `Extracted text from ${extracted} resumes` + (skipped > 0 ? ` (${skipped} had no extractable content)` : ''), total: candidates.length, extracted, skipped });
+      res.json({
+        message: parts.filter(Boolean).join(' — '),
+        extracted,
+        skipped: empty,
+        remaining,
+        done: remaining === 0
+      });
     } catch (err) {
       console.error('Error extracting resumes:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
+  // Extract-and-cache CV text for candidates that have never been attempted.
+  //
+  // Every candidate processed here ends up with a non-NULL resume_text_status,
+  // whether or not text came out. That is the point: .doc files, image-only
+  // scans and corrupt PDFs yield '' forever, and the old
+  // `WHERE resume_text = ''` condition re-selected them on every single
+  // consultant-request email — re-parsing the same unparseable files for the
+  // life of the system. Marking them 'empty' makes extraction genuinely
+  // once-per-file. Attaching a new CV resets the marker via
+  // updateCandidateResumeText.
+  //
+  // Returns { extracted, empty, remaining }.
+  async function backfillResumeText(userId, limit) {
+    if (!limit || !uploadsDir) return { extracted: 0, empty: 0, remaining: 0 };
+
+    const candidates = data.getCandidatesNeedingResumeExtraction(userId, limit);
+    let extracted = 0;
+    let empty = 0;
+
+    for (const c of candidates) {
+      const filename = c.file_filename || c.resume_filename;
+      let text = '';
+
+      if (filename) {
+        try {
+          text = await extractTextFromFile(path.join(uploadsDir, filename));
+        } catch (err) {
+          console.error(`Error extracting resume for ${c.name} (${c.id}):`, err.message);
+        }
+      }
+
+      // Fall back to the skills field so the candidate is still matchable even
+      // when the file itself yields nothing.
+      if (!text && c.skills) text = `Skills: ${c.skills}`;
+
+      if (text) {
+        data.updateCandidateResumeText(c.id, text);
+        extracted++;
+      } else {
+        data.markCandidateResumeUnextractable(c.id);
+        empty++;
+      }
+
+      // Hand the thread back to Express between documents so other users'
+      // requests are not queued behind the whole batch.
+      await yieldToEventLoop();
+    }
+
+    const remaining = data.countCandidatesNeedingResumeExtraction(userId);
+    return { extracted, empty, remaining };
+  }
+
   // Check if inbox entry still exists (guards against deletion during async processing)
   function inboxEntryExists(emailId, userId) {
     return !!data.getInboxEmailById(emailId, userId);
   }
 
-  // Core email processing logic
+  // Claim the row, then fire the background job. Returns true if THIS call won
+  // the claim; false means another run already owns the email and we must not
+  // start a second one (see data.claimInboxEmailForProcessing).
+  function startProcessing(emailId, userId) {
+    if (!data.claimInboxEmailForProcessing(emailId)) return false;
+
+    processEmail(emailId, userId).catch(err => {
+      console.error('Error processing email:', err);
+      data.updateInboxEmail(emailId, {
+        status: 'failed',
+        stage: null,
+        errorMessage: err.message,
+        processedAt: new Date().toISOString()
+      });
+    });
+    return true;
+  }
+
+  // Core email processing logic. The caller has already claimed the row and set
+  // status = 'processing'; this function only advances `stage` so the UI can
+  // show what it is currently doing instead of a silent multi-minute wait.
   async function processEmail(emailId, userId) {
     const email = data.getInboxEmailById(emailId, userId);
     if (!email) throw new Error('Email not found');
-
-    data.updateInboxEmail(emailId, { status: 'processing' });
 
     // Step 1: Classify the email using AI (returns multiple actions)
     const result = await classifyEmail({
@@ -223,6 +272,7 @@ module.exports = function(uploadsDir) {
     if (minConfidence < 0.7) {
       data.updateInboxEmail(emailId, {
         status: 'review',
+        stage: null,
         actionSummary: `Low confidence (${Math.round(minConfidence * 100)}%). ${actions.length} action(s) detected. Manual review recommended.`,
         processedAt: new Date().toISOString()
       });
@@ -230,6 +280,7 @@ module.exports = function(uploadsDir) {
     }
 
     // Step 2: Execute all actions
+    data.updateInboxEmail(emailId, { stage: 'executing' });
     const summaries = [];
     const actionIds = [];
     const actionTypes = [];
@@ -282,6 +333,7 @@ module.exports = function(uploadsDir) {
 
     data.updateInboxEmail(emailId, {
       status: 'completed',
+      stage: null,
       actionType: actionTypes.join(', '),
       actionId: actionIds.join(', '),
       actionSummary: summaries.join(' | '),
@@ -373,51 +425,33 @@ module.exports = function(uploadsDir) {
       verb = 'Created';
     }
 
-    // Extract resume text for candidates that don't have it yet
-    const db = require('../database');
-    const teamId = data.getUserTeamId(userId);
-    let candidateFiles;
-    if (teamId) {
-      candidateFiles = db.prepare(`
-        SELECT c.id, cf.filename FROM candidates c
-        JOIN candidate_files cf ON cf.candidate_id = c.id
-        WHERE c.team_id = ? AND (c.resume_text IS NULL OR c.resume_text = '')
-      `).all(teamId);
-    } else {
-      candidateFiles = db.prepare(`
-        SELECT c.id, cf.filename FROM candidates c
-        JOIN candidate_files cf ON cf.candidate_id = c.id
-        WHERE c.created_by = ? AND (c.resume_text IS NULL OR c.resume_text = '')
-      `).all(userId);
-    }
-
-    for (const cf of candidateFiles) {
-      if (uploadsDir && cf.filename) {
-        try {
-          const text = await extractTextFromFile(path.join(uploadsDir, cf.filename));
-          if (text) data.updateCandidateResumeText(cf.id, text);
-        } catch (err) {
-          console.error(`Resume extract error for ${cf.id}:`, err.message);
-        }
-      }
-    }
+    // Backfill resume text for candidates that have never been extracted.
+    // Normally a no-op: CVs are parsed once at upload/import and cached in
+    // resume_text. This only catches profiles that predate that, or whose
+    // extraction was interrupted. Bounded so it can't stall the server.
+    if (emailId) data.updateInboxEmail(emailId, { stage: 'extracting_resumes' });
+    await backfillResumeText(userId, RESUME_BACKFILL_LIMIT);
 
     // Match candidates using AI
+    if (emailId) data.updateInboxEmail(emailId, { stage: 'matching' });
     const candidates = data.getCandidatesWithResumes(userId);
     let matches = [];
+    let evaluatedIds = [];
     if (candidates.length > 0) {
-      matches = await matchCandidates({
+      ({ matches, evaluatedIds } = await matchCandidates({
         title: request.title,
         description: request.description,
         requiredSkills: request.requiredSkills,
         role: request.role
-      }, candidates);
+      }, candidates));
     }
 
     // Merge instead of overwrite: preserves any candidate that inserted itself
     // into this request concurrently (e.g. a profile added while this email was
-    // being processed) — see reconcileRequestMatches.
-    data.reconcileRequestMatches(request.id, candidates.map(c => c.id), matches, userId);
+    // being processed) — see reconcileRequestMatches. Only candidates actually
+    // scored are passed as evaluated, so a failed chunk preserves rather than
+    // drops its candidates.
+    data.reconcileRequestMatches(request.id, evaluatedIds, matches, userId);
 
     const matchSummary = matches.length > 0
       ? ` Matched ${matches.length} candidate(s), best: ${matches[0].score}% fit.`

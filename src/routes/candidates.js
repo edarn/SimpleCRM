@@ -308,6 +308,10 @@ router.post('/:id/files', upload.single('file'), (req, res) => {
             console.error('Background request matching error:', e.message)
           );
         }
+      } else {
+        // Nothing extractable (.doc, image-only scan, corrupt PDF). Record the
+        // attempt so the backfill loops don't re-parse this file forever.
+        data.markCandidateResumeUnextractable(candidateId);
       }
     }).catch(err => console.error('Resume text extraction error:', err.message));
 
@@ -574,6 +578,9 @@ async function _runCandidateRequestMatching(candidateId, candidate, userId) {
           }
         }
       }
+      // Every file tried and none yielded text — mark it so this candidate
+      // isn't re-parsed on every subsequent match/backfill run.
+      if (!resumeText) data.markCandidateResumeUnextractable(candidateId);
     }
   }
 

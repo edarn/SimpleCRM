@@ -5557,8 +5557,8 @@ const views = {
                   class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-2.5 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm">
             + Simulate Email
           </button>
-          <button onclick="views.extractAllResumes()"
-                  class="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm border border-slate-200"
+          <button id="extract-resumes-btn" onclick="views.extractAllResumes()"
+                  class="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm border border-slate-200 disabled:opacity-50"
                   title="Extract text from all uploaded resumes for AI matching">
             Extract Resumes
           </button>
@@ -5607,7 +5607,14 @@ const views = {
           <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span class="font-medium text-slate-800">${this.escapeHtml(e.fromName || e.fromEmail)}</span>
             <span class="text-xs px-2 py-0.5 rounded-full ${classColor}">${classLabel}</span>
-            <span class="text-xs px-2 py-0.5 rounded-full ${statusColor}">${e.status}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full ${statusColor} inline-flex items-center gap-1.5">
+              ${e.status === 'processing' || e.status === 'pending'
+                ? '<span class="inline-block w-2.5 h-2.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>'
+                : ''}${e.status}
+            </span>
+            ${(e.status === 'processing' || e.status === 'pending') && this._inboxStageLabels[e.stage]
+              ? `<span class="text-xs text-slate-500">${this.escapeHtml(this._inboxStageLabels[e.stage])}</span>`
+              : ''}
           </div>
           <div class="text-sm text-slate-700 font-medium">${this.escapeHtml(e.subject || '(no subject)')}</div>
           <div class="text-sm text-slate-500 mt-1 truncate">${this.escapeHtml(e.body.substring(0, 120))}${e.body.length > 120 ? '...' : ''}</div>
@@ -5623,6 +5630,12 @@ const views = {
 
   async inboxDetail(container, emailId) {
     const email = await api.get(`/api/inbox/${emailId}`);
+
+    // A job may still be running — because we just submitted it, because we
+    // reloaded/deep-linked into a running one, or because a teammate started it.
+    // Polling therefore belongs here rather than in the submit handler, so every
+    // route into this view resumes progress instead of showing a frozen badge.
+    const isRunning = email.status === 'pending' || email.status === 'processing';
 
     const classMap = { new_contact: 'New Contact', consultant_request: 'Consultant Request', todo: 'ToDo', pending: 'Pending' };
     const classColorMap = { new_contact: 'bg-sky-100 text-sky-800', consultant_request: 'bg-violet-100 text-violet-800', todo: 'bg-emerald-100 text-emerald-800' };
@@ -5681,6 +5694,17 @@ const views = {
           </div>
         </div>
 
+        ${isRunning ? `
+        <div id="inbox-progress" class="bg-indigo-50 rounded-lg p-4 mb-4 border border-indigo-200">
+          <div class="flex items-center gap-3">
+            <span class="inline-block w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0"></span>
+            <div class="text-sm font-medium text-indigo-800">
+              ${this.escapeHtml(this._inboxStageLabels[email.stage] || 'Processing…')}
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
         ${email.confidence ? `<div class="text-sm text-slate-500 mb-4">Confidence: ${Math.round(email.confidence * 100)}%</div>` : ''}
 
         <div class="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
@@ -5720,8 +5744,8 @@ const views = {
 
         <div class="flex gap-2 mt-4">
           ${email.status === 'failed' || email.status === 'review' ? `
-          <button onclick="views.reprocessEmail('${email.id}')"
-                  class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
+          <button id="reprocess-btn" onclick="views.reprocessEmail('${email.id}')"
+                  class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm disabled:opacity-50">
             Reprocess
           </button>
           ` : ''}
@@ -5732,6 +5756,13 @@ const views = {
         </div>
       </div>
     `;
+
+    if (isRunning) {
+      this.pollInboxStatus(emailId);
+    } else {
+      // Terminal state — retire any loop still polling this view.
+      this._inboxPollToken++;
+    }
   },
 
   showSimulateEmailModal() {
@@ -5784,8 +5815,8 @@ We're looking for a senior Java developer..."></textarea>
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       modal.hide();
+      // The detail view starts its own polling (see inboxDetail).
       router.navigate('inbox-detail', { id: data.id });
-      this.pollInboxStatus(data.id);
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Send to AI';
@@ -5793,34 +5824,117 @@ We're looking for a senior Java developer..."></textarea>
     }
   },
 
+  // Token identifying the poll loop that currently "owns" the inbox detail view.
+  // Navigating to another email (or away and back) bumps it, so a stale loop
+  // exits instead of racing the new one for the same DOM node.
+  _inboxPollToken: 0,
+
+  // Poll an inbox email until it reaches a terminal state.
+  //
+  // The AI job takes 30s-3min (classify + optional resume backfill + chunked
+  // candidate matching, all queued behind a shared concurrency gate). The old
+  // loop gave up after ~31s, which left the page frozen on "processing" forever
+  // even though the work completed fine in the background — the reported bug.
+  //
+  // So: no fixed attempt cap. Poll briskly at first, then back off to keep the
+  // request rate low on long jobs, and stop when the user navigates away.
   async pollInboxStatus(emailId) {
-    let attempts = 0;
+    const token = ++this._inboxPollToken;
+    const startedAt = Date.now();
+    const MAX_WAIT_MS = 15 * 60 * 1000; // safety stop; jobs never legitimately run this long
+
+    const delayFor = (elapsed) => {
+      if (elapsed < 30000) return 2000;   // first 30s — user is watching
+      if (elapsed < 120000) return 4000;  // next 90s
+      return 8000;                        // long tail
+    };
+
     const poll = async () => {
-      attempts++;
-      if (attempts > 30) return; // Give up after 30 attempts (~30 seconds)
+      // Stale loop, or the user left this email's detail view.
+      if (token !== this._inboxPollToken) return;
+      if (router.currentRoute?.route !== 'inbox-detail' ||
+          router.currentRoute?.params?.id !== emailId) return;
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > MAX_WAIT_MS) {
+        this._renderInboxStalled(emailId);
+        return;
+      }
+
       try {
         const email = await api.get(`/api/inbox/${emailId}`);
+        if (token !== this._inboxPollToken) return;
+
         if (email.status === 'completed' || email.status === 'failed' || email.status === 'review') {
-          // Refresh the detail view
-          if (router.currentRoute?.route === 'inbox-detail' && router.currentRoute?.params?.id === emailId) {
-            await this.inboxDetail(document.getElementById('app'), emailId);
-          }
+          await this.inboxDetail(document.getElementById('app'), emailId);
           return;
         }
-        setTimeout(poll, 1000);
-      } catch (_) {
-        setTimeout(poll, 2000);
+        // Still running — refresh just the progress line, not the whole view,
+        // so we don't fight the user's scroll position every few seconds.
+        this._renderInboxProgress(email, elapsed);
+        setTimeout(poll, delayFor(elapsed));
+      } catch (err) {
+        if (token !== this._inboxPollToken) return;
+        // Transient (429, blip, server restart) — keep waiting, slower.
+        setTimeout(poll, Math.max(4000, delayFor(elapsed)));
       }
     };
+
     setTimeout(poll, 1500);
   },
 
+  _inboxStageLabels: {
+    classifying: 'Reading and classifying the email…',
+    extracting_resumes: 'Extracting text from new CVs…',
+    matching: 'Matching candidates against the request…',
+    executing: 'Creating contacts, requests and ToDos…'
+  },
+
+  _renderInboxProgress(email, elapsedMs) {
+    const el = document.getElementById('inbox-progress');
+    if (!el) return;
+    const label = this._inboxStageLabels[email.stage] || 'Processing…';
+    const secs = Math.round(elapsedMs / 1000);
+    const elapsedText = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    el.innerHTML = `
+      <div class="flex items-center gap-3">
+        <span class="inline-block w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0"></span>
+        <div>
+          <div class="text-sm font-medium text-indigo-800">${this.escapeHtml(label)}</div>
+          <div class="text-xs text-indigo-500 mt-0.5">
+            Running for ${elapsedText}. This can take a couple of minutes — you can leave this page, the work continues.
+          </div>
+        </div>
+      </div>`;
+  },
+
+  _renderInboxStalled(emailId) {
+    const el = document.getElementById('inbox-progress');
+    if (!el) return;
+    el.innerHTML = `
+      <div class="text-sm text-amber-800">
+        Still processing after 15 minutes — something is likely stuck.
+        <button onclick="views.inboxDetail(document.getElementById('app'), '${emailId}')"
+                class="underline font-medium ml-1">Refresh</button>
+      </div>`;
+  },
+
   async reprocessEmail(emailId) {
+    // Disable immediately: a double-click used to start two concurrent runs.
+    // The server rejects the second with 409, but there is no reason to send it.
+    const btn = document.getElementById('reprocess-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
     try {
       await api.post(`/api/inbox/${emailId}/reprocess`);
-      router.navigate('inbox-detail', { id: emailId });
-      this.pollInboxStatus(emailId);
+      // Re-render; the view sees status 'processing' and starts polling.
+      await this.inboxDetail(document.getElementById('app'), emailId);
     } catch (err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Reprocess'; }
+      if (String(err.message).includes('409')) {
+        // Someone else already started it — just show the live state.
+        await this.inboxDetail(document.getElementById('app'), emailId);
+        return;
+      }
       alert('Error: ' + err.message);
     }
   },
@@ -5885,12 +5999,29 @@ We're looking for a senior Java developer..."></textarea>
     }
   },
 
+  // Backfill CV text in bounded batches. The endpoint used to parse the entire
+  // library in one request, blocking the server for everyone; it now returns
+  // after a batch and reports what is left, so we loop here with the UI alive.
   async extractAllResumes() {
+    const btn = document.getElementById('extract-resumes-btn');
+    if (btn) { btn.disabled = true; }
+    let extracted = 0;
+    let skipped = 0;
     try {
-      const result = await api.post('/api/inbox/extract-resumes');
-      alert(result.message);
+      // Bounded: each round must make progress, so a stuck row can't spin forever.
+      for (let round = 0; round < 40; round++) {
+        if (btn) btn.textContent = round === 0 ? 'Extracting…' : `Extracting… (${extracted} done)`;
+        const result = await api.post('/api/inbox/extract-resumes');
+        extracted += result.extracted || 0;
+        skipped += result.skipped || 0;
+        if (result.done || (result.extracted === 0 && result.skipped === 0)) break;
+      }
+      alert(`Extracted text from ${extracted} resume(s).` +
+            (skipped > 0 ? ` ${skipped} had no extractable content and won't be retried.` : ''));
     } catch (err) {
       alert('Error: ' + err.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Extract Resumes'; }
     }
   },
 

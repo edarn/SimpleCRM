@@ -2131,6 +2131,7 @@ function updateInboxEmail(emailId, updates) {
   if (updates.confidence !== undefined) { sets.push('confidence = ?'); values.push(updates.confidence); }
   if (updates.extractedData !== undefined) { sets.push('extracted_data = ?'); values.push(JSON.stringify(updates.extractedData)); }
   if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
+  if (updates.stage !== undefined) { sets.push('stage = ?'); values.push(updates.stage); }
   if (updates.actionType !== undefined) { sets.push('action_type = ?'); values.push(updates.actionType); }
   if (updates.actionId !== undefined) { sets.push('action_id = ?'); values.push(updates.actionId); }
   if (updates.actionSummary !== undefined) { sets.push('action_summary = ?'); values.push(updates.actionSummary); }
@@ -2139,6 +2140,24 @@ function updateInboxEmail(emailId, updates) {
   if (sets.length === 0) return;
   values.push(emailId);
   db.prepare(`UPDATE email_inbox SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+// Atomically take ownership of an inbox email for background processing.
+//
+// The inbox is team-scoped, so two members (or one impatient double-click) can
+// both hit Reprocess on the same row. A blind `UPDATE ... SET status =
+// 'processing'` lets both runs proceed and duplicate every side effect
+// (handleTodo in particular creates a fresh ToDo each time). This conditional
+// UPDATE is the claim: exactly one caller sees changes === 1, the losers see 0
+// and back off. better-sqlite3 runs it as a single atomic statement, so there
+// is no TOCTOU window between the check and the write.
+function claimInboxEmailForProcessing(emailId) {
+  const result = db.prepare(`
+    UPDATE email_inbox
+    SET status = 'processing', stage = 'classifying', error_message = '', processed_at = NULL
+    WHERE id = ? AND status IN ('pending', 'failed', 'review', 'completed')
+  `).run(emailId);
+  return result.changes === 1;
 }
 
 function deleteInboxEmail(emailId, userId) {
@@ -2383,7 +2402,39 @@ function deleteConsultantRequest(requestId, userId) {
 // ============ Candidate Resume Text ============
 
 function updateCandidateResumeText(candidateId, resumeText) {
-  db.prepare('UPDATE candidates SET resume_text = ?, request_matches = \'[]\' WHERE id = ?').run(resumeText, candidateId);
+  db.prepare("UPDATE candidates SET resume_text = ?, resume_text_status = 'ok', request_matches = '[]' WHERE id = ?")
+    .run(resumeText, candidateId);
+}
+
+// Mark that extraction was attempted but yielded nothing usable, so the
+// backfill loops stop retrying this file on every consultant-request email.
+// Cleared automatically whenever a new CV is attached (updateCandidateResumeText).
+function markCandidateResumeUnextractable(candidateId) {
+  db.prepare("UPDATE candidates SET resume_text_status = 'empty' WHERE id = ?").run(candidateId);
+}
+
+function countCandidatesNeedingResumeExtraction(userId) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'team_id = ?' : 'created_by = ?';
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM candidates WHERE ${scope} AND resume_text_status IS NULL`)
+    .get(teamId || userId);
+  return row?.n || 0;
+}
+
+// Candidates whose CV text has never been extracted (or was attached before
+// this tracking existed). Scoped the same way as the rest of the data layer.
+function getCandidatesNeedingResumeExtraction(userId, limit) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'c.team_id = ?' : 'c.created_by = ?';
+  const param = teamId || userId;
+  return db.prepare(`
+    SELECT c.id, c.name, c.skills, c.resume_filename,
+           (SELECT cf.filename FROM candidate_files cf
+             WHERE cf.candidate_id = c.id ORDER BY cf.uploaded_at DESC LIMIT 1) AS file_filename
+    FROM candidates c
+    WHERE ${scope} AND c.resume_text_status IS NULL
+    LIMIT ?
+  `).all(param, limit);
 }
 
 function getCandidateRequestMatches(candidateId) {
@@ -2546,6 +2597,7 @@ module.exports = {
   getInboxEmailById,
   createInboxEmail,
   updateInboxEmail,
+  claimInboxEmailForProcessing,
   deleteInboxEmail,
 
   // Consultant Requests
@@ -2558,6 +2610,9 @@ module.exports = {
 
   // Candidate Resume Text
   updateCandidateResumeText,
+  markCandidateResumeUnextractable,
+  getCandidatesNeedingResumeExtraction,
+  countCandidatesNeedingResumeExtraction,
   getCandidateRequestMatches,
   updateCandidateRequestMatches,
   setCandidateMatchStatus,

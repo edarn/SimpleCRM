@@ -1,9 +1,24 @@
 const { createMessage } = require('./ai-client');
 const { scrubPII } = require('./pseudonymize');
 
-async function matchCandidates(request, candidates) {
-  if (!candidates || candidates.length === 0) return [];
+// How many candidates go into a single AI call.
+//
+// Why chunk at all: the prompt carries up to 4000 chars of CV per candidate, so
+// one call over the whole pool grows linearly with the roster. At ~100
+// candidates that is already ~100k input tokens; at 500 it is ~500k, which
+// exceeds the model's context window outright — the feature would simply stop
+// working as the CV library grows.
+//
+// Chunking is safe here because the scoring rubric is ABSOLUTE (points against
+// the request's skills/role), not relative to the other candidates in the call.
+// A candidate therefore scores the same whichever chunk it lands in, so merging
+// chunk results is just concatenate-and-sort. As a bonus the chunks run
+// concurrently through the shared gate, so matching gets faster, not slower.
+const CHUNK_SIZE = Math.max(1, Number(process.env.AI_MATCH_CHUNK_SIZE || 40));
 
+// Score one chunk. Returns the raw matches for that chunk (real UUIDs), or
+// throws so the caller can record the chunk as unevaluated.
+async function matchChunk(request, candidates) {
   // Use simple numeric IDs (1, 2, 3...) that the AI can reliably return
   // Then map back to real UUIDs after. The AI never needs the name — we
   // re-identify locally — so we pseudonymize before sending (see pseudonymize.js).
@@ -105,22 +120,23 @@ ${candidateSummaries}`
   try {
     matches = JSON.parse(text);
   } catch (err) {
-    // Fallback: pull the first JSON array out of the response. Wrapped in its
-    // own try/catch so a malformed array (e.g. the model added trailing prose)
-    // degrades to "no matches" instead of throwing and failing the whole
-    // request action in the AI inbox.
+    // Fallback: pull the first JSON array out of the response (e.g. the model
+    // wrapped it in prose or a markdown fence).
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     try {
-      matches = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+      matches = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
     } catch (err2) {
-      matches = [];
-    }
-    if (!Array.isArray(matches) || matches.length === 0) {
-      console.error('Failed to parse candidate matching response:', text.substring(0, 200));
-      return [];
+      matches = null;
     }
   }
-  if (!Array.isArray(matches)) return [];
+
+  // An unparseable response means we do NOT know how these candidates scored.
+  // Throw rather than returning [] — the caller records the chunk as
+  // unevaluated so reconcileRequestMatches preserves their existing entries
+  // instead of silently dropping them from the request.
+  if (!Array.isArray(matches)) {
+    throw new Error(`Unparseable matching response: ${text.substring(0, 160)}`);
+  }
 
   // Map simple numeric IDs back to real UUIDs
   return matches
@@ -139,8 +155,53 @@ ${candidateSummaries}`
         reasoning: m.reasoning || [m.strengths, m.gaps].filter(Boolean).join(' ')
       };
     })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score);
+    .filter(Boolean);
+}
+
+// Match a whole candidate pool against a request.
+//
+// Returns { matches, evaluatedIds } — `evaluatedIds` lists only the candidates
+// that were actually scored. If a chunk fails (API error, unparseable reply),
+// its candidates are left OUT of evaluatedIds so the caller's reconcile step
+// preserves their existing entries rather than treating "not returned" as "no
+// longer a match".
+async function matchCandidates(request, candidates) {
+  if (!candidates || candidates.length === 0) return { matches: [], evaluatedIds: [] };
+
+  const chunks = [];
+  for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+    chunks.push(candidates.slice(i, i + CHUNK_SIZE));
+  }
+
+  // Concurrency is capped by the shared gate in ai-client.js, so firing all
+  // chunks at once is safe — they queue rather than stampede the API.
+  const results = await Promise.allSettled(
+    chunks.map(chunk => matchChunk(request, chunk))
+  );
+
+  const matches = [];
+  const evaluatedIds = [];
+  let failedChunks = 0;
+
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      matches.push(...result.value);
+      evaluatedIds.push(...chunks[i].map(c => c.id));
+    } else {
+      failedChunks++;
+      console.error(
+        `Candidate matching chunk ${i + 1}/${chunks.length} failed (${chunks[i].length} candidates not scored):`,
+        result.reason?.message || result.reason
+      );
+    }
+  });
+
+  if (failedChunks > 0) {
+    console.warn(`Matching completed with ${failedChunks}/${chunks.length} chunk(s) failed — those candidates keep their previous entries.`);
+  }
+
+  matches.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return { matches, evaluatedIds };
 }
 
 module.exports = { matchCandidates };

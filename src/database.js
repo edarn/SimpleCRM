@@ -573,6 +573,30 @@ function migrateExistingData() {
   // Add resume_text column to candidates for caching extracted text
   addColumnIfNotExists('candidates', 'resume_text', "TEXT DEFAULT ''");
 
+  // Records that we have ALREADY attempted text extraction for this candidate's
+  // CV, independent of whether it produced anything ('ok' = text cached,
+  // 'empty' = parsed but nothing extractable — .doc, image-only scan, corrupt
+  // PDF). The backfill loops key off this instead of `resume_text = ''`, which
+  // otherwise re-parses every permanently-unparseable file on every single
+  // consultant-request email, forever. NULL = never attempted.
+  addColumnIfNotExists('candidates', 'resume_text_status', 'TEXT DEFAULT NULL');
+  try {
+    const marked = db.prepare(`
+      UPDATE candidates SET resume_text_status = 'ok'
+      WHERE resume_text_status IS NULL AND resume_text IS NOT NULL AND resume_text != ''
+    `).run();
+    if (marked.changes > 0) {
+      console.log(`Marked ${marked.changes} candidate(s) as already resume-extracted`);
+    }
+  } catch (err) {
+    console.log('resume_text_status backfill error:', err.message);
+  }
+
+  // Coarse progress marker for a running inbox job ('classifying',
+  // 'extracting_resumes', 'matching', 'executing'). `status` alone covers a
+  // multi-minute span with no feedback, which reads as a hung page.
+  addColumnIfNotExists('email_inbox', 'stage', 'TEXT DEFAULT NULL');
+
   // Migrate todos linked_type to also allow 'general' for email-generated todos
   migrateTodosLinkedTypeGeneral();
 
@@ -585,6 +609,7 @@ function migrateExistingData() {
     const recovered = db.prepare(`
       UPDATE email_inbox
       SET status = 'failed',
+          stage = NULL,
           error_message = 'Processing was interrupted by a server restart. Please reprocess this email.',
           processed_at = ?
       WHERE status IN ('processing', 'pending')

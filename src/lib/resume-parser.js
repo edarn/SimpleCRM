@@ -1,6 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 
+// Yield the event loop back to Express between CPU-bound parses.
+//
+// pdf-parse is pure JS and CPU-bound: it blocks Node's single thread for the
+// whole parse. A serial loop over many CVs therefore stalls EVERY user's
+// requests — including the POST /api/inbox/simulate that is supposed to return
+// immediately. setImmediate lets queued I/O callbacks run between files. It
+// does not make an individual parse non-blocking (that needs worker_threads),
+// but it caps the stall at one document instead of the whole batch.
+function yieldToEventLoop() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 async function extractTextFromFile(filePath) {
   const ext = path.extname(filePath).toLowerCase();
 
@@ -42,4 +54,4 @@ async function extractFromDOCX(filePath) {
   }
 }
 
-module.exports = { extractTextFromFile };
+module.exports = { extractTextFromFile, yieldToEventLoop };

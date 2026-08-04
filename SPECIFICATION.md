@@ -214,6 +214,26 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Inbox detail**: Shows original email, extracted data, and all actions taken.
      Each action has a type badge, view link, and delete button (for unwanted
      contacts created from long conversation threads).
+   - **Background processing with live progress**: `POST /api/inbox/simulate`
+     returns `201` immediately and the AI work runs in the background (it can
+     take 30 s–3 min). The row carries a coarse `stage`
+     (`classifying` → `extracting_resumes` → `matching` → `executing`), which the
+     detail view renders as a spinner + label and the inbox list shows next to
+     the status badge.
+     - **Polling lives in the view, not the submit handler**: `inboxDetail`
+       starts polling whenever it loads an email in `pending`/`processing`. So a
+       reload, a deep link, a back-navigation, or a *teammate* opening the same
+       email all resume progress — previously only the submitting tab polled,
+       and only for ~31 s, after which the page sat on "processing" forever even
+       though the job had finished.
+     - Polling backs off (2 s → 4 s → 8 s) and stops when the user navigates
+       away; a generation token ensures only one poll loop is ever live.
+   - **Single-writer job claim**: starting a job goes through
+     `claimInboxEmailForProcessing`, a conditional `UPDATE ... WHERE status IN
+     ('pending','failed','review','completed')`. Exactly one caller wins; the
+     losers get `409`. This is what stops two team members (or one double-click)
+     from running the same email twice and creating duplicate ToDos/contacts.
+     The Reprocess button also disables itself on click.
    - **New dependencies**: `@anthropic-ai/sdk`, `pdf-parse`, `mammoth`
    - **New env var**: `ANTHROPIC_API_KEY`
 
@@ -259,6 +279,20 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      status). Only candidates that have been sent get the dropdown.
    - **Matching uses simple numeric IDs** (not UUIDs) for reliable AI
      round-trips. Results cached in DB and sorted by score descending.
+   - **Chunked matching (`AI_MATCH_CHUNK_SIZE`, default 40)**: the prompt carries
+     up to 4000 chars of CV per candidate, so a single call grows linearly with
+     the roster — at ~500 candidates it would exceed the model's context window
+     and the feature would simply stop working. Candidates are therefore scored
+     in chunks. This is safe because the rubric is **absolute** (points against
+     the request's skills/role), not relative to the others in the call, so a
+     candidate scores the same whichever chunk it lands in and merging is just
+     concatenate-and-sort. Chunks run concurrently through the shared gate, so
+     matching also gets faster.
+   - **Partial-failure safety**: `matchCandidates` returns
+     `{ matches, evaluatedIds }`, where `evaluatedIds` lists only candidates
+     actually scored. A chunk that fails (API error, unparseable reply) leaves
+     its candidates out, so `reconcileRequestMatches` **preserves** their
+     existing entries instead of reading "not returned" as "no longer matches".
 
 14. **CV Bulk Import**
    - "Import CVs" button on the Candidates tab opens a modal to upload
@@ -314,14 +348,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      app (email classification, candidate matching, CV parsing) runs server-side
      under one API key, so all users/tabs share one rate limit. All calls go
      through a single shared `createMessage()` that caps in-flight requests to
-     `AI_MAX_CONCURRENCY` (default 4); excess calls queue FIFO and run as slots
+     `AI_MAX_CONCURRENCY` (default 6); excess calls queue FIFO and run as slots
      free. This prevents bursts of simultaneous email simulations from firing too
      many parallel calls at once (which trip 429/529 → slow SDK retries → an inbox
      email stuck at "processing"). The shared client also sets bounded SDK retries
-     (`AI_MAX_RETRIES`, default 3; respects `retry-after`) and a per-attempt
-     `timeout` (`AI_REQUEST_TIMEOUT_MS`, default 120000) so a dead connection
-     releases its gate slot instead of blocking the queue. Tune the concurrency
-     cap to your Anthropic tier.
+     (`AI_MAX_RETRIES`, default 2; respects `retry-after`) and a per-attempt
+     `timeout` (`AI_REQUEST_TIMEOUT_MS`, default 60000) so a dead connection
+     releases its gate slot instead of blocking the queue. Worst case per call is
+     therefore ~3 min rather than ~8 min — this is an interactive feature, and a
+     wedged call holds a gate slot that every other user queues behind. Tune the
+     concurrency cap to your Anthropic tier.
    - **Startup recovery of orphaned work**: Background AI processing runs in
      fire-and-forget promises, so a server restart/crash loses any in-flight job
      while its DB row stays mid-flight forever. On boot (`src/database.js`) any
@@ -343,11 +379,36 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      candidate into each open request's `matched_candidates` (so the same
      candidate↔request pair isn't scored twice).
 
-16. **Resume Text Search**
+16. **Resume Text Extraction — once per file, never on the matching path**
+   - A CV's text is extracted **once**, when the file is attached: single upload
+     (`POST /api/candidates/:id/files`), bulk CV import, or candidate create/update
+     with a file. The result is cached in `candidates.resume_text` and every
+     matching run reads that cached text. PDFs are never re-parsed to match.
+   - `candidates.resume_text_status` records that extraction was *attempted*:
+     `ok` (text cached), `empty` (parsed, nothing extractable — `.doc`, image-only
+     scan, corrupt PDF), `NULL` (never attempted). Attaching a new CV resets it
+     to `ok` with the fresh text.
+   - **Why the status column exists**: the backfill loops used to select
+     `WHERE resume_text = ''`, which permanently re-selected every file that
+     legitimately yields no text — so each consultant-request email re-parsed the
+     same unparseable PDFs, forever. Keying on `resume_text_status IS NULL`
+     makes extraction genuinely once-per-file.
+   - **Backfill is bounded and yields**: only profiles that predate this tracking
+     (or whose extraction was interrupted) need backfilling. An email job does at
+     most `RESUME_BACKFILL_LIMIT` (default 10) documents and calls `setImmediate`
+     between them, because `pdf-parse` is CPU-bound and blocks Node's single
+     thread — an unbounded loop froze the app for *every* user, not just the one
+     who triggered it.
+   - **"Extract Resumes"** (`POST /api/inbox/extract-resumes`) processes a bounded
+     batch per call and returns `{ extracted, skipped, remaining, done }`; the UI
+     loops until `done`. It previously parsed the whole library inline before
+     responding, blocking the server for minutes.
+
+17. **Resume Text Search**
    - Candidate search in the list view now matches against the full extracted
      CV text in addition to name, email, phone, role, and skills.
 
-17. **Browser History Support**
+18. **Browser History Support**
    - Every navigation pushes to browser history with hash URLs
      (e.g. #contacts, #candidate-detail/uuid, #request-detail/uuid).
    - Back/forward buttons navigate between views correctly.
@@ -383,7 +444,7 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 | PDF text extraction | pdf-parse | Extract text from PDF resumes for AI matching |
 | DOCX text extraction | mammoth | Extract text from DOCX resumes for AI matching |
 | Security headers | helmet | CSP, HSTS, X-Frame-Options, nosniff |
-| Rate limiting | express-rate-limit | Auth (20/15min) and API (120/min) rate limits |
+| Rate limiting | express-rate-limit | Auth (20/15min per IP) and API (240/min **per user**, falling back to IP when anonymous — a whole team commonly shares one office egress IP, so an IP-keyed budget made colleagues throttle each other). The two status-poll endpoints (`GET /api/inbox/:id`, `GET /api/candidates/:id/match-requests`) are exempt so a long AI job can't starve the caller's budget for real work. |
 
 ---
 
@@ -547,6 +608,7 @@ CREATE TABLE candidates (
   resume_filename TEXT DEFAULT '',
   resume_original_name TEXT DEFAULT '',
   resume_text TEXT DEFAULT '',
+  resume_text_status TEXT,   -- 'ok' | 'empty' | NULL (never attempted); see section 16
   request_matches TEXT DEFAULT '[]',
   team_id TEXT,
   created_by TEXT,
@@ -633,6 +695,7 @@ CREATE TABLE email_inbox (
   confidence REAL DEFAULT 0,
   extracted_data TEXT DEFAULT '{}',
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'review')),
+  stage TEXT,            -- classifying | extracting_resumes | matching | executing (NULL when not running)
   action_type TEXT,
   action_id TEXT,
   action_summary TEXT DEFAULT '',
@@ -1040,9 +1103,9 @@ VibeCodingProject/
 | GET | /api/inbox | List all inbox emails |
 | GET | /api/inbox/:id | Get single inbox email with details |
 | POST | /api/inbox/simulate | Simulate receiving an email (temp dev UI) |
-| POST | /api/inbox/:id/reprocess | Reprocess a failed/review email |
+| POST | /api/inbox/:id/reprocess | Reprocess an email (409 if already processing) |
 | DELETE | /api/inbox/:id | Delete an inbox email |
-| POST | /api/inbox/extract-resumes | Extract text from all candidate resumes |
+| POST | /api/inbox/extract-resumes | Backfill CV text for one bounded batch; returns `{ extracted, skipped, remaining, done }` |
 
 ### Consultant Requests (Protected)
 
@@ -1075,6 +1138,11 @@ VibeCodingProject/
 | DATABASE_PATH | Path to SQLite database | ./data/crm.db |
 | SESSION_SECRET | Secret for session encryption | dev-secret-change-in-production |
 | ANTHROPIC_API_KEY | API key for Claude AI (email classification & matching) | (required for AI Inbox) |
+| AI_MAX_CONCURRENCY | Max in-flight Anthropic calls process-wide | 6 |
+| AI_MAX_RETRIES | SDK retries per call (429/529/network) | 2 |
+| AI_REQUEST_TIMEOUT_MS | Per-attempt Anthropic timeout | 60000 |
+| AI_MATCH_CHUNK_SIZE | Candidates scored per matching call | 40 |
+| RESUME_BACKFILL_LIMIT | Max CVs an email job extracts inline | 10 |
 
 ### Railway Deployment
 
