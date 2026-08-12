@@ -404,6 +404,11 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      are shown instantly (no AI delay on page load).
    - Matches scoring >50% displayed as clickable cards with score, title,
      role, and reasoning. Click navigates to the request.
+   - **Only the top 3 are shown**, with a "Visa alla matchande uppdrag (N)"
+     button revealing the rest (and "Visa färre" to collapse again). A strong
+     CV can match ten open requests, which buried the rest of the profile. The
+     list is already sorted by score, so the visible three are the best ones.
+     The button is omitted entirely at 3 matches or fewer.
    - Cache invalidated when CV is uploaded (re-matches automatically in
      background). Manual "Refresh" button for on-demand re-matching.
    - File uploads auto-extract resume text for AI matching.

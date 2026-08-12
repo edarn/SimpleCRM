@@ -4091,25 +4091,53 @@ const views = {
                 class="text-xs text-violet-600 hover:text-violet-700 font-medium">Refresh</button>
       </div>
       <div class="space-y-2">
-        ${matches.map(m => `
-          <a href="#" onclick="router.navigate('request-detail', {id: '${m.requestId}'}); return false;"
-             class="flex items-center gap-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 hover:bg-violet-100/50 transition-colors">
-            <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-violet-200 text-violet-800">
-              ${m.score}%
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="font-medium text-violet-700 truncate">${this.escapeHtml(m.title)}</div>
-              ${m.role ? `<div class="text-xs text-slate-500">${this.escapeHtml(m.role)}</div>` : ''}
-              ${m.strengths ? `<div class="text-xs text-emerald-700 mt-0.5">${this.escapeHtml(m.strengths)}</div>` : ''}
-                ${m.gaps ? `<div class="text-xs text-red-500 mt-0.5">${this.escapeHtml(m.gaps)}</div>` : ''}
-                ${!m.strengths && m.reasoning ? `<div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>` : ''}
-            </div>
-            <svg class="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-            </svg>
-          </a>
-        `).join('')}
+        ${matches.slice(0, this.REQUEST_MATCH_PREVIEW).map(m => this._requestMatchItem(m)).join('')}
       </div>
+      ${matches.length > this.REQUEST_MATCH_PREVIEW ? `
+      <div id="extra-request-matches" class="space-y-2 mt-2 hidden">
+        ${matches.slice(this.REQUEST_MATCH_PREVIEW).map(m => this._requestMatchItem(m)).join('')}
+      </div>
+      <button id="toggle-request-matches-btn" onclick="views.toggleAllRequestMatches()"
+              class="w-full mt-2 py-2 text-xs font-medium text-violet-600 hover:text-violet-700 hover:bg-violet-50 border border-violet-200 rounded-lg transition-colors">
+        Visa alla matchande uppdrag (${matches.length})
+      </button>
+      ` : ''}
+    `;
+  },
+
+  // A candidate with a big CV can match a lot of open requests; showing ten of
+  // them buries the rest of the profile. Show the strongest few (the list is
+  // already sorted by score) and keep the tail one click away.
+  REQUEST_MATCH_PREVIEW: 3,
+
+  toggleAllRequestMatches() {
+    const extra = document.getElementById('extra-request-matches');
+    const btn = document.getElementById('toggle-request-matches-btn');
+    if (!extra || !btn) return;
+    const showing = !extra.classList.toggle('hidden');
+    btn.textContent = showing
+      ? 'Visa färre'
+      : `Visa alla matchande uppdrag (${this.REQUEST_MATCH_PREVIEW + extra.children.length})`;
+  },
+
+  _requestMatchItem(m) {
+    return `
+      <a href="#" onclick="router.navigate('request-detail', {id: '${m.requestId}'}); return false;"
+         class="flex items-center gap-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 hover:bg-violet-100/50 transition-colors">
+        <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-violet-200 text-violet-800">
+          ${m.score}%
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-violet-700 truncate">${this.escapeHtml(m.title)}</div>
+          ${m.role ? `<div class="text-xs text-slate-500">${this.escapeHtml(m.role)}</div>` : ''}
+          ${m.strengths ? `<div class="text-xs text-emerald-700 mt-0.5">${this.escapeHtml(m.strengths)}</div>` : ''}
+          ${m.gaps ? `<div class="text-xs text-red-500 mt-0.5">${this.escapeHtml(m.gaps)}</div>` : ''}
+          ${!m.strengths && m.reasoning ? `<div class="text-xs text-slate-600 mt-0.5">${this.escapeHtml(m.reasoning)}</div>` : ''}
+        </div>
+        <svg class="w-4 h-4 text-violet-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </a>
     `;
   },
 
