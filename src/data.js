@@ -1635,25 +1635,271 @@ function getCandidateById(candidateId, userId) {
 // Used to avoid creating duplicate profiles for the same person. Returns the
 // formatted candidate or null. Empty email => null (can't dedup without one).
 // excludeId lets the edit flow ignore the candidate being edited.
+// Canonical form of an email for both storage and lookup.
+//
+// Why this is not just trim().toLowerCase(): CV text comes out of pdf-parse,
+// which routinely carries non-breaking spaces and zero-width characters through
+// from the PDF. An address stored as "anna@x.se " looked identical in the
+// UI but never matched the dedup lookup, so the same person was imported again
+// as a new profile. Storage and lookup MUST use this same function or the
+// mismatch comes straight back.
+function normalizeEmail(email) {
+  if (!email) return '';
+  return String(email)
+    .replace(/[​-‍﻿]/g, '')   // zero-width space/joiner/BOM
+    .replace(/\s/g, '')                  // ALL whitespace, nbsp included: an
+                                         // address cannot contain any, and PDF
+                                         // extraction sprinkles it inside as
+                                         // well as at the ends
+    .toLowerCase();
+}
+
+// Canonical form of a name, used only for the dedup fallback when a CV has no
+// email at all. Collapses whitespace and case; deliberately does NOT strip
+// diacritics, so "Jonsson" and "Jönsson" stay different people.
+function normalizeName(name) {
+  if (!name) return '';
+  return String(name)
+    .replace(/[​-‍﻿]/g, '')
+    .replace(/ /g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function findCandidateByEmail(email, userId, excludeId = null) {
-  if (!email || !email.trim()) return null;
-  const normalized = email.trim().toLowerCase();
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
   const teamId = getUserTeamId(userId);
   let row;
   if (teamId) {
     row = db.prepare(`
       SELECT * FROM candidates
-      WHERE team_id = ? AND archived_at IS NULL AND LOWER(email) = ? AND id != ?
+      WHERE team_id = ? AND archived_at IS NULL AND LOWER(TRIM(email)) = ? AND id != ?
       LIMIT 1
     `).get(teamId, normalized, excludeId || '');
   } else {
     row = db.prepare(`
       SELECT * FROM candidates
-      WHERE created_by = ? AND team_id IS NULL AND archived_at IS NULL AND LOWER(email) = ? AND id != ?
+      WHERE created_by = ? AND team_id IS NULL AND archived_at IS NULL AND LOWER(TRIM(email)) = ? AND id != ?
       LIMIT 1
     `).get(userId, normalized, excludeId || '');
   }
   return row ? formatCandidateRow(row) : null;
+}
+
+// All candidates in scope whose name matches, ignoring case and whitespace.
+// Returns an ARRAY on purpose: the import only treats a name match as a
+// duplicate when it is unambiguous, and two people really can share a name.
+function findCandidatesByName(name, userId, excludeId = null) {
+  const normalized = normalizeName(name);
+  if (!normalized) return [];
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'team_id = ?' : 'created_by = ? AND team_id IS NULL';
+
+  // Compared in JS, not SQL. SQLite's TRIM only strips the ends, so it cannot
+  // collapse the internal double spaces or the zero-width characters that PDF
+  // extraction leaves in a name — and those are exactly what made two records
+  // for the same person look different. resume_text is excluded from the SELECT
+  // on purpose: this runs once per CV during an import, and pulling tens of KB
+  // of cached text per candidate per file would be pure churn.
+  const rows = db.prepare(`
+    SELECT id, name, email, phone, role, skills, category, resume_filename, resume_original_name,
+           archived_at, created_by, created_at, updated_at
+    FROM candidates
+    WHERE ${scope} AND archived_at IS NULL AND id != ?
+    ORDER BY created_at ASC
+  `).all(teamId || userId, excludeId || '');
+
+  return rows
+    .filter(r => normalizeName(r.name) === normalized)
+    .map(formatCandidateRow);
+}
+
+// ============ Duplicate detection & merging ============
+
+// Group candidates that look like the same person.
+//
+// Grouping is by normalized name, then each group is classified by how much the
+// emails agree. That distinction is the whole point: a group where the only
+// addresses present are identical (or absent) is safe to merge automatically,
+// whereas two different real addresses means we are probably looking at two
+// different people and a human has to decide.
+function findDuplicateCandidateGroups(userId) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'c.team_id = ?' : 'c.created_by = ? AND c.team_id IS NULL';
+  const rows = db.prepare(`
+    SELECT c.*, u.username AS created_by_username,
+           (SELECT COUNT(*) FROM candidate_files cf WHERE cf.candidate_id = c.id) AS file_count,
+           (SELECT COUNT(*) FROM candidate_comments cc WHERE cc.candidate_id = c.id) AS comment_count
+    FROM candidates c
+    LEFT JOIN users u ON u.id = c.created_by
+    WHERE ${scope} AND c.archived_at IS NULL
+    ORDER BY c.created_at ASC
+  `).all(teamId || userId);
+
+  const byName = new Map();
+  for (const r of rows) {
+    const key = normalizeName(r.name);
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(r);
+  }
+
+  const groups = [];
+  for (const [key, members] of byName) {
+    if (members.length < 2) continue;
+    const emails = [...new Set(members.map(m => normalizeEmail(m.email)).filter(Boolean))];
+    groups.push({
+      key,
+      name: members[0].name,
+      // conflicting = more than one distinct real address in the group.
+      conflictingEmails: emails.length > 1,
+      emails,
+      // Oldest first — the survivor default, so the original record and its
+      // creation date are what remain.
+      members: members.map(m => ({
+        id: m.id,
+        name: m.name,
+        email: m.email || '',
+        phone: m.phone || '',
+        role: m.role || '',
+        skills: m.skills || '',
+        category: m.category || '',
+        createdBy: m.created_by,
+        createdByUsername: m.created_by_username || '',
+        createdAt: m.created_at,
+        hasResumeText: !!(m.resume_text && m.resume_text.length > 0),
+        fileCount: m.file_count,
+        commentCount: m.comment_count
+      }))
+    });
+  }
+  groups.sort((a, b) => b.members.length - a.members.length || a.name.localeCompare(b.name));
+  return groups;
+}
+
+// Comments the importer writes on every auto-created profile. They carry no
+// information once a profile has been merged into another one, and worse, the
+// "created via CV import" line is simply FALSE about a survivor that was
+// entered by hand. Dropped rather than carried over.
+const BOILERPLATE_IMPORT_COMMENTS = [
+  'Automatiskt skapad via CV import',
+  'CV uppdaterat via import (matchade befintlig e-postadress)',
+];
+
+function isBoilerplateImportComment(content) {
+  const c = String(content || '').trim();
+  return BOILERPLATE_IMPORT_COMMENTS.some(b => c === b);
+}
+
+// Merge duplicates into `survivorId`, then delete them.
+//
+// One transaction: a half-merged candidate (files moved, row still present)
+// would be worse than either outcome.
+const mergeCandidatesTx = db.transaction((survivorId, duplicateIds, userId, teamId) => {
+  const survivor = db.prepare('SELECT * FROM candidates WHERE id = ?').get(survivorId);
+  const now = getTimestamp();
+  const moved = { files: 0, comments: 0, offers: 0, todos: 0, skippedComments: 0 };
+
+  // Fields we can fill in from a duplicate — only ever into an EMPTY field on
+  // the survivor, never overwriting something a human may have curated.
+  const fillable = ['email', 'phone', 'role', 'skills', 'resume_filename', 'resume_original_name'];
+  const fill = {};
+
+  for (const dupId of duplicateIds) {
+    const dup = db.prepare('SELECT * FROM candidates WHERE id = ?').get(dupId);
+    if (!dup) continue;
+
+    for (const f of fillable) {
+      if (!survivor[f] && !fill[f] && dup[f]) fill[f] = dup[f];
+    }
+    // Prefer any CV text/profile we already have over none.
+    if (!survivor.resume_text && !fill.resume_text && dup.resume_text) {
+      fill.resume_text = dup.resume_text;
+      fill.resume_text_status = dup.resume_text_status || 'ok';
+    }
+    if (!survivor.profile_json && !fill.profile_json && dup.profile_json) {
+      fill.profile_json = dup.profile_json;
+      fill.profile_status = dup.profile_status || 'ok';
+      fill.skill_tags = dup.skill_tags || '';
+    }
+
+    const f = db.prepare('UPDATE candidate_files SET candidate_id = ? WHERE candidate_id = ?').run(survivorId, dupId);
+    moved.files += f.changes;
+
+    for (const c of db.prepare('SELECT * FROM candidate_comments WHERE candidate_id = ?').all(dupId)) {
+      if (isBoilerplateImportComment(c.content)) {
+        db.prepare('DELETE FROM candidate_comments WHERE id = ?').run(c.id);
+        moved.skippedComments++;
+        continue;
+      }
+      db.prepare('UPDATE candidate_comments SET candidate_id = ? WHERE id = ?').run(survivorId, c.id);
+      moved.comments++;
+    }
+
+    const o = db.prepare('UPDATE candidate_offers SET candidate_id = ? WHERE candidate_id = ?').run(survivorId, dupId);
+    moved.offers += o.changes;
+
+    const t = db.prepare(
+      "UPDATE todos SET linked_id = ? WHERE linked_type = 'candidate' AND linked_id = ?"
+    ).run(survivorId, dupId);
+    moved.todos += t.changes;
+
+    // Drop the duplicate out of every request's match list, otherwise the entry
+    // dangles at an id that no longer exists.
+    const reqScope = teamId ? 'team_id = ?' : 'created_by = ? AND team_id IS NULL';
+    for (const req of db.prepare(`SELECT id, matched_candidates FROM consultant_requests WHERE ${reqScope}`).all(teamId || userId)) {
+      let list;
+      try { list = JSON.parse(req.matched_candidates || '[]'); } catch (_) { continue; }
+      if (!Array.isArray(list) || !list.some(m => m.candidateId === dupId)) continue;
+      const next = list.filter(m => m.candidateId !== dupId);
+      db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(next), now, req.id);
+    }
+    db.prepare('DELETE FROM request_match_cache WHERE candidate_id = ?').run(dupId);
+
+    db.prepare('DELETE FROM candidates WHERE id = ?').run(dupId);
+  }
+
+  const keys = Object.keys(fill);
+  if (keys.length > 0) {
+    db.prepare(`UPDATE candidates SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`)
+      .run(...keys.map(k => fill[k]), now, survivorId);
+  } else {
+    db.prepare('UPDATE candidates SET updated_at = ? WHERE id = ?').run(now, survivorId);
+  }
+
+  // The merged profile's cached matches describe a pool that just changed.
+  db.prepare("UPDATE candidates SET request_matches = '[]' WHERE id = ?").run(survivorId);
+  db.prepare('DELETE FROM request_match_cache WHERE candidate_id = ?').run(survivorId);
+
+  return moved;
+});
+
+function mergeCandidates(survivorId, duplicateIds, userId) {
+  const survivor = getCandidateById(survivorId, userId);
+  if (!survivor) return { error: 'Candidate not found' };
+
+  const teamId = getUserTeamId(userId);
+  // Every id must be in scope, or a merge could be used to reach another team's
+  // rows by guessing ids.
+  const ids = (duplicateIds || []).filter(id => id && id !== survivorId);
+  for (const id of ids) {
+    if (!getCandidateById(id, userId)) return { error: 'Candidate not found' };
+  }
+  if (ids.length === 0) return { error: 'Nothing to merge' };
+
+  const moved = mergeCandidatesTx(survivorId, ids, userId, teamId);
+
+  createCandidateComment(
+    survivorId,
+    `Sammanslagen med ${ids.length} dubblettprofil(er). Flyttat: ${moved.files} fil(er), ` +
+    `${moved.comments} kommentar(er), ${moved.offers} erbjudande(n), ${moved.todos} todo(s).`,
+    userId
+  );
+
+  return { merged: ids.length, moved, candidate: getCandidateById(survivorId, userId) };
 }
 
 function createCandidate({ name, email, phone, role, skills, category, resumeFilename, resumeOriginalName }, userId) {
@@ -1662,10 +1908,11 @@ function createCandidate({ name, email, phone, role, skills, category, resumeFil
   const now = getTimestamp();
   const username = getUsernameById(userId);
 
+  // email is stored in its canonical form — the dedup lookup compares against it.
   db.prepare(`
     INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, email || '', phone || '', role || '', skills || '', category || 'in_progress', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
+  `).run(id, name, normalizeEmail(email), phone || '', role || '', skills || '', category || 'in_progress', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
 
   return {
     id,
@@ -1699,7 +1946,7 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, catego
     WHERE id = ?
   `).run(
     name !== undefined ? name : existing.name,
-    email !== undefined ? email : existing.email,
+    email !== undefined ? normalizeEmail(email) : existing.email,
     phone !== undefined ? phone : existing.phone,
     role !== undefined ? role : existing.role,
     skills !== undefined ? skills : existing.skills,
@@ -2685,6 +2932,11 @@ module.exports = {
   getAllCandidates,
   getCandidateById,
   findCandidateByEmail,
+  findCandidatesByName,
+  findDuplicateCandidateGroups,
+  mergeCandidates,
+  normalizeEmail,
+  normalizeName,
   createCandidate,
   updateCandidate,
   transferCandidate,

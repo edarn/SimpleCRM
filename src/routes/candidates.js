@@ -25,6 +25,89 @@ router.get('/', (req, res) => {
   }
 });
 
+// GET /api/candidates/duplicates - Review list of profiles that look like the
+// same person. Read-only: this is the dry run a human inspects before merging.
+//
+// ORDER MATTERS: this must stay registered BEFORE GET /:id. Express matches in
+// registration order, so with /:id first the literal path "duplicates" is taken
+// as a candidate id and this route can never be reached.
+router.get('/duplicates', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const groups = data.findDuplicateCandidateGroups(userId);
+    res.json({ groups });
+  } catch (err) {
+    console.error('Error finding duplicate candidates:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/candidates/merge - Merge duplicate profiles into a survivor.
+//
+// Merging DELETES the duplicate rows, so it is gated by exactly the same rule
+// as DELETE /:id: an owner (or a solo user) may merge anything, a member only
+// profiles they created themselves. Every duplicate is checked before anything
+// is written — the merge itself is a single transaction and must not be
+// entered unless all of it is allowed. The survivor is deliberately NOT
+// restricted: it survives, nothing is destroyed there.
+router.post('/merge', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { survivorId, duplicateIds } = req.body || {};
+
+    if (!survivorId || typeof survivorId !== 'string') {
+      return res.status(400).json({ error: 'survivorId is required' });
+    }
+    if (!Array.isArray(duplicateIds) || duplicateIds.length === 0) {
+      return res.status(400).json({ error: 'duplicateIds must be a non-empty array' });
+    }
+
+    // De-dupe the list and drop the survivor from it, so a UI that sends the
+    // whole group (survivor included) does the harmless thing.
+    const ids = [...new Set(
+      duplicateIds.filter(id => typeof id === 'string' && id && id !== survivorId)
+    )];
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'duplicateIds must name at least one candidate other than the survivor' });
+    }
+
+    const survivor = data.getCandidateById(survivorId, userId);
+    if (!survivor) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
+
+    for (const id of ids) {
+      // getCandidateById is team-scoped, so this doubles as the check that the
+      // id belongs to the caller's scope at all.
+      const dup = data.getCandidateById(id, userId);
+      if (!dup) {
+        return res.status(404).json({ error: 'Candidate not found' });
+      }
+      if (!data.canDeleteEntity(userId, dup)) {
+        return res.status(403).json({
+          error: `You can only merge away candidates you created yourself (${dup.name})`
+        });
+      }
+    }
+
+    const result = data.mergeCandidates(survivorId, ids, userId);
+    if (result.error) {
+      const status = result.error === 'Candidate not found' ? 404 : 400;
+      return res.status(status).json({ error: result.error });
+    }
+
+    // The merge clears the survivor's cached request matches (its CV, skills and
+    // files just changed), so re-run matching or the profile is left with an
+    // empty match list until someone opens it and asks manually.
+    triggerRequestMatchingInBackground(survivorId, userId);
+
+    res.json(result);
+  } catch (err) {
+    console.error('Error merging candidates:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/candidates/:id - Get single candidate with comments and files
 router.get('/:id', (req, res) => {
   try {
@@ -830,6 +913,10 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   let created = 0;
   let failed = 0;
   let merged = 0;
+  // Reported in the 'done' event so the UI can summarise how much of the batch
+  // could not be dedup-checked at all, instead of it disappearing into `created`.
+  let noEmail = 0;    // created with no email whatsoever
+  let ambiguous = 0;  // created despite an existing candidate with the same name
   const createdIds = [];
 
   for (let i = 0; i < req.files.length; i++) {
@@ -868,9 +955,50 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
         continue;
       }
 
-      // Dedup by email: if a candidate with this email already exists, merge
-      // the new CV into that profile instead of creating a duplicate.
-      const dup = parsed.email ? data.findCandidateByEmail(parsed.email, userId) : null;
+      // ---- Dedup ladder ---------------------------------------------------
+      //
+      // A bulk import once produced 42 duplicates out of 288 because this was a
+      // single email lookup: 51% of CVs carry no email at all, so for half the
+      // batch the check silently did not run and every upload created a new
+      // profile. The ladder below falls back to the name, but only where the
+      // name can be trusted:
+      //
+      //   email hit                  -> merge (matchedBy 'email')
+      //   exactly one name hit       -> merge (matchedBy 'name'), unless both
+      //                                 sides have an email and they DIFFER
+      //   several name hits          -> create ('ambiguous-name')
+      //   no hit                     -> create ('no-email' when the CV had none)
+      //
+      // A name match is only trusted when it is UNIQUE and nothing contradicts
+      // it. Merging two different people who happen to share a name is worse
+      // than leaving a duplicate behind — a duplicate can still be merged
+      // later, a wrong merge has already destroyed a profile. So every
+      // ambiguous case creates, and says why.
+      let dup = parsed.email ? data.findCandidateByEmail(parsed.email, userId) : null;
+      let matchedBy = dup ? 'email' : null;
+      let dedupNote = null;
+
+      if (!dup) {
+        const nameMatches = data.findCandidatesByName(parsed.name, userId);
+        if (nameMatches.length === 1) {
+          // Two known addresses that disagree are a contradiction; a missing
+          // address on either side is not (that is the exact shape of the
+          // duplicates this fixes: one copy with an email, one without).
+          const existingEmail = data.normalizeEmail(nameMatches[0].email);
+          const parsedEmail = data.normalizeEmail(parsed.email);
+          if (!existingEmail || !parsedEmail || existingEmail === parsedEmail) {
+            dup = nameMatches[0];
+            matchedBy = 'name';
+          } else {
+            dedupNote = 'name-differs-email';
+          }
+        } else if (nameMatches.length > 1) {
+          dedupNote = 'ambiguous-name';
+        } else {
+          dedupNote = parsed.email ? null : 'no-email';
+        }
+      }
+
       if (dup) {
         data.addCandidateFile(dup.id, {
           filename: file.filename,
@@ -884,6 +1012,11 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
         if (!dup.role && parsed.role) fill.role = parsed.role;
         if (!dup.skills && parsed.skills) fill.skills = parsed.skills;
         if (!dup.phone && parsed.phone) fill.phone = parsed.phone;
+        // Filling an empty email matters beyond completeness: it upgrades this
+        // profile to the cheap, unambiguous email path, so the NEXT import of
+        // this person matches on the address instead of relying on the name
+        // heuristic again.
+        if (!dup.email && parsed.email) fill.email = parsed.email;
         if (Object.keys(fill).length > 0) data.updateCandidate(dup.id, fill, userId);
 
         // The merged profile describes the NEW CV, so it replaces the old one.
@@ -893,11 +1026,21 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
           role: dup.role || parsed.role,
         });
 
-        data.createCandidateComment(dup.id, 'CV uppdaterat via import (matchade befintlig e-postadress)', userId);
+        // Say WHICH rule merged this. A name merge is the fallible one, so the
+        // comment has to be spottable afterwards by a human auditing the batch
+        // (it is also deliberately not in data.js's boilerplate-comment list,
+        // so a later merge carries it over instead of dropping it).
+        data.createCandidateComment(
+          dup.id,
+          matchedBy === 'name'
+            ? 'CV uppdaterat via import (matchade på namn, ingen e-post i CV:t)'
+            : 'CV uppdaterat via import (matchade befintlig e-postadress)',
+          userId
+        );
 
         merged++;
         createdIds.push(dup.id); // re-match the updated profile against open requests
-        sendEvent({ ...progress, status: 'duplicate', candidateId: dup.id, name: dup.name, role: dup.role || parsed.role || '' });
+        sendEvent({ ...progress, status: 'duplicate', matchedBy, candidateId: dup.id, name: dup.name, role: dup.role || parsed.role || '' });
         continue;
       }
 
@@ -927,8 +1070,16 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
       data.createCandidateComment(candidate.id, 'Automatiskt skapad via CV import', userId);
 
       created++;
+      // Counted off the actual address, not off dedupNote: a CV with no email
+      // that ALSO hit a name collision is reported as 'ambiguous-name', but it
+      // is still one more profile that no email check will ever catch.
+      if (!data.normalizeEmail(parsed.email)) noEmail++;
+      if (dedupNote === 'ambiguous-name') ambiguous++;
       createdIds.push(candidate.id);
-      sendEvent({ ...progress, status: 'created', candidateId: candidate.id, name: parsed.name, role: parsed.role || '' });
+      // dedupNote is what makes a silently-undeduped profile visible in the
+      // progress list — reporting these as a plain 'created' is why a whole bad
+      // batch went unnoticed.
+      sendEvent({ ...progress, status: 'created', dedupNote, candidateId: candidate.id, name: parsed.name, role: parsed.role || '' });
     } catch (err) {
       console.error(`Error processing CV ${originalName}:`, err.message);
       failed++;
@@ -936,7 +1087,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
     }
   }
 
-  sendEvent({ type: 'done', created, merged, failed, total });
+  sendEvent({ type: 'done', created, merged, failed, total, noEmail, ambiguous });
   res.end();
 
   // Background: match each imported candidate against open requests, run

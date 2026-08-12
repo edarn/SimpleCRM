@@ -655,6 +655,35 @@ function migrateExistingData() {
     console.log('match cache index error:', err.message);
   }
 
+  // ---- Canonicalize stored candidate emails --------------------------------
+  // The dedup lookup normalizes what it searches FOR but the write path stored
+  // whatever the CV parser produced. pdf-parse carries non-breaking spaces and
+  // zero-width characters straight out of the PDF, so "anna@x.se " looked
+  // identical in the UI and never matched — the same person came back as a new
+  // profile on the next import. Canonicalize what is already stored; the write
+  // path now does the same (data.js normalizeEmail).
+  try {
+    const rows = db.prepare("SELECT id, email FROM candidates WHERE email IS NOT NULL AND email != ''").all();
+    const clean = (e) => String(e)
+      .replace(/[​-‍﻿]/g, '')
+      .replace(/\s/g, '')
+      .toLowerCase();
+    const upd = db.prepare('UPDATE candidates SET email = ? WHERE id = ?');
+    let fixed = 0;
+    const run = db.transaction(() => {
+      for (const r of rows) {
+        const c = clean(r.email);
+        if (c !== r.email) { upd.run(c, r.id); fixed++; }
+      }
+    });
+    run();
+    if (fixed > 0) {
+      console.log(`Normalized ${fixed} candidate email(s) — these could not be deduplicated before`);
+    }
+  } catch (err) {
+    console.log('Candidate email normalization error:', err.message);
+  }
+
   // Coarse progress marker for a running inbox job ('classifying',
   // 'extracting_resumes', 'matching', 'executing'). `status` alone covers a
   // multi-minute span with no feedback, which reads as a hung page.

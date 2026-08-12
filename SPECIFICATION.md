@@ -345,13 +345,59 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Claude AI extracts name, email, phone, role, and skills from each CV.
    - Each auto-created profile gets a comment "Automatiskt skapad via CV import".
    - Resume text is cached for AI matching. File is stored as candidate's resume.
-   - **Email dedup / merge**: If an imported CV's email matches an existing
-     candidate in scope, the import does **not** create a duplicate — it merges
-     into the existing profile instead: attaches the new CV, refreshes the
-     cached resume text, fills in only previously-empty fields (never overwrites
-     existing data), adds a "CV uppdaterat via import" comment, and re-matches
-     the profile against open requests. The progress UI shows these as "merged"
-     and the summary reports `N created, M merged`.
+   - **Dedup / merge**: If an imported CV matches an existing candidate in scope,
+     the import does **not** create a duplicate — it merges into the existing
+     profile instead: attaches the new CV, refreshes the cached resume text,
+     fills in only previously-empty fields (never overwrites existing data),
+     adds a comment recording how it matched, and re-matches the profile against
+     open requests. The progress UI shows these as "merged" and the summary
+     reports `N created, M merged`.
+
+     The check is a ladder, applied per CV:
+
+     | Situation | Outcome |
+     |---|---|
+     | Email matches an existing candidate | merge, `matchedBy: 'email'` |
+     | No email match, exactly one name match, emails don't contradict | merge, `matchedBy: 'name'` |
+     | No email match, one name match, but the two have *different* addresses | create, `dedupNote: 'name-differs-email'` |
+     | Several candidates share the name | create, `dedupNote: 'ambiguous-name'` |
+     | No email in the CV and no name match | create, `dedupNote: 'no-email'` |
+
+     A name match is only trusted when it is **unique** and nothing contradicts
+     it. Merging two people who happen to share a name is worse than a
+     duplicate, so ambiguity always creates.
+
+   - **Why the name fallback exists**: an import of ~288 CVs produced ~42
+     duplicates. 51% of the CVs yielded no email at all — the check was
+     `parsed.email ? find(...) : null`, so with no email it silently did not run
+     — and 29 of the 30 duplicate groups contained at least one email-less copy,
+     typically "one copy with an address, one without" (the AI extracted it on
+     one pass and not the other).
+   - **Emails are stored canonically** (`normalizeEmail`: all whitespace removed,
+     zero-width characters stripped, lowercased). They used to be stored exactly
+     as the CV parser produced them, so a trailing non-breaking space made the
+     lookup miss and created a duplicate that looked identical in the UI. A boot
+     migration canonicalizes existing rows. Storage and lookup must always use
+     the same function.
+   - **Nothing is silent**: every progress row states how it was resolved, and
+     the summary calls out how many profiles were created without a dedup check.
+     The original incident went unnoticed for a whole batch because a CV with no
+     email was reported as an ordinary "created".
+
+   - **Duplicate review & merge** (`GET /api/candidates/duplicates`,
+     `POST /api/candidates/merge`): candidates are grouped by normalized name.
+     A group whose only addresses are identical (or absent) is safe to merge; a
+     group with two *different* real addresses is flagged as conflicting, is not
+     pre-selected, and warns that these are probably two different people.
+     Merging keeps the oldest profile, moves files, comments, offers and linked
+     todos onto it, fills only its empty fields, drops the deleted ids out of
+     every request's match list, and records what it did as a comment.
+     - The importer's boilerplate comments ("Automatiskt skapad via CV import"
+       and the import-merge note) are **deleted rather than carried over** —
+       they add nothing to the survivor and the "created via CV import" line is
+       simply false about a profile that was entered by hand.
+     - Merging deletes rows, so it is gated exactly like `DELETE /:id`: an owner
+       or solo user may merge anything, a member only profiles they created.
 
 15. **Candidate-to-Request Matching**
    - When viewing a candidate, cached matches against open consultant requests
@@ -1231,6 +1277,8 @@ VibeCodingProject/
 | POST | /api/candidates/:id/match-requests | Run fresh AI matching against open requests |
 | POST | /api/candidates/import-cvs | Bulk import candidates from CV files (multipart) |
 | POST | /api/candidates/backfill-profiles | Distil one bounded batch of CVs into matching profiles; returns `{ distilled, empty, remaining, done }` (503 without `ANTHROPIC_API_KEY`) |
+| GET | /api/candidates/duplicates | Profiles that look like the same person, grouped by normalized name (read-only review list) |
+| POST | /api/candidates/merge | Merge `{ survivorId, duplicateIds[] }` into one profile; 403 if the caller may not delete one of the duplicates |
 
 ### Candidate Offers (Protected)
 

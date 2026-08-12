@@ -623,6 +623,9 @@ const router = {
         case 'candidate-form':
           await views.candidateForm(app, params.id);
           break;
+        case 'candidate-duplicates':
+          await views.candidateDuplicates(app);
+          break;
         case 'team-settings':
           await views.teamSettings(app);
           break;
@@ -3054,6 +3057,10 @@ const views = {
           <p class="text-slate-500">${candidates.length} candidates</p>
         </div>
         <div class="flex gap-2">
+          <button onclick="router.navigate('candidate-duplicates')"
+                  class="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-2.5 rounded-lg hover:from-amber-600 hover:to-orange-700 transition-all font-medium shadow-sm text-sm">
+            Granska dubbletter
+          </button>
           <button onclick="views.showCVImportModal()"
                   class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2.5 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
             Import CVs
@@ -3251,19 +3258,26 @@ const views = {
       } else if (evt.status === 'parsing') {
         statusEl.textContent = `AI parsing: ${this.escapeHtml(evt.file)} (${evt.index + 1}/${evt.total})`;
       } else if (evt.status === 'created') {
-        statusEl.textContent = `Created: ${this.escapeHtml(evt.name)} (${evt.index + 1}/${evt.total})`;
-        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm">
-          <span class="text-emerald-500">&#10003;</span>
+        const note = this._importDedupNote(evt.dedupNote);
+        statusEl.textContent = `Created: ${evt.name} (${evt.index + 1}/${evt.total})`;
+        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm ${note ? 'bg-amber-50 rounded px-1' : ''}">
+          <span class="${note ? 'text-amber-500' : 'text-emerald-500'}">${note ? '&#9888;' : '&#10003;'}</span>
           <a href="#" onclick="modal.hide(); router.navigate('candidate-detail', {id: '${evt.candidateId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">${this.escapeHtml(evt.name)}</a>
-          <span class="text-slate-400">${this.escapeHtml(evt.role || '')}</span>
+          ${note
+            ? `<span class="text-amber-700 text-xs">${this.escapeHtml(note)}</span>`
+            : `<span class="text-slate-400">${this.escapeHtml(evt.role || '')}</span>`}
         </div>`;
         resultsEl.scrollTop = resultsEl.scrollHeight;
       } else if (evt.status === 'duplicate') {
-        statusEl.textContent = `Merged into existing: ${this.escapeHtml(evt.name)} (${evt.index + 1}/${evt.total})`;
-        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm">
-          <span class="text-blue-500" title="Matched an existing candidate by email">&#8635;</span>
+        const byName = evt.matchedBy === 'name';
+        const label = byName
+          ? 'matchade på namn — ingen e-post i CV:t'
+          : 'matchade befintlig profil (e-post)';
+        statusEl.textContent = `Merged into existing: ${evt.name} (${evt.index + 1}/${evt.total})`;
+        resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm ${byName ? 'bg-amber-50 rounded px-1' : ''}">
+          <span class="${byName ? 'text-amber-500' : 'text-blue-500'}" title="${this.escapeHtml(label)}">${byName ? '&#9888;' : '&#8635;'}</span>
           <a href="#" onclick="modal.hide(); router.navigate('candidate-detail', {id: '${evt.candidateId}'}); return false;" class="text-violet-600 hover:text-violet-700 font-medium">${this.escapeHtml(evt.name)}</a>
-          <span class="text-blue-500 text-xs">merged (existing email)</span>
+          <span class="${byName ? 'text-amber-700' : 'text-blue-500'} text-xs">${this.escapeHtml(label)}</span>
         </div>`;
         resultsEl.scrollTop = resultsEl.scrollHeight;
       } else if (evt.status === 'skipped' || evt.status === 'error') {
@@ -3280,6 +3294,19 @@ const views = {
     if (evt.type === 'done') {
       bar.style.width = '100%';
       statusEl.textContent = `Done: ${evt.created} created` + (evt.merged > 0 ? `, ${evt.merged} merged` : '') + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`;
+
+      // A batch where CVs had no email is exactly how duplicates slipped in
+      // unnoticed last time — say it out loud and offer the review screen.
+      const noEmail = evt.noEmail || 0;
+      const ambiguous = evt.ambiguous || 0;
+      if (noEmail > 0) {
+        resultsEl.innerHTML += `<div class="mt-2 p-3 rounded-lg bg-amber-50 border border-amber-300 text-sm text-amber-800">
+          <div class="font-semibold">&#9888; ${noEmail} profil(er) skapades utan dubblettkontroll</div>
+          <div class="text-xs mt-1">CV:t saknade e-postadress${ambiguous > 0 ? `, och ${ambiguous} till hade ett namn som inte gick att matcha entydigt` : ''}. De kan vara dubbletter av profiler som redan finns.</div>
+          <a href="#" onclick="modal.hide(); router.navigate('candidate-duplicates'); return false;" class="inline-block mt-2 font-medium text-amber-900 underline hover:text-amber-700">Granska dubbletter &rarr;</a>
+        </div>`;
+        resultsEl.scrollTop = resultsEl.scrollHeight;
+      }
       // Repurpose the primary button into a working "Done": it was a disabled
       // submit button, which is why clicking "Done" did nothing. Turn it into a
       // plain button that closes the modal and refreshes the candidates list.
@@ -3291,6 +3318,339 @@ const views = {
       const closeBtn = document.getElementById('cv-import-close');
       if (closeBtn) closeBtn.classList.add('hidden');
     }
+  },
+
+  // Why a created candidate skipped the duplicate check. '' = normal create.
+  _importDedupNote(note) {
+    const notes = {
+      'no-email': 'skapad utan dubblettkontroll (ingen e-post i CV:t)',
+      'ambiguous-name': 'flera profiler har samma namn — skapad som ny',
+      'name-differs-email': 'namnet finns redan men med annan e-post — skapad som ny'
+    };
+    return notes[note] || '';
+  },
+
+  // ============ Duplicate Review ============
+
+  async candidateDuplicates(container) {
+    const data = await api.get('/api/candidates/duplicates');
+    const groups = data.groups || [];
+    this._duplicateGroups = groups;
+
+    const safeCount = groups.filter(g => !g.conflictingEmails).length;
+    const totalDupes = groups.reduce((n, g) => n + Math.max(0, (g.members || []).length - 1), 0);
+
+    container.innerHTML = `
+      <div class="mb-6">
+        <a href="#" onclick="router.navigate('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
+          ← Tillbaka till kandidater
+        </a>
+      </div>
+
+      <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Granska dubbletter</h2>
+          <p class="text-slate-500" id="dup-count">${groups.length} grupp(er) kvar att granska</p>
+        </div>
+        <div class="flex gap-2">
+          ${groups.length > 0 ? `
+          <button id="dup-merge-all-btn" onclick="views.mergeAllSafeDuplicates()"
+                  class="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-2.5 rounded-lg hover:from-amber-600 hover:to-orange-700 transition-all font-medium shadow-sm text-sm ${safeCount === 0 ? 'hidden' : ''}">
+            Slå ihop alla säkra (${safeCount})
+          </button>` : ''}
+          <button onclick="router.navigate('candidate-duplicates')"
+                  class="bg-white border border-slate-300 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-50 transition-colors font-medium text-sm">
+            Uppdatera
+          </button>
+        </div>
+      </div>
+
+      ${groups.length > 0 ? `
+      <p class="text-sm text-slate-500 mb-4">
+        ${totalDupes} profil(er) föreslås slås ihop. Den profil du behåller får alla filer, kommentarer,
+        offerter och todos från dubbletterna — dubbletterna tas bort permanent.
+      </p>` : ''}
+
+      <div id="dup-progress" class="hidden mb-4 text-sm text-slate-600 bg-slate-100 rounded-lg px-4 py-2"></div>
+      <div id="dup-log" class="hidden mb-4 bg-white shadow-sm rounded-xl border border-slate-200 p-4 max-h-48 overflow-y-auto"></div>
+
+      <div id="dup-groups">
+        ${groups.length === 0 ? `
+          <div class="bg-white shadow-sm rounded-xl border border-slate-200 p-8 text-center">
+            <p class="text-slate-700 font-medium">Inga dubbletter hittades</p>
+            <p class="text-slate-500 text-sm mt-1">Alla kandidatprofiler ser unika ut just nu.</p>
+          </div>
+        ` : groups.map((g, gi) => this._renderDuplicateGroup(g, gi)).join('')}
+      </div>
+    `;
+
+    groups.forEach((_, gi) => this._updateDuplicateSummary(gi));
+  },
+
+  _renderDuplicateGroup(group, gi) {
+    const conflict = !!group.conflictingEmails;
+    const members = group.members || [];
+    return `
+      <div id="dup-group-${gi}" class="bg-white shadow-sm rounded-xl border ${conflict ? 'border-amber-400' : 'border-slate-200'} mb-4 overflow-hidden">
+        <div class="px-5 py-4 border-b ${conflict ? 'bg-amber-50 border-amber-200' : 'border-slate-200'}">
+          <h3 class="text-lg font-semibold text-slate-800">${this.escapeHtml(group.name || '(utan namn)')}</h3>
+          <p class="text-sm text-slate-500">${members.length} profiler med samma namn</p>
+          ${conflict ? `
+            <div class="mt-3 p-3 rounded-lg bg-amber-100 border border-amber-300 text-sm text-amber-900">
+              <span class="font-semibold">&#9888; Olika e-postadresser i den här gruppen</span>
+              <div class="text-xs mt-1">
+                ${this.escapeHtml((group.emails || []).join(' · '))}
+              </div>
+              <div class="text-xs mt-1">
+                Två riktiga adresser betyder oftast två olika personer med samma namn. Inget är förvalt här —
+                kryssa bara i om du är säker på att det är samma person.
+              </div>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="divide-y divide-slate-100">
+          ${members.map((m, mi) => this._renderDuplicateMember(m, gi, mi, conflict)).join('')}
+        </div>
+
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+          <span id="dup-summary-${gi}" class="text-sm text-slate-600"></span>
+          <button id="dup-merge-btn-${gi}" onclick="views.mergeDuplicateGroup(${gi})"
+                  class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-4 py-2 rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all font-medium shadow-sm text-sm">
+            Slå ihop
+          </button>
+        </div>
+      </div>
+    `;
+  },
+
+  _renderDuplicateMember(m, gi, mi, conflict) {
+    const categoryLabels = this._candidateCategories;
+    const categoryLabel = m.category ? (categoryLabels[m.category] || m.category) : '-';
+    // Oldest member survives by default, so its own "merge" box is off and locked.
+    const checked = mi === 0 ? '' : (conflict ? '' : 'checked');
+    return `
+      <div data-member-row class="px-5 py-3 flex flex-col sm:flex-row sm:items-start gap-3">
+        <div class="flex gap-4 sm:flex-col sm:gap-1 sm:w-28 shrink-0">
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer whitespace-nowrap">
+            <input type="radio" name="dup-survivor-${gi}" value="${this.escapeHtml(m.id)}" ${mi === 0 ? 'checked' : ''}
+                   onchange="views.duplicateSurvivorChanged(${gi})" class="text-rose-500 focus:ring-rose-500">
+            Behåll
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer whitespace-nowrap">
+            <input type="checkbox" data-dup-id="${this.escapeHtml(m.id)}" ${mi === 0 ? 'disabled' : ''} ${checked}
+                   onchange="views.duplicateSelectionChanged(${gi})" class="rounded text-rose-500 focus:ring-rose-500">
+            Slå ihop
+          </label>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <a href="#" onclick="router.navigate('candidate-detail', {id: '${this.escapeHtml(m.id)}'}); return false;"
+               class="font-medium text-violet-600 hover:text-violet-700">${this.escapeHtml(m.name || '(utan namn)')}</a>
+            ${m.email
+              ? `<span class="text-sm text-slate-600">${this.escapeHtml(m.email)}</span>`
+              : `<span class="text-sm px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">ingen e-post</span>`}
+            ${m.category ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${this._categoryBadgeClass(m.category)}">${this.escapeHtml(categoryLabel)}</span>` : ''}
+          </div>
+          <div class="text-sm text-slate-500 mt-0.5">
+            ${this.escapeHtml(m.role || 'ingen roll')}${m.phone ? ` · ${this.escapeHtml(m.phone)}` : ''}
+          </div>
+          ${m.skills ? `<div class="text-xs text-slate-400 mt-0.5 truncate">${this.escapeHtml(m.skills)}</div>` : ''}
+          <div class="text-xs text-slate-400 mt-1">
+            Ägare: ${this.escapeHtml(m.createdByUsername || '-')} ·
+            Skapad: ${formatDate(m.createdAt)} ·
+            ${m.fileCount} fil(er) · ${m.commentCount} kommentar(er)${m.hasResumeText ? ' · CV-text' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  // Read the live checkbox/radio state for one group's card.
+  _duplicateGroupSelection(gi) {
+    const card = document.getElementById(`dup-group-${gi}`);
+    if (!card) return null;
+    const survivor = card.querySelector(`input[name="dup-survivor-${gi}"]:checked`);
+    const duplicateIds = Array.from(card.querySelectorAll('input[type="checkbox"][data-dup-id]'))
+      .filter(b => b.checked && !b.disabled)
+      .map(b => b.dataset.dupId);
+    return { survivorId: survivor ? survivor.value : null, duplicateIds };
+  },
+
+  duplicateSurvivorChanged(gi) {
+    const card = document.getElementById(`dup-group-${gi}`);
+    const group = (this._duplicateGroups || [])[gi];
+    if (!card || !group) return;
+    const conflict = !!group.conflictingEmails;
+    card.querySelectorAll('[data-member-row]').forEach(row => {
+      const radio = row.querySelector('input[type="radio"]');
+      const box = row.querySelector('input[type="checkbox"][data-dup-id]');
+      if (!radio || !box) return;
+      if (radio.checked) {
+        // The survivor can never merge into itself.
+        box.checked = false;
+        box.disabled = true;
+      } else if (box.disabled) {
+        box.disabled = false;
+        box.checked = !conflict;
+      }
+    });
+    this._updateDuplicateSummary(gi);
+  },
+
+  duplicateSelectionChanged(gi) {
+    this._updateDuplicateSummary(gi);
+  },
+
+  _updateDuplicateSummary(gi) {
+    const el = document.getElementById(`dup-summary-${gi}`);
+    const group = (this._duplicateGroups || [])[gi];
+    const sel = this._duplicateGroupSelection(gi);
+    if (!el || !group || !sel) return;
+    if (sel.duplicateIds.length === 0) {
+      el.textContent = 'Inga dubbletter valda';
+      return;
+    }
+    const survivor = (group.members || []).find(m => m.id === sel.survivorId);
+    el.textContent = `${sel.duplicateIds.length} profil(er) slås in i ${survivor ? survivor.name : 'vald profil'} och tas bort permanent`;
+  },
+
+  async _mergeDuplicates(survivorId, duplicateIds) {
+    try {
+      return await api.post('/api/candidates/merge', { survivorId, duplicateIds });
+    } catch (err) {
+      if (err.message === 'HTTP 400') throw new Error('Ogiltigt val av profiler.');
+      if (err.message === 'HTTP 403') throw new Error('Du saknar behörighet att ta bort en av dubbletterna.');
+      if (err.message === 'HTTP 404') throw new Error('En av profilerna finns inte längre — ladda om sidan.');
+      throw err;
+    }
+  },
+
+  _describeMoved(moved) {
+    const m = moved || {};
+    const parts = [];
+    if (m.files) parts.push(`${m.files} fil(er)`);
+    if (m.comments) parts.push(`${m.comments} kommentar(er)`);
+    if (m.offers) parts.push(`${m.offers} offert(er)`);
+    if (m.todos) parts.push(`${m.todos} todo(s)`);
+    let text = parts.length ? `Flyttade ${parts.join(', ')}.` : 'Inget innehåll behövde flyttas.';
+    if (m.skippedComments) text += ` ${m.skippedComments} kommentar(er) hoppades över.`;
+    return text;
+  },
+
+  _logDuplicateResult(text, isError) {
+    const log = document.getElementById('dup-log');
+    if (!log) return;
+    log.classList.remove('hidden');
+    const div = document.createElement('div');
+    div.className = isError ? 'text-sm text-red-700 py-0.5' : 'text-sm text-emerald-700 py-0.5';
+    div.textContent = (isError ? '✗ ' : '✓ ') + text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  },
+
+  _removeDuplicateCard(gi, message) {
+    const card = document.getElementById(`dup-group-${gi}`);
+    if (card) card.remove();
+    if (this._duplicateGroups && this._duplicateGroups[gi]) this._duplicateGroups[gi] = null;
+    if (message) this._logDuplicateResult(message, false);
+
+    const remaining = (this._duplicateGroups || []).filter(Boolean).length;
+    const countEl = document.getElementById('dup-count');
+    if (countEl) countEl.textContent = `${remaining} grupp(er) kvar att granska`;
+
+    const safeLeft = (this._duplicateGroups || []).filter(g => g && !g.conflictingEmails).length;
+    const allBtn = document.getElementById('dup-merge-all-btn');
+    if (allBtn) {
+      if (safeLeft === 0) allBtn.classList.add('hidden');
+      else allBtn.textContent = `Slå ihop alla säkra (${safeLeft})`;
+    }
+
+    const listEl = document.getElementById('dup-groups');
+    if (remaining === 0 && listEl) {
+      listEl.innerHTML = `
+        <div class="bg-white shadow-sm rounded-xl border border-slate-200 p-8 text-center">
+          <p class="text-slate-700 font-medium">Inga dubbletter kvar</p>
+          <p class="text-slate-500 text-sm mt-1">Alla grupper är hanterade.</p>
+        </div>
+      `;
+    }
+  },
+
+  async mergeDuplicateGroup(gi) {
+    const group = (this._duplicateGroups || [])[gi];
+    const sel = this._duplicateGroupSelection(gi);
+    if (!group || !sel) return;
+    if (!sel.survivorId) {
+      alert('Välj vilken profil som ska behållas.');
+      return;
+    }
+    if (sel.duplicateIds.length === 0) {
+      alert('Välj minst en dubblett att slå ihop.');
+      return;
+    }
+    const survivor = (group.members || []).find(m => m.id === sel.survivorId);
+    const survivorName = survivor ? survivor.name : 'vald profil';
+    if (!confirm(`Slå ihop ${sel.duplicateIds.length} profil(er) in i "${survivorName}"?\n\n${sel.duplicateIds.length} profil(er) tas bort permanent. Detta går inte att ångra.`)) return;
+
+    const btn = document.getElementById(`dup-merge-btn-${gi}`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Slår ihop...'; }
+    try {
+      const res = await this._mergeDuplicates(sel.survivorId, sel.duplicateIds);
+      this._removeDuplicateCard(gi, `${group.name}: ${sel.duplicateIds.length} profil(er) sammanslagna i ${survivorName}. ${this._describeMoved(res.moved)}`);
+    } catch (err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Slå ihop'; }
+      alert('Error: ' + err.message);
+    }
+  },
+
+  async mergeAllSafeDuplicates() {
+    const groups = this._duplicateGroups || [];
+    const jobs = [];
+    groups.forEach((g, gi) => {
+      // Conflicting-email groups are never batch-merged — they need a human.
+      if (!g || g.conflictingEmails) return;
+      if (!document.getElementById(`dup-group-${gi}`)) return;
+      const sel = this._duplicateGroupSelection(gi);
+      if (!sel || !sel.survivorId || sel.duplicateIds.length === 0) return;
+      jobs.push({ gi, group: g, survivorId: sel.survivorId, duplicateIds: sel.duplicateIds });
+    });
+
+    if (jobs.length === 0) {
+      alert('Inga säkra grupper att slå ihop.');
+      return;
+    }
+    const profileCount = jobs.reduce((n, j) => n + j.duplicateIds.length, 0);
+    if (!confirm(`Slå ihop ${jobs.length} grupp(er)?\n\n${profileCount} profil(er) slås in i ${jobs.length} kvarvarande profil(er) och tas bort permanent. Detta går inte att ångra.`)) return;
+
+    const btn = document.getElementById('dup-merge-all-btn');
+    const progress = document.getElementById('dup-progress');
+    if (btn) { btn.disabled = true; btn.textContent = 'Slår ihop...'; }
+    if (progress) progress.classList.remove('hidden');
+
+    let ok = 0;
+    let failed = 0;
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
+      if (progress) progress.textContent = `Slår ihop grupp ${i + 1} av ${jobs.length}: ${job.group.name}...`;
+      const btnG = document.getElementById(`dup-merge-btn-${job.gi}`);
+      if (btnG) btnG.disabled = true;
+      try {
+        const res = await this._mergeDuplicates(job.survivorId, job.duplicateIds);
+        ok++;
+        this._removeDuplicateCard(job.gi, `${job.group.name}: ${job.duplicateIds.length} profil(er) sammanslagna. ${this._describeMoved(res.moved)}`);
+      } catch (err) {
+        failed++;
+        if (btnG) btnG.disabled = false;
+        this._logDuplicateResult(`${job.group.name}: misslyckades — ${err.message}`, true);
+      }
+    }
+
+    if (progress) progress.textContent = `Klart: ${ok} grupp(er) sammanslagna${failed > 0 ? `, ${failed} misslyckades` : ''}.`;
+    if (btn) { btn.disabled = false; }
+    const safeLeft = (this._duplicateGroups || []).filter(g => g && !g.conflictingEmails).length;
+    if (btn) btn.textContent = `Slå ihop alla säkra (${safeLeft})`;
+    if (failed > 0) alert(`${failed} grupp(er) kunde inte slås ihop. Se listan för detaljer.`);
   },
 
   _categoryBadgeClass(category) {
