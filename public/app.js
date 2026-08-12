@@ -6180,6 +6180,9 @@ We're looking for a senior Java developer..."></textarea>
     // Background matching state: while a job runs the button row becomes a
     // progress line, and a finished job leaves a diff summary behind.
     const matchRunning = request.matchState?.status === 'running';
+    // Solo users own every profile, so the owner pill would be pure noise —
+    // same convention as the "Added By" column on the candidates list.
+    const matchHasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
 
     container.innerHTML = `
       <div class="mb-6">
@@ -6279,6 +6282,9 @@ We're looking for a senior Java developer..."></textarea>
                   m.candidateCategory === 'contact_later' ? 'bg-red-100 text-red-600' :
                   'bg-slate-100 text-slate-600'
                 }">${this.escapeHtml(this._candidateCategories[m.candidateCategory] || m.candidateCategory)}</span>` : ''}
+                ${matchHasTeam && m.candidateOwner ? `<span class="text-xs px-2 py-0.5 rounded-full ${
+                  m.candidateOwnerId === auth.currentUser?.id ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'
+                }" title="Profilens ägare">${this.escapeHtml(m.candidateOwner)}</span>` : ''}
               </div>
               ${m.candidateSkills ? `<div class="text-sm text-slate-500 mt-0.5">${this.escapeHtml(m.candidateSkills)}</div>` : ''}
               ${m.strengths ? `<p class="text-sm text-emerald-700 mt-1">${this.escapeHtml(m.strengths)}</p>` : ''}

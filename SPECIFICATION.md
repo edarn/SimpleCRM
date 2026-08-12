@@ -274,6 +274,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      and related tools (Jenkins/GitHub Actions = CI/CD).
    - **Match results**: Each candidate shows score, strengths (green), and
      gaps (red) separately. Category badge shows availability status.
+   - **Profile owner (team users)**: each match row carries a badge with the
+     username of the member who owns that candidate profile — violet for your
+     own, slate for a teammate's. A shared request's match list mixes profiles
+     from the whole team, so the owner is what tells you whom to talk to before
+     putting someone forward. Hidden for solo users, who own everything anyway
+     (same convention as the "Added By" column on the candidates list).
    - **Send via Outlook**: Select candidates with checkboxes, click "Send
      Selected via Outlook" to generate an .eml draft with HTML-formatted
      candidate presentations (strengths/gaps) and CV files attached. Sent
