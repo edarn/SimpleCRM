@@ -1788,6 +1788,13 @@ const BOILERPLATE_IMPORT_COMMENTS = [
   'CV uppdaterat via import (matchade befintlig e-postadress)',
 ];
 
+// How far a client response got. Used when merging two rows that were both
+// sent to the same request: the further-along answer wins.
+const CLIENT_STATUS_RANK = { declined: 1, sent: 2, interview: 3, accepted: 4 };
+function statusRank(status) {
+  return CLIENT_STATUS_RANK[status] || 0;
+}
+
 function isBoilerplateImportComment(content) {
   const c = String(content || '').trim();
   return BOILERPLATE_IMPORT_COMMENTS.some(b => c === b);
@@ -1846,14 +1853,42 @@ const mergeCandidatesTx = db.transaction((survivorId, duplicateIds, userId, team
     ).run(survivorId, dupId);
     moved.todos += t.changes;
 
-    // Drop the duplicate out of every request's match list, otherwise the entry
+    // Take the duplicate out of every request's match list, otherwise the entry
     // dangles at an id that no longer exists.
+    //
+    // But a "sent" entry is HISTORY, not a match result: it records that this
+    // person was actually put in front of a client, and possibly their response
+    // (interview/accepted). removeCandidateFromRequestMatches refuses to delete
+    // those for exactly that reason. So a sent entry is re-pointed at the
+    // survivor rather than dropped — the person was still sent, they just live
+    // under a different row now.
     const reqScope = teamId ? 'team_id = ?' : 'created_by = ? AND team_id IS NULL';
     for (const req of db.prepare(`SELECT id, matched_candidates FROM consultant_requests WHERE ${reqScope}`).all(teamId || userId)) {
       let list;
       try { list = JSON.parse(req.matched_candidates || '[]'); } catch (_) { continue; }
-      if (!Array.isArray(list) || !list.some(m => m.candidateId === dupId)) continue;
+      if (!Array.isArray(list)) continue;
+      const dupEntry = list.find(m => m.candidateId === dupId);
+      if (!dupEntry) continue;
+
       const next = list.filter(m => m.candidateId !== dupId);
+
+      if (dupEntry.sent) {
+        const survivorEntry = next.find(m => m.candidateId === survivorId);
+        if (survivorEntry) {
+          // Both are on this request. Keep the survivor's row but carry the
+          // sent history onto it, preferring whichever response got further —
+          // losing an "accepted" because the other row said "sent" would be
+          // the worst possible outcome here.
+          survivorEntry.sent = true;
+          if (statusRank(dupEntry.status) > statusRank(survivorEntry.status)) {
+            survivorEntry.status = dupEntry.status;
+          }
+        } else {
+          next.push({ ...dupEntry, candidateId: survivorId });
+        }
+        next.sort((a, b) => (b.score || 0) - (a.score || 0));
+      }
+
       db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
         .run(JSON.stringify(next), now, req.id);
     }
