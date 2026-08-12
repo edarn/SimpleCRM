@@ -251,6 +251,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      Click = toggle priority (bold = critical, weighs more in scoring).
      Double-click = edit text inline. x = remove. + = add new.
    - **Editable description**: Free-text description field.
+   - **"Visa hela beskrivningen"**: the description is the AI's *summary* of the
+     email the request came from. A link under the field opens the original
+     email in an overlay (blurred backdrop, closed by the ×, the Stäng button,
+     clicking outside, or Escape) so you can check what the summary left out
+     without leaving the page. Shown only when the request has a linked source
+     email. The body is served by `GET /api/requests/:id/source` rather than
+     inlined into `GET /api/requests/:id` — that endpoint is polled every few
+     seconds during a match, and a full email body in every poll response would
+     be pure waste.
    - **Save & Re-match**: Saves skill/description changes and triggers fresh
      AI candidate matching in one click (fast mode — see section 19).
    - **Full ommatchning (alla CV)**: a second button that scores the entire CV
@@ -1255,6 +1264,7 @@ VibeCodingProject/
 |--------|----------|-------------|
 | GET | /api/requests | List all consultant requests |
 | GET | /api/requests/:id | Get single request with enriched match details |
+| GET | /api/requests/:id/source | Original email the request was extracted from (`{ fromEmail, fromName, subject, body, receivedAt }`); 404 when there is none or it was deleted from the inbox |
 | PUT | /api/requests/:id | Update request (status, skills, description) |
 | POST | /api/requests/:id/rematch | Start AI candidate matching in the background. Body `{ mode: 'fast' \| 'full' }` (default `fast`). **202** on start, **409** if a run is already in flight, **404** if unknown. Poll `GET /api/requests/:id` → `matchState` |
 | POST | /api/requests/:id/send-eml | Generate Outlook draft with selected candidates |

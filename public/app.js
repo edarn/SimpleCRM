@@ -669,22 +669,40 @@ function focusAutofocus(container) {
 }
 
 // Modal helper
+const MODAL_SIZES = { md: 'max-w-md', lg: 'max-w-3xl' };
+
 const modal = {
-  show(content) {
+  // opts.size: 'md' (default, every existing form) | 'lg' (long read-only text)
+  show(content, opts = {}) {
     if (content !== undefined) {
       document.getElementById('modal-content').innerHTML = content;
+    }
+    const panel = document.getElementById('modal-panel');
+    if (panel) {
+      for (const cls of Object.values(MODAL_SIZES)) panel.classList.remove(cls);
+      panel.classList.add(MODAL_SIZES[opts.size] || MODAL_SIZES.md);
     }
     document.getElementById('modal').classList.remove('hidden');
     focusAutofocus(document.getElementById('modal-content'));
   },
   hide() {
     document.getElementById('modal').classList.add('hidden');
+  },
+  isOpen() {
+    const el = document.getElementById('modal');
+    return !!el && !el.classList.contains('hidden');
   }
 };
 
 // Close modal on backdrop click
 document.getElementById('modal')?.addEventListener('click', (e) => {
   if (e.target.id === 'modal') modal.hide();
+});
+
+// ...and on Escape. Without this the only way out of a full-screen overlay is
+// to hit exactly the backdrop, which is fiddly once the panel is large.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && modal.isOpen()) modal.hide();
 });
 
 // Team Manager module
@@ -6226,6 +6244,13 @@ We're looking for a senior Java developer..."></textarea>
           <textarea id="req-desc-input" rows="4"
                     class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 text-sm"
                     placeholder="Describe what's needed...">${this.escapeHtml(request.description || '')}</textarea>
+          ${request.emailInboxId ? `
+          <button onclick="views.showRequestSource('${request.id}')" id="show-source-btn"
+                  class="mt-1.5 text-sm text-violet-600 hover:text-violet-700 font-medium">
+            Visa hela beskrivningen
+          </button>
+          <span class="text-xs text-slate-400 ml-1">(ursprungsmejlet — beskrivningen ovan är AI:ns sammanfattning)</span>
+          ` : ''}
         </div>
 
         <div id="rematch-row" class="flex gap-2 mb-6 items-center">
@@ -6459,6 +6484,57 @@ We're looking for a senior Java developer..."></textarea>
     );
     if (!ok) return;
     await this._startRematch(requestId, 'full', 'full-rematch-btn', 'Full ommatchning (alla CV)');
+  },
+
+  // The `description` on a request is the AI's summary of an email. This shows
+  // the email itself, so you can check what the summary left out without
+  // leaving the page.
+  async showRequestSource(requestId) {
+    const btn = document.getElementById('show-source-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Hämtar…'; }
+    try {
+      // Fetched directly rather than via api.get: that helper collapses every
+      // failure to "HTTP 404", and here the server's message is the useful part
+      // ("the source email was deleted from the inbox" vs "there is none").
+      const res = await fetch(`/api/requests/${requestId}/source`);
+      if (res.status === 401) { auth.showLoginModal(); return; }
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+      const src = payload;
+
+      const meta = [
+        src.fromName || src.fromEmail
+          ? `Från: ${[src.fromName, src.fromEmail && `<${src.fromEmail}>`].filter(Boolean).join(' ')}`
+          : null,
+        src.subject ? `Ämne: ${src.subject}` : null,
+        src.receivedAt ? `Mottaget: ${new Date(src.receivedAt).toLocaleString('sv-SE')}` : null
+      ].filter(Boolean);
+
+      modal.show(`
+        <div class="flex items-start justify-between gap-4 mb-3">
+          <h3 class="text-lg font-semibold text-slate-800">Ursprunglig beskrivning</h3>
+          <button onclick="modal.hide()" aria-label="Stäng"
+                  class="text-slate-400 hover:text-slate-600 text-2xl leading-none px-1 -mt-1">&times;</button>
+        </div>
+        ${meta.length ? `
+        <div class="text-xs text-slate-500 border-b border-slate-200 pb-3 mb-3 space-y-0.5">
+          ${meta.map(l => `<div>${this.escapeHtml(l)}</div>`).join('')}
+        </div>` : ''}
+        <div class="max-h-[60vh] overflow-y-auto text-sm text-slate-700 whitespace-pre-wrap break-words font-mono leading-relaxed">${
+          this.escapeHtml(src.body || '(Tom text)')
+        }</div>
+        <div class="flex justify-end mt-4 pt-3 border-t border-slate-200">
+          <button onclick="modal.hide()"
+                  class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Stäng</button>
+        </div>
+      `, { size: 'lg' });
+    } catch (err) {
+      // 404 covers both "no source email" and "the email was deleted from the
+      // inbox" — the endpoint's message says which.
+      alert(err.message || 'Kunde inte hämta ursprungstexten.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Visa hela beskrivningen'; }
+    }
   },
 
   // Save the on-screen criteria, start the background job, then let the view

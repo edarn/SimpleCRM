@@ -18,6 +18,43 @@ router.get('/', (req, res) => {
   }
 });
 
+// GET /api/requests/:id/source - The original email this request was extracted
+// from. Deliberately its own endpoint rather than a field on GET /:id: that one
+// is polled every few seconds while a match runs, and a full email body in
+// every poll response would be pure waste.
+router.get('/:id/source', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const request = data.getConsultantRequestById(req.params.id, userId);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (!request.emailInboxId) {
+      return res.status(404).json({ error: 'Den här förfrågan har ingen ursprungstext.' });
+    }
+
+    // Scoped the same way as the request itself, so this cannot be used to read
+    // another team's inbox by guessing ids.
+    const email = data.getInboxEmailById(request.emailInboxId, userId);
+    if (!email) {
+      // The source email was deleted from the inbox after the request was created.
+      return res.status(404).json({ error: 'Ursprungsmejlet finns inte kvar i inkorgen.' });
+    }
+
+    res.json({
+      emailInboxId: email.id,
+      fromEmail: email.fromEmail || '',
+      fromName: email.fromName || '',
+      subject: email.subject || '',
+      body: email.body || '',
+      receivedAt: email.createdAt || null
+    });
+  } catch (err) {
+    console.error('Error fetching request source:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/requests/:id - Get single request with match details
 router.get('/:id', (req, res) => {
   try {
