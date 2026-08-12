@@ -163,7 +163,11 @@ const apiLimiter = rateLimit({
   // which serves files and must stay limited.
   skip: (req) => req.method === 'GET' && (
     /^\/inbox\/[^/]+$/.test(req.path) ||
-    /^\/candidates\/[^/]+\/match-requests$/.test(req.path)
+    /^\/candidates\/[^/]+\/match-requests$/.test(req.path) ||
+    // Request detail carries matchState, which the UI polls for the duration of
+    // a rematch — the longest-running job in the app now that a full rematch
+    // scores the entire CV library.
+    /^\/requests\/[^/]+$/.test(req.path)
   )
 });
 

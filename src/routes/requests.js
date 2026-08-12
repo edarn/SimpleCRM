@@ -40,6 +40,10 @@ router.get('/:id', (req, res) => {
       });
     }
 
+    // Background matching job state — the frontend polls this endpoint while a
+    // re-match is running, and reads `summary` for the diff once it is done.
+    request.matchState = data.getRequestMatchState(req.params.id, req.session.userId);
+
     res.json(request);
   } catch (err) {
     console.error('Error fetching request:', err);
@@ -61,37 +65,176 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// POST /api/requests/:id/rematch - Re-run candidate matching
-router.post('/:id/rematch', async (req, res) => {
+// Resolve candidate display names for the diff, memoized so a 1000-candidate
+// full rematch doesn't issue the same lookup twice.
+function makeNameResolver(userId) {
+  const cache = new Map();
+  return (candidateId) => {
+    if (cache.has(candidateId)) return cache.get(candidateId);
+    let name = 'Unknown';
+    try {
+      const c = data.getCandidateById(candidateId, userId);
+      if (c && c.name) name = c.name;
+    } catch (err) {
+      console.error('Error resolving candidate name for diff:', candidateId, err);
+    }
+    cache.set(candidateId, name);
+    return name;
+  };
+}
+
+// Score movement below this is noise from the model, not a real change.
+const SCORE_DELTA_THRESHOLD = 5;
+
+// The actual matching work. Runs detached from the HTTP request (see the route
+// below) because a full rematch over the whole CV library takes many minutes —
+// far longer than a browser will hold a POST open.
+//
+// The caller has already won the claim and set match_status = 'running'; this
+// function only advances match_stage so the UI can show progress, and always
+// ends by calling finishRequestMatching.
+async function runMatchJob(requestId, userId, mode, request) {
+  const { matchCandidates } = require('../lib/candidate-matcher');
+
+  // Snapshot BEFORE anything mutates the list — this is the baseline the diff
+  // is computed against.
+  const before = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
+  const beforeById = new Map(before.map(m => [m.candidateId, m]));
+
+  // Candidates already on the list are pinned into the scoring pool, so a
+  // prefilter can never silently drop an existing match.
+  const alwaysInclude = before.map(m => m.candidateId).filter(Boolean);
+
+  if (mode === 'full') {
+    // Full verification run: no cached scores, everything is re-derived.
+    data.clearRequestMatchCache(requestId);
+  } else {
+    // Newly imported CVs have no distilled profile yet; top a few up so they can
+    // take part in the cheap path. Bounded, and never fatal — a backfill
+    // failure must not cost the user their match run.
+    data.setRequestMatchStage(requestId, 'Uppdaterar profiler');
+    try {
+      const { backfillProfiles } = require('../lib/profile-distiller');
+      await backfillProfiles(userId, 10);
+    } catch (err) {
+      console.error('Profile backfill failed, matching anyway:', err);
+    }
+  }
+
+  data.setRequestMatchStage(requestId, 'Matchar');
+  const candidates = data.getCandidatesWithResumes(userId);
+
+  let matches = [];
+  let evaluatedIds = [];
+  let stats = { mode, pool: candidates.length, selected: 0, scored: 0 };
+
+  if (candidates.length > 0) {
+    const result = await matchCandidates({
+      title: request.title,
+      description: request.description,
+      requiredSkills: request.requiredSkills,
+      role: request.role
+    }, candidates, {
+      mode,
+      requestId,
+      alwaysInclude,
+      onProgress: ({ stage, done, total }) => {
+        // Progress reporting is cosmetic — never let it break the job.
+        try {
+          const label = stage || 'Matchar';
+          data.setRequestMatchStage(requestId, total ? `${label} ${done || 0}/${total}` : label);
+        } catch (err) { /* ignore */ }
+      }
+    });
+    matches = result.matches || [];
+    evaluatedIds = result.evaluatedIds || [];
+    stats = { ...stats, ...(result.stats || {}) };
+  }
+
+  data.setRequestMatchStage(requestId, 'Sparar');
+
+  // Merge instead of overwrite so a candidate added concurrently isn't wiped.
+  // Pass only the candidates actually scored — a failed chunk must not read as
+  // "these candidates no longer match".
+  data.reconcileRequestMatches(requestId, evaluatedIds, matches, userId);
+
+  // Diff against what was actually persisted, not against `matches`.
+  // reconcileRequestMatches deliberately preserves unevaluated entries and
+  // refuses to apply an empty result, so the stored list is the only honest
+  // "after" — diffing `matches` would report removals that never happened.
+  const saved = data.getConsultantRequestById(requestId, userId);
+  const after = (saved && Array.isArray(saved.matchedCandidates)) ? saved.matchedCandidates : [];
+  const afterById = new Map(after.map(m => [m.candidateId, m]));
+  const nameOf = makeNameResolver(userId);
+
+  const added = [];
+  const scoreChanged = [];
+  for (const m of after) {
+    const prev = beforeById.get(m.candidateId);
+    if (!prev) {
+      added.push({ candidateId: m.candidateId, name: nameOf(m.candidateId), score: m.score });
+      continue;
+    }
+    const from = Number(prev.score) || 0;
+    const to = Number(m.score) || 0;
+    if (Math.abs(to - from) >= SCORE_DELTA_THRESHOLD) {
+      scoreChanged.push({ candidateId: m.candidateId, name: nameOf(m.candidateId), from, to });
+    }
+  }
+
+  const removed = before
+    .filter(m => !afterById.has(m.candidateId))
+    .map(m => ({ candidateId: m.candidateId, name: nameOf(m.candidateId), score: m.score }));
+
+  const summary = {
+    mode,
+    stats,
+    added,
+    removed,
+    scoreChanged,
+    matchCount: after.length,
+    finishedAt: data.getTimestamp()
+  };
+
+  // The AI returned nothing while there were candidates to score. The old list
+  // was left untouched (by design), so "no differences" would be a lie here.
+  if (candidates.length > 0 && matches.length === 0) {
+    summary.noMatchesReturned = true;
+  }
+
+  data.finishRequestMatching(requestId, 'done', summary);
+}
+
+// POST /api/requests/:id/rematch - Kick off candidate matching in the background.
+// Returns 202 immediately; the client polls GET /api/requests/:id for matchState.
+router.post('/:id/rematch', (req, res) => {
   try {
     const userId = req.session.userId;
-    const request = data.getConsultantRequestById(req.params.id, userId);
-    if (!request) {
+    const mode = (req.body && req.body.mode === 'full') ? 'full' : 'fast';
+
+    // Claim first: exactly one caller can own the job, so a double-click or a
+    // second teammate can't run the same multi-minute AI job twice.
+    const claim = data.claimRequestForMatching(req.params.id, userId, mode);
+    if (claim.error === 'not_found') {
       return res.status(404).json({ error: 'Request not found' });
     }
-
-    const { matchCandidates } = require('../lib/candidate-matcher');
-    const candidates = data.getCandidatesWithResumes(userId);
-
-    let matches = [];
-    let evaluatedIds = [];
-    if (candidates.length > 0) {
-      ({ matches, evaluatedIds } = await matchCandidates({
-        title: request.title,
-        description: request.description,
-        requiredSkills: request.requiredSkills,
-        role: request.role
-      }, candidates));
+    if (claim.error === 'already_running') {
+      return res.status(409).json({ error: 'En matchning pågår redan för det här uppdraget.' });
     }
 
-    // Merge instead of overwrite so a candidate added concurrently isn't wiped.
-    // Pass only the candidates actually scored — a failed chunk must not read as
-    // "these candidates no longer match".
-    data.reconcileRequestMatches(req.params.id, evaluatedIds, matches, userId);
+    // Fire and forget — same shape as the inbox processing job.
+    runMatchJob(req.params.id, userId, mode, claim.request).catch(err => {
+      console.error('Error re-matching:', err);
+      try {
+        data.finishRequestMatching(req.params.id, 'failed', { mode, error: err.message });
+      } catch (finishErr) {
+        console.error('Error recording match failure:', finishErr);
+      }
+    });
 
-    res.json({ message: `Matched ${matches.length} candidate(s)`, matchCount: matches.length });
+    res.status(202).json({ status: 'running', mode });
   } catch (err) {
-    console.error('Error re-matching:', err);
+    console.error('Error starting re-match:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

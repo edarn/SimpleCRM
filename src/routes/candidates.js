@@ -188,6 +188,15 @@ router.put('/:id', upload.single('resume'), (req, res) => {
       resumeOriginalName
     }, userId);
 
+    // A replacement CV used to be stored but never re-extracted: resume_text
+    // kept the OLD CV's contents and resume_text_status stayed 'ok', so no
+    // backfill ever rescued it and every later match (and now every distilled
+    // profile) was built from the wrong document. Re-run the same background
+    // pipeline as POST /:id/files.
+    if (req.file) {
+      processNewResumeInBackground(req.params.id, req.file.filename, userId);
+    }
+
     res.json(updated);
   } catch (err) {
     console.error('Error updating candidate:', err);
@@ -295,25 +304,9 @@ router.post('/:id/files', upload.single('file'), (req, res) => {
       return res.status(400).json({ error: result.error });
     }
 
-    // Auto-extract resume text and run request matching in the background
-    const { extractTextFromFile } = require('../lib/resume-parser');
-    const candidateId = req.params.id;
-    extractTextFromFile(path.join(uploadsDir, req.file.filename)).then(async (text) => {
-      if (text) {
-        data.updateCandidateResumeText(candidateId, text);
-        // Trigger request matching with fresh text
-        const candidate = data.getCandidateById(candidateId, userId);
-        if (candidate) {
-          await runCandidateRequestMatching(candidateId, candidate, userId).catch(e =>
-            console.error('Background request matching error:', e.message)
-          );
-        }
-      } else {
-        // Nothing extractable (.doc, image-only scan, corrupt PDF). Record the
-        // attempt so the backfill loops don't re-parse this file forever.
-        data.markCandidateResumeUnextractable(candidateId);
-      }
-    }).catch(err => console.error('Resume text extraction error:', err.message));
+    // Auto-extract resume text, distill the matching profile, and run request
+    // matching in the background.
+    processNewResumeInBackground(req.params.id, req.file.filename, userId);
 
     res.status(201).json(result);
   } catch (err) {
@@ -574,6 +567,9 @@ async function _runCandidateRequestMatching(candidateId, candidate, userId) {
           resumeText = await extractTextFromFile(filePath);
           if (resumeText) {
             data.updateCandidateResumeText(candidateId, resumeText);
+            // First time we have text for this candidate — distill it now so
+            // the next match can use the profile instead of the raw CV.
+            await distillResumeInBackground(candidateId, resumeText, candidate);
             break;
           }
         }
@@ -695,6 +691,113 @@ function triggerRequestMatchingInBackground(candidateId, userId) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Distilled profiles
+//
+// Every path that attaches or replaces CV text also distills it ONCE here, so
+// matching can ship a ~400-token profile instead of 4000 chars of raw CV (see
+// src/lib/profile-distiller.js). Distillation is best-effort by construction:
+// it is an optimization, and a failing AI call must never cost us the import,
+// the upload, or the match that triggered it.
+// ---------------------------------------------------------------------------
+
+// Persist a distilled profile + canonical skill tags. `result` is the
+// { profile, skillsCsv } pair (or null when nothing usable came back — then we
+// record 'empty' so the backfill stops re-selecting this candidate forever).
+function storeDistilledProfile(candidateId, result, fields) {
+  const { tagsFor } = require('../lib/profile-distiller');
+  try {
+    if (result && result.profile) {
+      data.updateCandidateProfile(candidateId, result.profile, tagsFor(fields, result.skillsCsv));
+    } else {
+      data.markCandidateProfileEmpty(candidateId);
+    }
+  } catch (err) {
+    console.error(`Error storing distilled profile for ${candidateId}:`, err.message);
+  }
+}
+
+// Distill freshly extracted CV text for an existing candidate. Never throws.
+async function distillResumeInBackground(candidateId, resumeText, candidate) {
+  try {
+    const { distillProfile } = require('../lib/profile-distiller');
+    const result = await distillProfile(resumeText, {
+      name: candidate.name,
+      email: candidate.email,
+      phone: candidate.phone,
+    });
+    storeDistilledProfile(candidateId, result, { skills: candidate.skills, role: candidate.role });
+  } catch (err) {
+    console.error(`Profile distillation failed for candidate ${candidateId}:`, err.message);
+    try { data.markCandidateProfileEmpty(candidateId); } catch (_) {}
+  }
+}
+
+// Fire-and-forget pipeline for a newly attached/replaced CV file:
+// extract text -> cache it -> distill it -> re-run request matching.
+// The order matters: updateCandidateResumeText clears the cached matches, so
+// matching has to run afterwards or the candidate is left with none.
+function processNewResumeInBackground(candidateId, filename, userId) {
+  if (!filename || !uploadsDir) return;
+  const { extractTextFromFile } = require('../lib/resume-parser');
+
+  extractTextFromFile(path.join(uploadsDir, filename)).then(async (text) => {
+    if (!text) {
+      // Nothing extractable (.doc, image-only scan, corrupt PDF). Record the
+      // attempt so the backfill loops don't re-parse this file forever.
+      data.markCandidateResumeUnextractable(candidateId);
+      return;
+    }
+
+    data.updateCandidateResumeText(candidateId, text);
+
+    const candidate = data.getCandidateById(candidateId, userId);
+    if (!candidate) return;
+
+    await distillResumeInBackground(candidateId, text, candidate);
+    await runCandidateRequestMatching(candidateId, candidate, userId).catch(e =>
+      console.error('Background request matching error:', e.message)
+    );
+  }).catch(err => console.error('Resume text extraction error:', err.message));
+}
+
+// POST /api/candidates/backfill-profiles - Distill CVs that predate this feature.
+//
+// Bounded batch per call, mirroring POST /api/inbox/extract-resumes: each
+// candidate costs one AI call, so the UI calls this repeatedly until `done`
+// instead of holding one request open while the whole library is distilled.
+router.post('/backfill-profiles', async (req, res) => {
+  try {
+    const userId = req.session.userId;
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ error: 'AI is not configured (ANTHROPIC_API_KEY missing)' });
+    }
+
+    const defaultLimit = Math.max(1, Number(process.env.PROFILE_BACKFILL_LIMIT) || 10);
+    const requested = Number(req.body?.limit ?? req.body?.batchSize);
+    const limit = Math.min(Math.max(1, requested || defaultLimit), 50);
+
+    const { backfillProfiles } = require('../lib/profile-distiller');
+    const { distilled, empty, remaining } = await backfillProfiles(userId, limit);
+
+    const parts = [`Distilled ${distilled} CV profile(s)`];
+    if (empty > 0) parts.push(`${empty} had nothing usable`);
+    if (remaining > 0) parts.push(`${remaining} still pending — click again to continue`);
+
+    res.json({
+      message: parts.filter(Boolean).join(' — '),
+      distilled,
+      empty,
+      remaining,
+      done: remaining === 0
+    });
+  } catch (err) {
+    console.error('Error backfilling candidate profiles:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/candidates/import-cvs - Bulk import with SSE progress streaming
 router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   const userId = req.session.userId;
@@ -720,7 +823,10 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   sendEvent({ type: 'start', total });
 
   const { extractTextFromFile } = require('../lib/resume-parser');
-  const { parseCV } = require('../lib/cv-parser');
+  // parseCVWithProfile, not parseCV: the same single AI call returns the
+  // contact fields AND the distilled profile, so importing 50 CVs still costs
+  // 50 AI calls rather than 100.
+  const { parseCVWithProfile } = require('../lib/cv-parser');
   let created = 0;
   let failed = 0;
   let merged = 0;
@@ -752,7 +858,10 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
 
       sendEvent({ ...progress, status: 'parsing' });
 
-      const parsed = await parseCV(resumeText);
+      const parsed = await parseCVWithProfile(resumeText);
+      const profileResult = parsed.profile
+        ? { profile: parsed.profile, skillsCsv: parsed.skillsCsv }
+        : null;
       if (!parsed.name) {
         failed++;
         sendEvent({ ...progress, status: 'skipped', error: 'Could not extract candidate name from CV' });
@@ -776,6 +885,14 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
         if (!dup.skills && parsed.skills) fill.skills = parsed.skills;
         if (!dup.phone && parsed.phone) fill.phone = parsed.phone;
         if (Object.keys(fill).length > 0) data.updateCandidate(dup.id, fill, userId);
+
+        // The merged profile describes the NEW CV, so it replaces the old one.
+        // Tags are built from the post-merge skills/role, not the parsed ones.
+        storeDistilledProfile(dup.id, profileResult, {
+          skills: dup.skills || parsed.skills,
+          role: dup.role || parsed.role,
+        });
+
         data.createCandidateComment(dup.id, 'CV uppdaterat via import (matchade befintlig e-postadress)', userId);
 
         merged++;
@@ -803,6 +920,10 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
       }, userId);
 
       data.updateCandidateResumeText(candidate.id, resumeText);
+      storeDistilledProfile(candidate.id, profileResult, {
+        skills: parsed.skills || '',
+        role: parsed.role || '',
+      });
       data.createCandidateComment(candidate.id, 'Automatiskt skapad via CV import', userId);
 
       created++;

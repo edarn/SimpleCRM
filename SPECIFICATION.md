@@ -252,7 +252,17 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      Double-click = edit text inline. x = remove. + = add new.
    - **Editable description**: Free-text description field.
    - **Save & Re-match**: Saves skill/description changes and triggers fresh
-     AI candidate matching in one click.
+     AI candidate matching in one click (fast mode — see section 19).
+   - **Full ommatchning (alla CV)**: a second button that scores the entire CV
+     library with full raw CV text, no prefilter and no cache, then shows a diff
+     against the previous match list. This is the verification run — use it to
+     confirm no candidate dropped out because of the fast path. Slower and more
+     expensive, so it asks for confirmation first. Both buttons save the current
+     skills/description before matching, so the result always reflects what is
+     on screen.
+   - While a match runs, the button row is replaced by a spinner and the job's
+     current stage; the page can be reloaded or opened by a teammate without
+     losing progress.
    - **Candidate matching scoring** (0–100):
      - Skills match: 50 points (all skills equal weight)
      - Priority bonus: 15 points (separate pool for **bold** skills only —
@@ -287,12 +297,20 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      the request's skills/role), not relative to the others in the call, so a
      candidate scores the same whichever chunk it lands in and merging is just
      concatenate-and-sort. Chunks run concurrently through the shared gate, so
-     matching also gets faster.
+     matching also gets faster. Chunk *contents* are also what the prompt cache
+     keys on — see section 19.
+   - **Cost and scale**: which candidates are sent, what text represents them,
+     and what is reused from a previous run are all covered in **section 19**
+     (distilled profiles, local prefilter, per-pair cache, and the two matching
+     modes including the "full rematch" verification run).
    - **Partial-failure safety**: `matchCandidates` returns
-     `{ matches, evaluatedIds }`, where `evaluatedIds` lists only candidates
-     actually scored. A chunk that fails (API error, unparseable reply) leaves
-     its candidates out, so `reconcileRequestMatches` **preserves** their
-     existing entries instead of reading "not returned" as "no longer matches".
+     `{ matches, evaluatedIds, stats }`, where `evaluatedIds` lists only
+     candidates whose score is known after this run (freshly scored **or** served
+     from cache). A chunk that fails (API error, unparseable reply) leaves its
+     candidates out, so `reconcileRequestMatches` **preserves** their existing
+     entries instead of reading "not returned" as "no longer matches". Candidates
+     removed by the prefilter are likewise never "evaluated", so turning the
+     prefilter on cannot delete an existing match.
 
 14. **CV Bulk Import**
    - "Import CVs" button on the Candidates tab opens a modal to upload
@@ -414,6 +432,91 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Back/forward buttons navigate between views correctly.
    - Deep-linking and bookmarking URLs works — reload restores the view.
    - Split-view contact clicks use replaceState to avoid history flooding.
+
+19. **Matching at Scale — distilled profiles, local prefilter, per-pair cache**
+
+   Matching used to send *every* candidate's raw CV (4000 chars each) to the AI
+   on *every* run, so both cost and wall-clock grew linearly with the roster:
+   ~375k input tokens at 300 candidates, ~1.25M at 1000. Four changes make the
+   cost of a match roughly independent of how large the CV library gets.
+
+   - **Distilled profiles (`candidates.profile_json`)**: a CV is distilled
+     **once**, when it is attached, into a compact structured profile
+     (`seniority`, `yearsExperience`, `primaryRole`, `domains`, `languages`,
+     `skills[{name, level, lastUsed}]`, `highlights`) — roughly 400 tokens
+     instead of ~1300 of raw CV. Matching reads that profile. Besides being ~3x
+     cheaper it tends to match *better*, because 4000 chars of raw CV is mostly
+     boilerplate (cover page, contact details, the most recent assignment)
+     rather than signal.
+     - `profile_status`: `'ok'` | `'empty'` (attempted, nothing usable) | `NULL`
+       (never attempted) — the same once-per-file discipline as
+       `resume_text_status`, so an undistillable CV is not retried forever.
+     - **No extra AI call on import**: the bulk importer's existing per-CV
+       `parseCV` round-trip was extended (`parseCVWithProfile`) to return the
+       contact fields *and* the profile from one call.
+     - **Privacy**: distillation runs on `scrubPII`'d text and the prompt forbids
+       emitting identifiers. The bulk-import path must send unscrubbed text (it
+       has to extract name/email/phone), so there the profile is re-scrubbed with
+       the identifiers that same call extracted before it is stored. See
+       `docs/DPIA-cv-import.md` §8.2.
+     - Candidates whose CV predates this feature are distilled by a bounded
+       backfill: automatically (10 per fast match run) or in bulk via
+       `POST /api/candidates/backfill-profiles`.
+
+   - **Local skill prefilter (`src/lib/skills.js`)**: canonical skill tags
+     (`candidates.skill_tags`) let the server pick the ~80 candidates
+     (`AI_MATCH_PREFILTER_LIMIT`) worth scoring, with no AI call. Version numbers
+     are stripped, aliases folded, and ecosystem members expanded — but
+     **asymmetrically**: the candidate side broadens (S3 ⇒ AWS ⇒ cloud) while the
+     request side is taken literally. Broadening requirements too would dilute
+     them until a React developer scored 50% on an Angular request through the
+     shared `frontend`/`javascript` tags.
+     - Three safety rules, because a filter false-negative is *invisible*:
+       a candidate with no tags yet is always kept; a candidate already on the
+       request's match list is always kept (`alwaysInclude`); and a request with
+       no recognizable skills disables the filter rather than matching nobody.
+
+   - **Per-pair result cache (`request_match_cache`)**: re-running a match no
+     longer re-scores pairs whose inputs are unchanged. Both fingerprints hash
+     the literal text sent to the model, so a new CV, an edited description or a
+     mode switch misses the cache by construction — there is no invalidation
+     logic that can go stale. Candidates the model scored *below* the rubric
+     threshold are cached with `score = null` ("known, not a match"); without
+     that one sub-threshold candidate would keep its whole chunk billable
+     forever.
+
+   - **Cache-friendly prompt order**: Anthropic's prompt cache is a prefix
+     match, so the big stable part must come first. The rubric (system) and the
+     candidate block now precede the request block, with the `cache_control`
+     breakpoint after the candidates. The previous request-first layout meant
+     the very first tokens changed whenever the description was edited, so the
+     cache could never hit at all. Chunk boundaries depend only on *which*
+     candidates are selected (id order, never prefilter score), and a chunk is
+     either skipped whole or sent whole — re-packing chunks out of only the
+     stale candidates would shift the boundaries and throw the cache away.
+
+   **Two matching modes** (`POST /api/requests/:id/rematch`):
+   | Mode | Pool | CV text | Cache | Use |
+   |---|---|---|---|---|
+   | `fast` (default) | prefiltered | distilled profile (raw CV as fallback) | read + write | Save & Re-match, AI-inbox request creation |
+   | `full` | entire library | raw CV, 4000 chars | bypassed both ways | Verification — "did anything drop out?" |
+
+   **Full rematch is a control measurement.** It deliberately reproduces the
+   pre-optimization behaviour so the result can be trusted as an independent
+   check, and reports a **diff** against the previously stored match list —
+   added, removed, and score changes of ≥5 — rather than just a new list. An
+   empty diff is the answer the user is looking for, so it is stated explicitly.
+   A partial chunk failure or an empty AI response is surfaced as a warning,
+   because in those cases "no differences" would not be a guarantee.
+
+   **Matching runs as a background job.** It used to run inline on the HTTP
+   request, which the browser survived at 300 candidates but would not at 1000.
+   `consultant_requests.match_status` / `match_stage` / `match_summary` hold the
+   job state; the UI polls `GET /api/requests/:id` with backoff and a generation
+   token. Starting a job goes through `claimRequestForMatching`, a conditional
+   `UPDATE` exactly one caller can win — a double-click or a second teammate
+   gets a `409` instead of a duplicate multi-minute AI job. A job orphaned by a
+   restart is flipped to `failed` on boot, as with inbox jobs.
 
 ### Non-Functional Requirements
 
@@ -609,6 +712,10 @@ CREATE TABLE candidates (
   resume_original_name TEXT DEFAULT '',
   resume_text TEXT DEFAULT '',
   resume_text_status TEXT,   -- 'ok' | 'empty' | NULL (never attempted); see section 16
+  profile_json TEXT,         -- distilled ~400-token structured profile; see section 19
+  profile_status TEXT,       -- 'ok' | 'empty' | NULL (never attempted)
+  skill_tags TEXT,           -- canonical skill tags used by the local prefilter
+  match_status TEXT,         -- candidate→request auto-match: 'pending' | 'done' | NULL
   request_matches TEXT DEFAULT '[]',
   team_id TEXT,
   created_by TEXT,
@@ -722,6 +829,9 @@ CREATE TABLE consultant_requests (
   urgency TEXT DEFAULT 'normal' CHECK (urgency IN ('low', 'normal', 'high', 'urgent')),
   status TEXT DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'filled', 'closed')),
   matched_candidates TEXT DEFAULT '[]',
+  match_status TEXT,          -- background matching job: 'running' | 'done' | 'failed' | NULL
+  match_stage TEXT,           -- human-readable progress while running
+  match_summary TEXT DEFAULT '{}',  -- JSON: mode, stats, and the diff vs the previous list
   email_inbox_id TEXT,
   team_id TEXT,
   created_by TEXT,
@@ -732,6 +842,29 @@ CREATE TABLE consultant_requests (
   FOREIGN KEY (created_by) REFERENCES users(id)
 )
 ```
+
+#### Request Match Cache Table
+```sql
+CREATE TABLE request_match_cache (
+  request_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,   -- sha256 of the request text sent to the AI (+ mode)
+  candidate_fingerprint TEXT NOT NULL, -- sha256 of the candidate summary sent to the AI
+  score INTEGER,
+  strengths TEXT DEFAULT '',
+  gaps TEXT DEFAULT '',
+  reasoning TEXT DEFAULT '',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (request_id, candidate_id),
+  FOREIGN KEY (request_id) REFERENCES consultant_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+)
+```
+A row records "for this (request, candidate) pair, with **these exact inputs**, the
+AI returned this score". Because both fingerprints hash the literal text sent to
+the model, any change on either side — a new CV, an edited description, or
+switching between fast and full mode — misses the cache automatically. There is
+no invalidation logic that can go stale.
 
 ### Field Descriptions
 
@@ -922,6 +1055,8 @@ VibeCodingProject/
 │   │   ├── resume-parser.js     # PDF/DOCX text extraction for resumes
 │   │   ├── candidate-matcher.js # AI-powered candidate-to-request matching
 │   │   ├── cv-parser.js         # AI-powered CV field extraction for bulk import
+│   │   ├── profile-distiller.js # Distils a CV into the compact matching profile (see §19)
+│   │   ├── skills.js            # Canonical skill vocabulary + local prefilter (see §19)
 │   │   └── security-logger.js   # Security event logging
 │   ├── middleware/
 │   │   ├── auth.js              # Authentication + team revalidation
@@ -1070,6 +1205,7 @@ VibeCodingProject/
 | GET | /api/candidates/:id/match-requests | Get cached request matches for candidate |
 | POST | /api/candidates/:id/match-requests | Run fresh AI matching against open requests |
 | POST | /api/candidates/import-cvs | Bulk import candidates from CV files (multipart) |
+| POST | /api/candidates/backfill-profiles | Distil one bounded batch of CVs into matching profiles; returns `{ distilled, empty, remaining, done }` (503 without `ANTHROPIC_API_KEY`) |
 
 ### Candidate Offers (Protected)
 
@@ -1114,7 +1250,7 @@ VibeCodingProject/
 | GET | /api/requests | List all consultant requests |
 | GET | /api/requests/:id | Get single request with enriched match details |
 | PUT | /api/requests/:id | Update request (status, skills, description) |
-| POST | /api/requests/:id/rematch | Re-run AI candidate matching |
+| POST | /api/requests/:id/rematch | Start AI candidate matching in the background. Body `{ mode: 'fast' \| 'full' }` (default `fast`). **202** on start, **409** if a run is already in flight, **404** if unknown. Poll `GET /api/requests/:id` → `matchState` |
 | POST | /api/requests/:id/send-eml | Generate Outlook draft with selected candidates |
 | PUT | /api/requests/:id/candidates/:candidateId/status | Set a sent candidate's client-response status (sent/declined/interview/accepted) |
 | DELETE | /api/requests/:id | Delete a request |
@@ -1142,7 +1278,9 @@ VibeCodingProject/
 | AI_MAX_RETRIES | SDK retries per call (429/529/network) | 2 |
 | AI_REQUEST_TIMEOUT_MS | Per-attempt Anthropic timeout | 60000 |
 | AI_MATCH_CHUNK_SIZE | Candidates scored per matching call | 40 |
+| AI_MATCH_PREFILTER_LIMIT | Max candidates the local prefilter sends to the AI per request (fast mode) | 80 |
 | RESUME_BACKFILL_LIMIT | Max CVs an email job extracts inline | 10 |
+| PROFILE_BACKFILL_LIMIT | Max CVs distilled into profiles per backfill batch | 10 |
 
 ### Railway Deployment
 

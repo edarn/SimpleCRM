@@ -6177,6 +6177,10 @@ We're looking for a senior Java developer..."></textarea>
     const statusColor = { open: 'bg-emerald-100 text-emerald-800', in_progress: 'bg-blue-100 text-blue-800', filled: 'bg-violet-100 text-violet-800', closed: 'bg-slate-100 text-slate-600' }[request.status] || 'bg-slate-100 text-slate-600';
     const urgencyLabel = { urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' }[request.urgency] || request.urgency;
 
+    // Background matching state: while a job runs the button row becomes a
+    // progress line, and a finished job leaves a diff summary behind.
+    const matchRunning = request.matchState?.status === 'running';
+
     container.innerHTML = `
       <div class="mb-6">
         <a href="#" onclick="router.navigate('requests'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
@@ -6221,15 +6225,24 @@ We're looking for a senior Java developer..."></textarea>
                     placeholder="Describe what's needed...">${this.escapeHtml(request.description || '')}</textarea>
         </div>
 
-        <div class="flex gap-2 mb-6">
+        <div id="rematch-row" class="flex gap-2 mb-6 items-center">
+          ${matchRunning ? this._matchProgressHtml(request.matchState, 0) : `
           <button onclick="views.saveAndRematchRequest('${request.id}')" id="rematch-btn"
                   class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm">
             Save &amp; Re-match
           </button>
+          <button onclick="views.fullRematchRequest('${request.id}')" id="full-rematch-btn"
+                  title="Poängsätter varje CV i hela biblioteket med fullständig CV-text, utan cache och utan förfiltrering — för att verifiera att ingen kandidat fallit bort på grund av optimeringarna. Långsam och kostar mer."
+                  class="border border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-800 px-4 py-2 rounded-lg transition-all font-medium text-sm">
+            Full ommatchning (alla CV)
+          </button>
           <button onclick="views.deleteRequest('${request.id}')"
                   class="text-red-500 hover:text-red-700 text-sm font-medium px-4 py-2">Delete Request</button>
+          `}
         </div>
       </div>
+
+      ${this._matchSummaryHtml(request)}
 
       <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
         <div class="flex items-center justify-between mb-4">
@@ -6293,6 +6306,10 @@ We're looking for a senior Java developer..."></textarea>
 
     // Initialize skill tags after DOM is set
     this.initSkillTags(request.requiredSkills);
+
+    // A job may already be running — started by this tab, another tab, or a
+    // teammate. Either way the view should follow it to completion.
+    if (matchRunning) this.pollRequestMatch(requestId);
   },
 
   async updateRequestStatus(requestId, status) {
@@ -6421,21 +6438,268 @@ We're looking for a senior Java developer..."></textarea>
   },
 
   async saveAndRematchRequest(requestId) {
-    const btn = document.getElementById('rematch-btn');
-    btn.disabled = true;
-    btn.textContent = 'Saving & matching...';
+    await this._startRematch(requestId, 'fast', 'rematch-btn', 'Save & Re-match');
+  },
+
+  // The expensive verification run: scores the entire CV library with full
+  // resume text and no cache, to prove nothing was lost to the prefilter or the
+  // distilled profiles. Confirmed first — it costs real money.
+  async fullRematchRequest(requestId) {
+    const ok = confirm(
+      'Full ommatchning poängsätter ALLA CV:n i biblioteket med fullständig CV-text, ' +
+      'utan cache och utan förfiltrering.\n\n' +
+      'Det tar flera minuter och kostar betydligt mer än en vanlig ommatchning. ' +
+      'Resultatet visas som en jämförelse mot nuvarande träfflista.\n\nKör ändå?'
+    );
+    if (!ok) return;
+    await this._startRematch(requestId, 'full', 'full-rematch-btn', 'Full ommatchning (alla CV)');
+  },
+
+  // Save the on-screen criteria, start the background job, then let the view
+  // re-render — requestDetail picks up the running state and starts polling.
+  // Both modes save first: matching against criteria the user can no longer see
+  // would make the diff meaningless.
+  async _startRematch(requestId, mode, btnId, btnLabel) {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = mode === 'full' ? 'Startar full ommatchning...' : 'Saving & matching...';
+    }
     try {
       await api.put(`/api/requests/${requestId}`, {
         requiredSkills: this.getSkillsString(),
         description: document.getElementById('req-desc-input').value.trim()
       });
-      await api.post(`/api/requests/${requestId}/rematch`);
+      await this._postRematch(requestId, mode);
       await this.requestDetail(document.getElementById('app'), requestId);
     } catch (err) {
       alert('Error: ' + err.message);
-      btn.disabled = false;
-      btn.textContent = 'Save & Re-match';
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = btnLabel;
+      }
     }
+  },
+
+  // POST the job. A 409 means someone (another tab, a teammate, a double-click)
+  // already owns this match — that is not an error, we just watch theirs.
+  async _postRematch(requestId, mode) {
+    const res = await fetch(`/api/requests/${requestId}/rematch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    if (res.status === 401) {
+      auth.showLoginModal();
+      throw new Error('Authentication required');
+    }
+    if (res.status === 409) return { alreadyRunning: true };
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body && body.error) message = body.error;
+      } catch (_) { /* non-JSON error body */ }
+      throw new Error(message);
+    }
+    return res.json();
+  },
+
+  // Token identifying the poll loop that currently "owns" the request detail
+  // view, so a stale loop exits instead of racing a newer one for the same DOM.
+  _requestMatchPollToken: 0,
+
+  // Poll a request's matching job until it leaves 'running'. Same shape as the
+  // inbox poller: no attempt cap (a full rematch over the whole library is
+  // genuinely slow), backoff to keep the request rate low, stop when the user
+  // navigates away, and a hard safety stop so a lost job can't spin forever.
+  async pollRequestMatch(requestId) {
+    const token = ++this._requestMatchPollToken;
+    const startedAt = Date.now();
+    const MAX_WAIT_MS = 15 * 60 * 1000;
+
+    const delayFor = (elapsed) => {
+      if (elapsed < 30000) return 2000;   // first 30s — user is watching
+      if (elapsed < 120000) return 4000;  // next 90s
+      return 8000;                        // long tail
+    };
+
+    const poll = async () => {
+      // Stale loop, or the user left this request's detail view.
+      if (token !== this._requestMatchPollToken) return;
+      if (router.currentRoute?.route !== 'request-detail' ||
+          router.currentRoute?.params?.id !== requestId) return;
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > MAX_WAIT_MS) {
+        this._renderMatchStalled(requestId);
+        return;
+      }
+
+      try {
+        const request = await api.get(`/api/requests/${requestId}`);
+        if (token !== this._requestMatchPollToken) return;
+
+        if (request.matchState?.status !== 'running') {
+          // done or failed — full re-render shows the new list and the diff.
+          await this.requestDetail(document.getElementById('app'), requestId);
+          return;
+        }
+        // Still running — refresh just the progress line, not the whole view,
+        // so we don't fight the user's scroll position every few seconds.
+        this._renderMatchProgress(request.matchState, elapsed);
+        setTimeout(poll, delayFor(elapsed));
+      } catch (err) {
+        if (token !== this._requestMatchPollToken) return;
+        // Transient (429, blip, server restart) — keep waiting, slower.
+        setTimeout(poll, Math.max(4000, delayFor(elapsed)));
+      }
+    };
+
+    setTimeout(poll, 1500);
+  },
+
+  _matchProgressHtml(matchState, elapsedMs) {
+    const stage = (matchState && matchState.stage) || 'Matchar…';
+    const secs = Math.round((elapsedMs || 0) / 1000);
+    const elapsedText = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    return `
+      <div class="flex items-center gap-3">
+        <span class="inline-block w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin shrink-0"></span>
+        <div>
+          <div class="text-sm font-medium text-violet-800">${this.escapeHtml(stage)}</div>
+          <div class="text-xs text-violet-500 mt-0.5">
+            ${secs > 0 ? `Pågår i ${elapsedText}. ` : ''}En full ommatchning kan ta flera minuter — du kan lämna sidan, arbetet fortsätter.
+          </div>
+        </div>
+      </div>`;
+  },
+
+  _renderMatchProgress(matchState, elapsedMs) {
+    const el = document.getElementById('rematch-row');
+    if (!el) return;
+    el.innerHTML = this._matchProgressHtml(matchState, elapsedMs);
+  },
+
+  _renderMatchStalled(requestId) {
+    const el = document.getElementById('rematch-row');
+    if (!el) return;
+    el.innerHTML = `
+      <div class="text-sm text-amber-700">
+        Matchningen svarar inte längre. Den kan fortfarande köra i bakgrunden —
+        <a href="#" onclick="views.requestDetail(document.getElementById('app'), '${requestId}'); return false;"
+           class="text-violet-600 hover:text-violet-700 font-medium">uppdatera sidan</a>.
+      </div>`;
+  },
+
+  // Summaries the user has clicked away, keyed by request + finish time so a
+  // later run shows its own result again.
+  _dismissedMatchSummaries: {},
+
+  dismissMatchSummary(key) {
+    this._dismissedMatchSummaries[key] = true;
+    const el = document.getElementById('match-summary-panel');
+    if (el) el.remove();
+  },
+
+  // The diff panel: what a re-match actually changed. For a full rematch an
+  // empty diff is the whole point, so say so plainly instead of showing nothing.
+  _matchSummaryHtml(request) {
+    const state = request.matchState;
+    if (!state || state.status === 'running' || !state.status) return '';
+
+    const s = state.summary || {};
+    // Sanitized: this key is interpolated into an inline onclick string.
+    const key = `${request.id}:${s.finishedAt || state.status}`.replace(/[^\w:.-]/g, '');
+    if (this._dismissedMatchSummaries[key]) return '';
+
+    const dismissBtn = `
+      <button onclick="views.dismissMatchSummary('${this.escapeHtml(key)}')"
+              class="text-slate-400 hover:text-slate-600 text-lg leading-none px-2" title="Dölj">&times;</button>`;
+
+    if (state.status === 'failed') {
+      return `
+      <div id="match-summary-panel" class="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+        <div class="flex items-start justify-between">
+          <div>
+            <div class="text-sm font-semibold text-red-800">Matchningen misslyckades</div>
+            <div class="text-sm text-red-600 mt-1">${this.escapeHtml(s.error || 'Okänt fel')}</div>
+          </div>
+          ${dismissBtn}
+        </div>
+      </div>`;
+    }
+
+    const added = s.added || [];
+    const removed = s.removed || [];
+    const scoreChanged = s.scoreChanged || [];
+    const stats = s.stats || {};
+    const isFull = s.mode === 'full';
+    const label = isFull ? 'Full ommatchning' : 'Ommatchning';
+    const scored = stats.scored != null ? stats.scored : (stats.selected != null ? stats.selected : 0);
+    const hasDiff = added.length > 0 || removed.length > 0 || scoreChanged.length > 0;
+
+    // A partial failure means we did not actually compare everything — say so,
+    // otherwise "inga skillnader" reads as a guarantee it isn't.
+    const warnings = [];
+    if (stats.failedChunks) {
+      warnings.push(`${stats.failedChunks} delkörning(ar) misslyckades — jämförelsen är ofullständig och kan sakna kandidater.`);
+    }
+    if (s.noMatchesReturned) {
+      warnings.push('AI:n returnerade inga träffar alls. Den befintliga träfflistan har lämnats orörd — kör gärna igen.');
+    }
+    const warningHtml = warnings.length === 0 ? '' : `
+      <div class="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">
+        ${warnings.map(w => `<div>⚠ ${this.escapeHtml(w)}</div>`).join('')}
+      </div>`;
+
+    const nameList = (items, cls) => items.map(i => `
+      <a href="#" onclick="router.navigate('candidate-detail', {id: '${i.candidateId}'}); return false;"
+         class="inline-block ${cls} text-xs px-2 py-0.5 rounded-full mr-1 mb-1 hover:underline">
+        ${this.escapeHtml(i.name || 'Unknown')}${Number.isFinite(Number(i.score)) ? ` ${Number(i.score)}%` : ''}
+      </a>`).join('');
+
+    const statsLine = [
+      stats.pool != null ? `${stats.pool} i poolen` : null,
+      `${scored} poängsatta`,
+      stats.cacheHits ? `${stats.cacheHits} från cache` : null,
+      stats.dropped ? `${stats.dropped} bortfiltrerade` : null,
+      stats.pinned ? `${stats.pinned} fastnålade` : null
+    ].filter(Boolean).join(' · ');
+
+    const body = !hasDiff ? `
+      <div class="text-sm text-emerald-700 mt-1">
+        ${this.escapeHtml(`${label}: inga skillnader — ${scored} kandidater poängsatta.`)}
+        ${isFull ? ' Träfflistan är alltså komplett; ingen kandidat har fallit bort.' : ''}
+      </div>` : `
+      <div class="mt-2 space-y-2">
+        ${added.length ? `<div class="text-sm"><span class="font-medium text-emerald-700">Tillkomna (${added.length}):</span><div class="mt-1">${nameList(added, 'bg-emerald-100 text-emerald-800')}</div></div>` : ''}
+        ${removed.length ? `<div class="text-sm"><span class="font-medium text-red-700">Borttagna (${removed.length}):</span><div class="mt-1">${nameList(removed, 'bg-red-100 text-red-700')}</div></div>` : ''}
+        ${scoreChanged.length ? `<div class="text-sm"><span class="font-medium text-slate-700">Ändrad poäng (${scoreChanged.length}):</span>
+          <div class="mt-1 text-slate-600">${scoreChanged.map(c => `
+            <span class="inline-block bg-slate-100 text-xs px-2 py-0.5 rounded-full mr-1 mb-1">
+              ${this.escapeHtml(c.name || 'Unknown')} ${c.from}% → ${c.to}%
+            </span>`).join('')}</div></div>` : ''}
+      </div>`;
+
+    const panelCls = hasDiff
+      ? 'bg-violet-50 border-violet-200'
+      : 'bg-emerald-50 border-emerald-200';
+
+    return `
+      <div id="match-summary-panel" class="${panelCls} border rounded-xl p-4 mb-6">
+        <div class="flex items-start justify-between">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold text-slate-800">
+              ${this.escapeHtml(label)}${hasDiff ? ' — resultat' : ' klar'}
+            </div>
+            ${body}
+            ${statsLine ? `<div class="text-xs text-slate-400 mt-2">${this.escapeHtml(statsLine)}</div>` : ''}
+            ${warningHtml}
+          </div>
+          ${dismissBtn}
+        </div>
+      </div>`;
   },
 
   async sendSelectedCandidates(requestId) {

@@ -86,7 +86,9 @@ try {
     const mod = await import(pathToFileURL(checksPath).href);
     const run = mod.default || mod.run;
     if (typeof run !== 'function') throw new Error('smoke.checks.mjs must export a default async function');
-    await run({ api, check, log, BASE });
+    // dbPath lets checks seed rows the API has no create endpoint for
+    // (consultant requests are only ever created by the AI inbox).
+    await run({ api, check, log, BASE, dbPath: join(dbDir, 'crm.db') });
   } else {
     console.log('(no scripts/smoke.checks.mjs found — only verified the server boots)');
   }

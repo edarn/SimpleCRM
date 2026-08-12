@@ -443,7 +443,7 @@ module.exports = function(uploadsDir) {
         description: request.description,
         requiredSkills: request.requiredSkills,
         role: request.role
-      }, candidates));
+      }, candidates, { mode: 'fast', requestId: request.id }));
     }
 
     // Merge instead of overwrite: preserves any candidate that inserted itself

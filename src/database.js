@@ -592,6 +592,69 @@ function migrateExistingData() {
     console.log('resume_text_status backfill error:', err.message);
   }
 
+  // ---- Distilled candidate profiles + canonical skill tags -----------------
+  // Matching used to send every candidate's raw CV (4000 chars each) to the AI
+  // on every run, so cost grew linearly with the roster. `profile_json` holds a
+  // compact structured profile distilled ONCE when the CV is attached (~400
+  // tokens instead of ~1300), and `skill_tags` holds the canonical tag string
+  // the local prefilter uses to decide who is worth sending at all.
+  //
+  // `profile_status` mirrors the resume_text_status idiom: 'ok' = distilled,
+  // 'empty' = attempted but nothing usable, NULL = never attempted (the
+  // backfill keys off NULL so a permanently-undistillable CV is not retried
+  // forever).
+  addColumnIfNotExists('candidates', 'profile_json', 'TEXT DEFAULT NULL');
+  addColumnIfNotExists('candidates', 'profile_status', 'TEXT DEFAULT NULL');
+  addColumnIfNotExists('candidates', 'skill_tags', 'TEXT DEFAULT NULL');
+
+  // ---- Request-side matching job state -------------------------------------
+  // Matching a request is a multi-minute AI job. It used to run inline on the
+  // HTTP request, which meant the browser held an open POST for the duration —
+  // survivable at 300 candidates, not at 1000, and impossible for the "full
+  // rematch" diagnostic that deliberately scores the whole pool. These columns
+  // let the job run in the background while the UI polls, exactly like the
+  // inbox jobs do.
+  //   match_status: 'running' | 'done' | 'failed' | NULL (never run)
+  //   match_stage:  human-readable progress, e.g. 'Poängsätter 3/8'
+  //   match_summary: JSON — mode, counts, and the diff vs the previous list
+  addColumnIfNotExists('consultant_requests', 'match_status', 'TEXT DEFAULT NULL');
+  addColumnIfNotExists('consultant_requests', 'match_stage', 'TEXT DEFAULT NULL');
+  addColumnIfNotExists('consultant_requests', 'match_summary', "TEXT DEFAULT '{}'");
+
+  // ---- Per-pair match cache ------------------------------------------------
+  // Re-matching a request used to re-score every candidate from scratch even
+  // when nothing about the candidate OR the request had changed — which is the
+  // common case when you tweak a description and click "Save & Re-match".
+  //
+  // A row here says: "for this (request, candidate) pair, with THESE exact
+  // inputs, the AI returned this score". Both fingerprints are hashes of the
+  // literal text sent to the model, so any change to either side — a new CV, an
+  // edited description, or switching between fast and full mode — misses the
+  // cache automatically. There is no invalidation logic to get wrong.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS request_match_cache (
+      request_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      candidate_fingerprint TEXT NOT NULL,
+      score INTEGER,
+      strengths TEXT DEFAULT '',
+      gaps TEXT DEFAULT '',
+      reasoning TEXT DEFAULT '',
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (request_id, candidate_id),
+      FOREIGN KEY (request_id) REFERENCES consultant_requests(id) ON DELETE CASCADE,
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+    )
+  `);
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_request_match_cache_request ON request_match_cache(request_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_request_match_cache_candidate ON request_match_cache(candidate_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_candidates_profile_status ON candidates(profile_status)`);
+  } catch (err) {
+    console.log('match cache index error:', err.message);
+  }
+
   // Coarse progress marker for a running inbox job ('classifying',
   // 'extracting_resumes', 'matching', 'executing'). `status` alone covers a
   // multi-minute span with no feedback, which reads as a hung page.
@@ -629,6 +692,24 @@ function migrateExistingData() {
     }
   } catch (err) {
     console.log('Candidate match-status recovery error:', err.message);
+  }
+  try {
+    // Request-side matching jobs orphaned by a restart. Same reasoning as the
+    // inbox recovery above: the promise is gone but the row would otherwise say
+    // 'running' forever, and the single-writer claim would refuse to start a
+    // new run. Flip to 'failed' so the UI shows it and the user can re-run.
+    const staleMatches = db.prepare(`
+      UPDATE consultant_requests
+      SET match_status = 'failed',
+          match_stage = NULL,
+          match_summary = json_object('error', 'Matchningen avbröts av en serveromstart. Kör om.')
+      WHERE match_status = 'running'
+    `).run();
+    if (staleMatches.changes > 0) {
+      console.log(`Recovered ${staleMatches.changes} consultant request(s) stuck in 'running' match status after restart`);
+    }
+  } catch (err) {
+    console.log('Request match-status recovery error:', err.message);
   }
 
   // Find the first user to assign orphaned data to

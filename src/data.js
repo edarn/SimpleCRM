@@ -2459,25 +2459,171 @@ function updateCandidateRequestMatches(candidateId, matches) {
   db.prepare('UPDATE candidates SET request_matches = ? WHERE id = ?').run(JSON.stringify(matches), candidateId);
 }
 
+// The candidate pool a request is matched against.
+//
+// ORDER BY c.id is load-bearing, not cosmetic: the matcher chunks this list and
+// relies on chunk contents being byte-identical between runs for the Anthropic
+// prompt cache to hit. An unordered SELECT would reshuffle chunk boundaries and
+// silently turn every cached run back into a full-price one.
+//
+// Also returns the distilled profile and canonical skill tags, which are what
+// the fast path actually sends and filters on.
 function getCandidatesWithResumes(userId) {
   const teamId = getUserTeamId(userId);
-  let rows;
-  if (teamId) {
-    rows = db.prepare(`
-      SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone
-      FROM candidates c
-      WHERE c.team_id = ? AND c.category IN ('in_progress', 'employed_no_assignment', 'contact_later')
-        AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
-    `).all(teamId);
-  } else {
-    rows = db.prepare(`
-      SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone
-      FROM candidates c
-      WHERE c.created_by = ? AND c.category IN ('in_progress', 'employed_no_assignment', 'contact_later')
-        AND (c.resume_text IS NOT NULL AND c.resume_text != '' OR c.skills != '')
-    `).all(userId);
-  }
+  const scope = teamId ? 'c.team_id = ?' : 'c.created_by = ?';
+  const rows = db.prepare(`
+    SELECT c.id, c.name, c.role, c.skills, c.resume_text, c.email, c.phone,
+           c.profile_json, c.profile_status, c.skill_tags, c.updated_at
+    FROM candidates c
+    WHERE ${scope} AND c.category IN ('in_progress', 'employed_no_assignment', 'contact_later')
+      AND ((c.resume_text IS NOT NULL AND c.resume_text != '') OR c.skills != '')
+    ORDER BY c.id
+  `).all(teamId || userId);
   return rows.map(toCamelCase);
+}
+
+// ============ Distilled candidate profiles ============
+
+// Store the distilled profile + canonical skill tags produced once per CV.
+// Deliberately does NOT touch resume_text or request_matches — distillation is
+// a derived artefact of text that has already been cached.
+function updateCandidateProfile(candidateId, profileJson, skillTags) {
+  db.prepare(`
+    UPDATE candidates
+    SET profile_json = ?, profile_status = 'ok', skill_tags = ?
+    WHERE id = ?
+  `).run(
+    typeof profileJson === 'string' ? profileJson : JSON.stringify(profileJson || {}),
+    skillTags || '',
+    candidateId
+  );
+}
+
+// Distillation was attempted and produced nothing usable. Same purpose as
+// markCandidateResumeUnextractable: stop the backfill retrying it forever.
+function markCandidateProfileEmpty(candidateId) {
+  db.prepare("UPDATE candidates SET profile_status = 'empty' WHERE id = ?").run(candidateId);
+}
+
+function countCandidatesNeedingProfile(userId) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'team_id = ?' : 'created_by = ?';
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM candidates
+    WHERE ${scope} AND profile_status IS NULL
+      AND ((resume_text IS NOT NULL AND resume_text != '') OR skills != '')
+  `).get(teamId || userId);
+  return row?.n || 0;
+}
+
+// Candidates with cached CV text but no distilled profile yet — i.e. everything
+// that predates this feature. Bounded by `limit` because distillation is an AI
+// call per candidate.
+function getCandidatesNeedingProfile(userId, limit) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'c.team_id = ?' : 'c.created_by = ?';
+  const rows = db.prepare(`
+    SELECT c.id, c.name, c.email, c.phone, c.role, c.skills, c.resume_text
+    FROM candidates c
+    WHERE ${scope} AND c.profile_status IS NULL
+      AND ((c.resume_text IS NOT NULL AND c.resume_text != '') OR c.skills != '')
+    ORDER BY c.id
+    LIMIT ?
+  `).all(teamId || userId, limit);
+  return rows.map(toCamelCase);
+}
+
+// ============ Request match cache (per candidate↔request pair) ============
+
+// Cached scores for this request, keyed by candidate id. The caller compares
+// the stored fingerprints against freshly computed ones and only reuses a row
+// when both sides are unchanged — so staleness is impossible by construction
+// rather than by remembering to invalidate.
+function getRequestMatchCache(requestId) {
+  const rows = db.prepare('SELECT * FROM request_match_cache WHERE request_id = ?').all(requestId);
+  const byCandidate = new Map();
+  for (const r of rows) byCandidate.set(r.candidate_id, toCamelCase(r));
+  return byCandidate;
+}
+
+// Upsert one scored pair. Written inside a transaction by the caller.
+const putRequestMatchCacheEntry = db.transaction((requestId, entries) => {
+  const stmt = db.prepare(`
+    INSERT INTO request_match_cache
+      (request_id, candidate_id, request_fingerprint, candidate_fingerprint,
+       score, strengths, gaps, reasoning, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(request_id, candidate_id) DO UPDATE SET
+      request_fingerprint = excluded.request_fingerprint,
+      candidate_fingerprint = excluded.candidate_fingerprint,
+      score = excluded.score,
+      strengths = excluded.strengths,
+      gaps = excluded.gaps,
+      reasoning = excluded.reasoning,
+      created_at = excluded.created_at
+  `);
+  const now = getTimestamp();
+  for (const e of entries) {
+    stmt.run(
+      requestId, e.candidateId, e.requestFingerprint, e.candidateFingerprint,
+      e.score == null ? null : Math.round(e.score),
+      e.strengths || '', e.gaps || '', e.reasoning || '', now
+    );
+  }
+});
+
+function saveRequestMatchCache(requestId, entries) {
+  if (!entries || entries.length === 0) return;
+  putRequestMatchCacheEntry(requestId, entries);
+}
+
+function clearRequestMatchCache(requestId) {
+  db.prepare('DELETE FROM request_match_cache WHERE request_id = ?').run(requestId);
+}
+
+// ============ Request-side matching job state ============
+
+// Single-writer claim, same pattern as claimInboxEmailForProcessing: a
+// conditional UPDATE that exactly one caller can win. Without it, two teammates
+// (or one double-click) would run the same multi-minute AI job twice and burn
+// double the tokens racing to write the same list.
+function claimRequestForMatching(requestId, userId, mode) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return { error: 'not_found' };
+
+  const result = db.prepare(`
+    UPDATE consultant_requests
+    SET match_status = 'running', match_stage = ?, match_summary = ?
+    WHERE id = ? AND (match_status IS NULL OR match_status IN ('done', 'failed'))
+  `).run('Förbereder', JSON.stringify({ mode, startedAt: getTimestamp() }), requestId);
+
+  if (result.changes === 0) return { error: 'already_running' };
+  return { claimed: true, request };
+}
+
+function setRequestMatchStage(requestId, stage) {
+  db.prepare('UPDATE consultant_requests SET match_stage = ? WHERE id = ?').run(stage, requestId);
+}
+
+function finishRequestMatching(requestId, status, summary) {
+  db.prepare(`
+    UPDATE consultant_requests
+    SET match_status = ?, match_stage = NULL, match_summary = ?
+    WHERE id = ?
+  `).run(status, JSON.stringify(summary || {}), requestId);
+}
+
+function getRequestMatchState(requestId, userId) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId ? 'team_id = ?' : 'created_by = ?';
+  const row = db.prepare(`
+    SELECT match_status, match_stage, match_summary
+    FROM consultant_requests WHERE id = ? AND ${scope}
+  `).get(requestId, teamId || userId);
+  if (!row) return null;
+  let summary = {};
+  try { summary = JSON.parse(row.match_summary || '{}'); } catch (_) { summary = {}; }
+  return { status: row.match_status, stage: row.match_stage, summary };
 }
 
 module.exports = {
@@ -2622,5 +2768,20 @@ module.exports = {
   removeCandidateFromRequestMatches,
   reconcileRequestMatches,
   setRequestCandidateStatus,
-  getCandidatesWithResumes
+  getCandidatesWithResumes,
+
+  // Distilled candidate profiles
+  updateCandidateProfile,
+  markCandidateProfileEmpty,
+  countCandidatesNeedingProfile,
+  getCandidatesNeedingProfile,
+
+  // Request match cache + job state
+  getRequestMatchCache,
+  saveRequestMatchCache,
+  clearRequestMatchCache,
+  claimRequestForMatching,
+  setRequestMatchStage,
+  finishRequestMatching,
+  getRequestMatchState
 };
