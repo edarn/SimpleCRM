@@ -362,9 +362,22 @@ router.post('/import', (req, res) => {
         const newId = data.generateId();
         candidateIdMap.set(candidate.id, newId);
 
+        // resume_text / profile_json / skill_tags are derived from the CV but
+        // are NOT cheap to rebuild: re-extracting is CPU-bound and re-distilling
+        // is an AI call per candidate. Dropping them on import (as this used to)
+        // meant a restore silently cost a full re-extraction and re-distillation
+        // of the whole library. They carry no foreign ids, so they restore
+        // verbatim.
+        //
+        // request_matches and match_status are deliberately NOT restored: they
+        // reference consultant_request ids that are remapped during import, so
+        // restoring them would point at the wrong requests. They rebuild on the
+        // next match.
         db.prepare(`
-          INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name,
+                                  resume_text, resume_text_status, profile_json, profile_status, skill_tags,
+                                  team_id, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           newId,
           candidate.name,
@@ -375,6 +388,11 @@ router.post('/import', (req, res) => {
           candidate.category || 'in_progress',
           candidate.resume_filename || '',
           candidate.resume_original_name || '',
+          candidate.resume_text || '',
+          candidate.resume_text_status || null,
+          candidate.profile_json || null,
+          candidate.profile_status || null,
+          candidate.skill_tags || null,
           teamId,
           userId,
           candidate.created_at || now,
@@ -566,10 +584,14 @@ router.post('/import-zip', backupUpload.single('backup'), async (req, res) => {
       for (const candidate of importData.data.candidates || []) {
         const newId = data.generateId();
         candidateIdMap.set(candidate.id, newId);
+        // See the ZIP import above for why resume_text/profile_json/skill_tags
+        // are restored and request_matches/match_status deliberately are not.
         db.prepare(`
-          INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(newId, candidate.name, candidate.email || '', candidate.phone || '', candidate.role || '', candidate.skills || '', candidate.category || 'in_progress', candidate.resume_filename || '', candidate.resume_original_name || '', teamId, userId, candidate.created_at || now, now);
+          INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name,
+                                  resume_text, resume_text_status, profile_json, profile_status, skill_tags,
+                                  team_id, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(newId, candidate.name, candidate.email || '', candidate.phone || '', candidate.role || '', candidate.skills || '', candidate.category || 'in_progress', candidate.resume_filename || '', candidate.resume_original_name || '', candidate.resume_text || '', candidate.resume_text_status || null, candidate.profile_json || null, candidate.profile_status || null, candidate.skill_tags || null, teamId, userId, candidate.created_at || now, now);
       }
 
       // Import todos

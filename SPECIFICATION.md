@@ -143,6 +143,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      `matched_candidates` candidate ids, offer/comment/file candidate ids,
      todo/note links, checklist links, and request→inbox links. Backup versions
      1, 2 and 3 are all accepted (older versions simply lack the newer sections).
+     - **Derived CV artefacts are restored**: `resume_text`,
+       `resume_text_status`, `profile_json`, `profile_status` and `skill_tags`
+       come back verbatim. They carry no foreign ids, and rebuilding them is
+       expensive — CPU-bound text extraction plus one AI call per candidate — so
+       dropping them (as the import used to) made every restore silently cost a
+       full re-extraction and re-distillation of the library.
+     - **`request_matches` and `match_status` are deliberately NOT restored**:
+       they reference consultant-request ids that the import remaps, so
+       restoring them would point at the wrong requests. They rebuild on the
+       next match.
    - **Download Full Database (disaster recovery)**: a one-click, consistent
      snapshot of the *entire* SQLite database (every table — users, teams,
      sessions, all of the above) via better-sqlite3's online backup. Restoring it
