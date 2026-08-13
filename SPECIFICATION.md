@@ -60,6 +60,16 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
 5. **Candidate Management**
    - Separate tab for managing job candidates (independent from contacts)
    - Candidate fields: name, email, phone, role, skills
+   - **Underkonsult (subcontractor)**: a checkbox on the candidate form marking
+     someone as engaged via their own company or a subcontractor rather than as
+     a candidate for employment. Deliberately separate from `category`, which
+     tracks *where in the process* someone is — the two vary independently (a
+     subcontractor can be In Progress, Anställd utan uppdrag, or anything else).
+     Shown as a green **Underkonsult** badge wherever candidates are listed —
+     the candidates list, the candidate detail header, and a request's matched
+     candidates. An ordinary employment candidate renders **nothing at all**:
+     the absence is the signal, so the lists stay quiet and the badge only
+     appears where it means something.
    - **Duplicate prevention (email)**: Creating a candidate whose email already
      belongs to another candidate in scope (the whole team for team users, the
      user's own candidates for solo users; case-insensitive) is blocked with a
@@ -788,6 +798,7 @@ CREATE TABLE candidates (
   resume_original_name TEXT DEFAULT '',
   resume_text TEXT DEFAULT '',
   resume_text_status TEXT,   -- 'ok' | 'empty' | NULL (never attempted); see section 16
+  is_subcontractor INTEGER DEFAULT 0,  -- 1 = underkonsult; independent of category
   profile_json TEXT,         -- distilled ~400-token structured profile; see section 19
   profile_status TEXT,       -- 'ok' | 'empty' | NULL (never attempted)
   skill_tags TEXT,           -- canonical skill tags used by the local prefilter

@@ -10,6 +10,16 @@ function fixOriginalName(file) {
   return Buffer.from(file.originalname, 'latin1').toString('utf8');
 }
 
+// Checkbox values arrive as strings through multipart/form-data, where the
+// string "false" is truthy. Returns undefined when the field was not sent at
+// all, so an update that omits it leaves the stored value alone.
+function toBool(v) {
+  if (v === undefined || v === null || v === '') return undefined;
+  if (typeof v === 'boolean') return v;
+  const s = String(v).toLowerCase();
+  return s === 'true' || s === '1' || s === 'on' || s === 'yes';
+}
+
 module.exports = function(upload, uploadsDir) {
   const router = express.Router();
 
@@ -139,6 +149,8 @@ router.post('/', upload.single('resume'), (req, res) => {
 
     const userId = req.session.userId;
     const { name, email, phone, role, skills, category } = req.body;
+    // Multipart bodies arrive as strings, so "false" would be truthy.
+    const isSubcontractor = toBool(req.body.isSubcontractor);
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Candidate name is required' });
@@ -175,6 +187,7 @@ router.post('/', upload.single('resume'), (req, res) => {
         role,
         skills,
         category,
+        isSubcontractor,
         resumeFilename,
         resumeOriginalName
       }, userId);
@@ -221,6 +234,8 @@ router.put('/:id', upload.single('resume'), (req, res) => {
 
     const userId = req.session.userId;
     const { name, email, phone, role, skills, category } = req.body;
+    // Multipart bodies arrive as strings, so "false" would be truthy.
+    const isSubcontractor = toBool(req.body.isSubcontractor);
 
     if (name !== undefined && !name.trim()) {
       return res.status(400).json({ error: 'Candidate name cannot be empty' });
@@ -267,6 +282,7 @@ router.put('/:id', upload.single('resume'), (req, res) => {
       role,
       skills,
       category,
+      isSubcontractor,
       resumeFilename,
       resumeOriginalName
     }, userId);

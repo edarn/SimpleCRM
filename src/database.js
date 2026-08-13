@@ -607,6 +607,12 @@ function migrateExistingData() {
   addColumnIfNotExists('candidates', 'profile_status', 'TEXT DEFAULT NULL');
   addColumnIfNotExists('candidates', 'skill_tags', 'TEXT DEFAULT NULL');
 
+  // Subcontractor flag. Distinct from `category`, which tracks where someone is
+  // in the process — this is what kind of engagement they are for, and the two
+  // vary independently (a subcontractor can be in_progress, employed, or
+  // anything else). 0 = ordinary employment candidate, 1 = subcontractor.
+  addColumnIfNotExists('candidates', 'is_subcontractor', 'INTEGER DEFAULT 0');
+
   // ---- Request-side matching job state -------------------------------------
   // Matching a request is a multi-minute AI job. It used to run inline on the
   // HTTP request, which meant the browser held an open POST for the duration —

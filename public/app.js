@@ -3665,6 +3665,16 @@ const views = {
     return colors[category] || 'bg-slate-100 text-slate-500';
   },
 
+  // Subcontractor marker. Deliberately renders NOTHING for an ordinary
+  // employment candidate — the absence is the signal, so the lists stay quiet
+  // and the badge only appears where it means something.
+  _subcontractorBadge(candidate, extraCls = '') {
+    const isSub = candidate && (candidate.isSubcontractor || candidate.candidateIsSubcontractor);
+    if (!isSub) return '';
+    return `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 whitespace-nowrap ${extraCls}"
+                  title="Underkonsult — anlitas via eget bolag eller underleverantör">Underkonsult</span>`;
+  },
+
   renderCandidateRows(candidates) {
     const categoryLabels = this._candidateCategories;
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
@@ -3681,7 +3691,10 @@ const views = {
       return `
       <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" data-candidate-id="${c.id}" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
         <td class="px-6 py-3">
-          <div class="font-medium text-slate-800">${this.escapeHtml(c.name)}</div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-medium text-slate-800">${this.escapeHtml(c.name)}</span>
+            ${this._subcontractorBadge(c)}
+          </div>
           ${c.skills ? `<div class="text-xs text-slate-400 mt-0.5 truncate max-w-md">${this.escapeHtml(c.skills)}</div>` : ''}
         </td>
         <td class="px-6 py-3 whitespace-nowrap text-slate-600" data-label="Role">${this.escapeHtml(c.role || '-')}</td>
@@ -3860,7 +3873,10 @@ const views = {
           <div>
             <h2 class="text-xl sm:text-2xl font-bold text-slate-800">${this.escapeHtml(candidate.name)}</h2>
             ${candidate.role ? `<p class="text-slate-600">${this.escapeHtml(candidate.role)}</p>` : ''}
-            ${candidate.category ? `<span class="inline-block mt-1 px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(candidate.category)}">${this.escapeHtml(this._candidateCategories[candidate.category] || candidate.category)}</span>` : ''}
+            <div class="flex items-center gap-2 flex-wrap mt-1">
+              ${candidate.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(candidate.category)}">${this.escapeHtml(this._candidateCategories[candidate.category] || candidate.category)}</span>` : ''}
+              ${this._subcontractorBadge(candidate, 'py-1')}
+            </div>
           </div>
           <div class="flex gap-2 flex-wrap">
             <button onclick="router.navigate('candidate-form', {id: '${candidate.id}'})"
@@ -5115,6 +5131,20 @@ const views = {
             </div>
           </div>
 
+          <div class="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+            <label class="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" id="candidate-subcontractor" ${candidate.isSubcontractor ? 'checked' : ''}
+                     class="mt-0.5 h-5 w-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+              <span>
+                <span class="block text-sm font-medium text-slate-700">Underkonsult</span>
+                <span class="block text-xs text-slate-500">
+                  Anlitas via eget bolag eller underleverantör — inte kandidat för anställning.
+                  Markeras med en grön etikett i alla kandidatlistor.
+                </span>
+              </span>
+            </label>
+          </div>
+
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Skills</label>
             <input type="text" id="candidate-skills" value="${this.escapeHtml(candidate.skills || '')}"
@@ -5236,6 +5266,10 @@ const views = {
     formData.append('role', document.getElementById('candidate-role').value);
     formData.append('skills', document.getElementById('candidate-skills').value);
     formData.append('category', document.getElementById('candidate-category').value);
+    // An unchecked checkbox submits nothing, so send the value explicitly —
+    // otherwise clearing the flag on an edit would look like "field omitted"
+    // and the old value would stick.
+    formData.append('isSubcontractor', document.getElementById('candidate-subcontractor').checked ? 'true' : 'false');
 
     const resumeInput = document.getElementById('candidate-resume');
     if (resumeInput && resumeInput.files[0]) {
@@ -6695,6 +6729,7 @@ We're looking for a senior Java developer..."></textarea>
                   m.candidateCategory === 'contact_later' ? 'bg-red-100 text-red-600' :
                   'bg-slate-100 text-slate-600'
                 }">${this.escapeHtml(this._candidateCategories[m.candidateCategory] || m.candidateCategory)}</span>` : ''}
+                ${this._subcontractorBadge(m)}
                 ${matchHasTeam && m.candidateOwner ? `<span class="text-xs px-2 py-0.5 rounded-full ${
                   m.candidateOwnerId === auth.currentUser?.id ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'
                 }" title="Profilens ägare">${this.escapeHtml(m.candidateOwner)}</span>` : ''}

@@ -1560,6 +1560,7 @@ function formatCandidateRow(row) {
     role: row.role,
     skills: row.skills,
     category: row.category || '',
+    isSubcontractor: !!row.is_subcontractor,
     resumeFilename: row.resume_filename,
     resumeOriginalName: row.resume_original_name,
     resumeText: row.resume_text || '',
@@ -1937,17 +1938,18 @@ function mergeCandidates(survivorId, duplicateIds, userId) {
   return { merged: ids.length, moved, candidate: getCandidateById(survivorId, userId) };
 }
 
-function createCandidate({ name, email, phone, role, skills, category, resumeFilename, resumeOriginalName }, userId) {
+function createCandidate({ name, email, phone, role, skills, category, isSubcontractor, resumeFilename, resumeOriginalName }, userId) {
   const teamId = getUserTeamId(userId);
   const id = generateId();
   const now = getTimestamp();
   const username = getUsernameById(userId);
+  const sub = isSubcontractor ? 1 : 0;
 
   // email is stored in its canonical form — the dedup lookup compares against it.
   db.prepare(`
-    INSERT INTO candidates (id, name, email, phone, role, skills, category, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, normalizeEmail(email), phone || '', role || '', skills || '', category || 'in_progress', resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
+    INSERT INTO candidates (id, name, email, phone, role, skills, category, is_subcontractor, resume_filename, resume_original_name, team_id, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, normalizeEmail(email), phone || '', role || '', skills || '', category || 'in_progress', sub, resumeFilename || '', resumeOriginalName || '', teamId, userId, now, now);
 
   return {
     id,
@@ -1957,6 +1959,7 @@ function createCandidate({ name, email, phone, role, skills, category, resumeFil
     role: role || '',
     skills: skills || '',
     category: category || 'in_progress',
+    isSubcontractor: !!sub,
     resumeFilename: resumeFilename || '',
     resumeOriginalName: resumeOriginalName || '',
     createdBy: userId,
@@ -1967,7 +1970,7 @@ function createCandidate({ name, email, phone, role, skills, category, resumeFil
   };
 }
 
-function updateCandidate(candidateId, { name, email, phone, role, skills, category, resumeFilename, resumeOriginalName }, userId) {
+function updateCandidate(candidateId, { name, email, phone, role, skills, category, isSubcontractor, resumeFilename, resumeOriginalName }, userId) {
   // Verify access
   const candidate = getCandidateById(candidateId, userId);
   if (!candidate) return null;
@@ -1977,7 +1980,7 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, catego
 
   db.prepare(`
     UPDATE candidates
-    SET name = ?, email = ?, phone = ?, role = ?, skills = ?, category = ?, resume_filename = ?, resume_original_name = ?, updated_at = ?
+    SET name = ?, email = ?, phone = ?, role = ?, skills = ?, category = ?, is_subcontractor = ?, resume_filename = ?, resume_original_name = ?, updated_at = ?
     WHERE id = ?
   `).run(
     name !== undefined ? name : existing.name,
@@ -1986,6 +1989,7 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, catego
     role !== undefined ? role : existing.role,
     skills !== undefined ? skills : existing.skills,
     category !== undefined ? category : (existing.category || ''),
+    isSubcontractor !== undefined ? (isSubcontractor ? 1 : 0) : (existing.is_subcontractor || 0),
     resumeFilename !== undefined ? resumeFilename : existing.resume_filename,
     resumeOriginalName !== undefined ? resumeOriginalName : existing.resume_original_name,
     now,

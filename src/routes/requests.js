@@ -73,6 +73,7 @@ router.get('/:id', (req, res) => {
           candidateRole: candidate ? candidate.role : '',
           candidateSkills: candidate ? candidate.skills : '',
           candidateCategory: candidate ? candidate.category : '',
+          candidateIsSubcontractor: candidate ? !!candidate.isSubcontractor : false,
           // Who owns the profile. On a shared request the match list mixes
           // candidates from every team member, so the owner is what tells you
           // whom to talk to before putting someone forward.
