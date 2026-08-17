@@ -4382,7 +4382,10 @@ const views = {
     document.body.appendChild(root);
     document.body.style.overflow = 'hidden';
     root.addEventListener('click', (e) => {
-      if (e.target.dataset && e.target.dataset.close === '1') views.hideOfferModal();
+      // closest(), not e.target — clicking the X hits the <svg>/<path> inside
+      // the button, which carries no data-close of its own.
+      const closer = e.target.closest && e.target.closest('[data-close="1"]');
+      if (closer) this.hideOfferModal();
     });
 
     this._offerState = state;
