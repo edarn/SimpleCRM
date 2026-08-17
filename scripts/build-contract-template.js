@@ -204,11 +204,27 @@ function transformDocumentXml(xml) {
   const salaryRunOld = ' års lönesamtal. (extra lön enligt nedan ej medräknat)';
   const salaryRunNew =
     ' års lönesamtal. Utöver detta har NN en rörlig lönedel om {{VARIABLE_PERCENTAGE}} % som beräknas enligt bifogad bilaga.' +
-    ' Den uppskattade totala årslönen (fast + rörlig, netto) är {{ESTIMATED_TOTAL}} kr. (extra lön enligt nedan ej medräknat)';
+    ' Den uppskattade månadslönen (fast + rörlig, brutto) är {{ESTIMATED_MONTHLY}} kr. (extra lön enligt nedan ej medräknat)';
   if (!out.includes(salaryRunOld)) {
     throw new Error('Salary clause anchor not found; did the upstream template change?');
   }
   out = out.replace(salaryRunOld, salaryRunNew);
+
+  // 16. Append the vacation sentence to point 3 (Anställningsvillkor). The
+  // paragraph ends just after "bolagets intranätet" + a run holding the final
+  // period, so we splice a new run in right before that paragraph's </w:p>.
+  const vacationAnchor = '<w:t>bolagets intranätet</w:t>';
+  const anchorPos = out.indexOf(vacationAnchor);
+  if (anchorPos === -1) {
+    throw new Error('Anställningsvillkor anchor not found; did the upstream template change?');
+  }
+  const paraEnd = out.indexOf('</w:p>', anchorPos);
+  if (paraEnd === -1) {
+    throw new Error('No </w:p> after the Anställningsvillkor anchor');
+  }
+  out = out.slice(0, paraEnd)
+    + cleanRun(' NN har rätt till 25 dagars betald semester per år.')
+    + out.slice(paraEnd);
 
   return out;
 }
@@ -217,8 +233,9 @@ function verify(xml) {
   const required = [
     '{{TITLE}}', '{{CANDIDATE_NAME}}', '{{PERSONAL_NUMBER}}', '{{DEPARTMENT}}',
     '{{START_DATE}}', '{{WORK_LOCATION}}', '{{CONTRACT_CLAUSE}}', '{{SALARY_YEAR}}',
-    '{{FIXED_SALARY}}', '{{VARIABLE_PERCENTAGE}}', '{{ESTIMATED_TOTAL}}',
+    '{{FIXED_SALARY}}', '{{VARIABLE_PERCENTAGE}}', '{{ESTIMATED_MONTHLY}}',
     '{{SIGN_LOCATION}}', '{{SIGN_DATE}}', '{{SIGNER_NAME}}', '{{SIGNER_TITLE}}',
+    'NN har rätt till 25 dagars betald semester per år.',
   ];
   const missing = required.filter((p) => !xml.includes(p));
   if (missing.length) {

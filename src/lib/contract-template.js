@@ -82,7 +82,7 @@ function buildDocxBuffer(entries) {
  * @param {number} values.salaryYear
  * @param {number} values.fixedSalary       SEK / month
  * @param {number} values.variablePercentage e.g. 10 for 10 %
- * @param {number} values.estimatedTotal    estimated total annual salary (SEK, net)
+ * @param {number} values.estimatedMonthly  estimated monthly salary, fixed + variable (SEK, gross)
  * @returns {Promise<Buffer>} the .docx file as a Buffer
  */
 async function renderContractDocx(values) {
@@ -106,7 +106,7 @@ async function renderContractDocx(values) {
     '{{SALARY_YEAR}}': escapeXml(String(values.salaryYear || '')),
     '{{FIXED_SALARY}}': escapeXml(formatSwedishNumber(values.fixedSalary)),
     '{{VARIABLE_PERCENTAGE}}': escapeXml(formatSwedishPercent(values.variablePercentage)),
-    '{{ESTIMATED_TOTAL}}': escapeXml(formatSwedishNumber(values.estimatedTotal)),
+    '{{ESTIMATED_MONTHLY}}': escapeXml(formatSwedishNumber(values.estimatedMonthly)),
     '{{SIGN_LOCATION}}': escapeXml(values.signLocation || ''),
     '{{SIGN_DATE}}': escapeXml(values.signDate || ''),
     '{{SIGNER_NAME}}': escapeXml(values.signerName || ''),

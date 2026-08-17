@@ -192,6 +192,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Typing only refreshes the *derived* parts of the modal (breakdown rows,
      sums, summary cards, preview) — the input elements themselves are never
      re-rendered, so the caret stays where the user put it.
+   - **Contract text**: point 2 states the fixed monthly salary, the variable
+     share, and *the estimated monthly salary (fixed + variable, gross)* —
+     `yearly.averageMonthly` from the model. Point 3 (Anställningsvillkor) ends
+     with "NN har rätt till 25 dagars betald semester per år." Both are baked
+     into `templates/contract-template.docx` by
+     `scripts/build-contract-template.js`.
    - **Submit** generates two artefacts: the contract `.docx` (filled-in copy of
      `templates/contract-template.docx`) and a salary-attachment `.pdf` (the
      monthly table + summary cards). Both files are persisted under `uploads/`

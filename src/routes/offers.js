@@ -116,7 +116,7 @@ module.exports = function (uploadsDir) {
         salaryYear: p.salaryYear,
         fixedSalary: Number(p.fixedSalary) || 0,
         variablePercentage: Number(p.variablePercentage) || 0,
-        estimatedTotal: calc && calc.yearly ? calc.yearly.total : 0,
+        estimatedMonthly: calc && calc.yearly ? calc.yearly.averageMonthly : 0,
       });
 
       const pdfBuf = await renderOfferPdf({

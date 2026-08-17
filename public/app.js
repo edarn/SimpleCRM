@@ -4643,7 +4643,8 @@ const views = {
       <p><strong>${s.contractType === 'permanent' ? 'Tillsvidareanställning' : 'Provanställning'}</strong> i ${this.escapeHtml(s.workLocation || '—')} på avdelning ${this.escapeHtml(s.department || '—')}, från och med ${this.escapeHtml(s.startDate || '—')}.</p>
       <p>${this.escapeHtml(s.candidateName || '—')} (${this.escapeHtml(s.personalNumber || '—')}) anställs som ${previewClause}.</p>
       <p>Lönen fastställs till <strong>${fmt(s.fixedSalary)} kr/mån</strong> (oberoende av ${this.escapeHtml(String(s.salaryYear))} års lönesamtal).</p>
-      <p>Beräknad <strong>total årslön (netto): ${fmt(calc.yearly.total)} kr</strong>, varav rörlig ${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr.</p>
+      <p>Den uppskattade <strong>månadslönen (fast + rörlig, brutto): ${fmt(calc.yearly.averageMonthly)} kr</strong>, varav rörlig ${fmt((calc.yearly.variableNet + calc.yearly.semesterSupplementNet) / 12)} kr/mån.</p>
+      <p>NN har rätt till 25 dagars betald semester per år.</p>
       <p class="text-xs text-slate-500">Signerare: ${this.escapeHtml(s.signerName || '')} — ${this.escapeHtml(s.signerTitle || '')}</p>
     `;
   },
