@@ -184,10 +184,18 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      (Karlskrona / 2402 / Thomas Hermansson / Vice President, Sigma Technology
      Software Solution); the company name and org. nr are baked into the .docx
      template and cannot be changed per-offer.
-   - **Salary calculator**: fast lön (netto), arvode (kr/tim), %-sats. Editable
+   - **Salary calculator**: fast lön (brutto), arvode (kr/tim), %-sats. Editable
      monthly hours and vacation days. Live 12-month breakdown table (totalt
-     antal timmar, arvode, lönekostnad, rörlig brutto/netto, semestertillägg,
-     fast + rörlig). Summary cards for årslön fast/rörlig/total and snittlön/mån.
+     antal timmar, arvode, lönekostnad, rörligt utrymme, rörlig lön,
+     semestertillägg, fast + rörlig). Summary cards for årslön fast/rörlig/total
+     and månadslön/snitt.
+   - **Terminology** (calculator, attachment PDF and contract alike): *brutto* =
+     salary before income tax, i.e. after employer social fees have been taken
+     out — the model's `variableNet` / `total`. The row that still holds the
+     employer fees (`variableGross`, the company's payroll cost for the variable
+     part) is labelled "Rörligt utrymme före arb.avg." so the two sides of the
+     social-fee divisor are never confused. The model's own field names are
+     unchanged; only the labels are.
    - **Live preview** of the contract text with the live numbers folded in.
    - Typing only refreshes the *derived* parts of the modal (breakdown rows,
      sums, summary cards, preview) — the input elements themselves are never

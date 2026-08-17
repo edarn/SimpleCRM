@@ -82,8 +82,8 @@ function drawDocument(doc, opts) {
 
   // --- Inputs row ---
   const inputs = [
-    ['Fast månadslön (netto)', `${fmt(opts.fixedSalary)} kr`],
-    ['%-sats rörlig (brutto)', `${opts.variablePercentage} %`],
+    ['Fast månadslön (brutto)', `${fmt(opts.fixedSalary)} kr`],
+    ['%-sats rörlig (av profit)', `${opts.variablePercentage} %`],
     ['Arvode (kr / tim)', `${fmt(opts.expectedRate)} kr`],
     ['Lönekostnadsfaktor', String(result.inputs.salaryCostFactor)],
     ['Sociala avgifter (divisor)', String(result.inputs.socialFeesDivisor)],
@@ -98,7 +98,9 @@ function drawDocument(doc, opts) {
   // --- Info note ---
   doc.font('Helvetica-Oblique').fontSize(9).fillColor(COLORS.amber);
   doc.text(
-    'Semestertillägg på rörlig lön betalas som klumpsumma i april och beräknas enligt procentregeln (12 % av årets rörliga bruttolön).',
+    'Brutto = lön före skatt, dvs. beloppet efter att arbetsgivaravgifter räknats av. Raden "Rörligt utrymme före arb.avg." är bolagets lönekostnad för den rörliga delen, '
+    + `före avdrag för arbetsgivaravgifter (divisor ${result.inputs.socialFeesDivisor}). Semestertillägg på rörlig lön betalas som klumpsumma i april och beräknas enligt `
+    + 'procentregeln (12 % av årets rörliga utrymme).',
     pageLeft,
     doc.y,
     { width: usableWidth }
@@ -130,7 +132,7 @@ function drawKeyValueRow(doc, items, x, y, width) {
 
 function drawMonthlyTable(doc, result, x, y, width) {
   // Columns: Label + 12 months + Summa = 14
-  const labelColW = 165;
+  const labelColW = 190;
   const sumColW = 70;
   const monthColW = (width - labelColW - sumColW) / 12;
   const headerH = 18;
@@ -142,10 +144,10 @@ function drawMonthlyTable(doc, result, x, y, width) {
     { label: 'Totalt antal timmar', values: result.months.map((m) => m.totalHours), total: sum(result.months, 'totalHours'), money: false },
     { label: 'Arvode / månad', values: result.months.map((m) => m.revenue), total: sum(result.months, 'revenue'), money: true },
     { label: '− Lönekostnad (profit)', values: result.months.map((m) => m.profit), total: sum(result.months, 'profit'), money: true, tone: 'muted' },
-    { label: 'Rörlig lön brutto', values: result.months.map((m) => m.variableGross), total: sum(result.months, 'variableGross'), money: true },
-    { label: 'Rörlig lön netto', values: result.months.map((m) => m.variableNet), total: sum(result.months, 'variableNet'), money: true, tone: 'green' },
-    { label: 'Semestertillägg rörlig (Apr)', values: result.months.map((m) => m.semesterSupplementNet), total: result.yearly.semesterSupplementNet, money: true, tone: 'green' },
-    { label: 'Fast + rörlig (netto, inkl. sem.tillägg)', values: result.months.map((m) => m.total), total: result.yearly.total, money: true, tone: 'strong' },
+    { label: 'Rörligt utrymme före arb.avg.', values: result.months.map((m) => m.variableGross), total: sum(result.months, 'variableGross'), money: true },
+    { label: 'Rörlig lön brutto (efter arb.avg.)', values: result.months.map((m) => m.variableNet), total: sum(result.months, 'variableNet'), money: true, tone: 'green' },
+    { label: 'Sem.tillägg rörlig, brutto (Apr)', values: result.months.map((m) => m.semesterSupplementNet), total: result.yearly.semesterSupplementNet, money: true, tone: 'green' },
+    { label: 'Fast + rörlig (brutto, inkl. sem.tillägg)', values: result.months.map((m) => m.total), total: result.yearly.total, money: true, tone: 'strong' },
   ];
 
   // Header
@@ -192,9 +194,9 @@ function drawMonthlyTable(doc, result, x, y, width) {
 function drawSummaryCards(doc, result, variablePct, x, y, width) {
   const cards = [
     { label: 'ÅRSLÖN FAST', value: `${fmt(result.yearly.annualFixed)} kr`, hint: '12 × fast månadslön' },
-    { label: 'ÅRSLÖN RÖRLIG (NETTO)', value: `${fmt(result.yearly.variableNet + result.yearly.semesterSupplementNet)} kr`, hint: `${variablePct} % av årets profit + sem.tillägg`, accent: 'green' },
-    { label: 'TOTAL ÅRSLÖN (NETTO)', value: `${fmt(result.yearly.total)} kr`, hint: 'Fast + rörlig + sem.tillägg', accent: 'blue' },
-    { label: 'SNITTLÖN / MÅN', value: `${fmt(result.yearly.averageMonthly)} kr`, hint: 'Inkl. rörlig del' },
+    { label: 'ÅRSLÖN RÖRLIG (BRUTTO)', value: `${fmt(result.yearly.variableNet + result.yearly.semesterSupplementNet)} kr`, hint: `${variablePct} % av årets profit + sem.tillägg`, accent: 'green' },
+    { label: 'TOTAL ÅRSLÖN (BRUTTO)', value: `${fmt(result.yearly.total)} kr`, hint: 'Fast + rörlig + sem.tillägg', accent: 'blue' },
+    { label: 'MÅNADSLÖN / SNITT (BRUTTO)', value: `${fmt(result.yearly.averageMonthly)} kr`, hint: 'Inkl. rörlig del' },
   ];
   const colW = (width - 12) / 4;
   const cardH = 56;

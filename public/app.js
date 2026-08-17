@@ -4491,7 +4491,7 @@ const views = {
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <div>
-          <label class="block text-xs font-medium text-slate-600 mb-1">Fast månadslön (netto, kr) *</label>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Fast månadslön (brutto, kr) *</label>
           <input type="number" data-bind="fixedSalary" value="${s.fixedSalary}"
                  class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
         </div>
@@ -4501,7 +4501,7 @@ const views = {
                  class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-600 mb-1">%-sats rörlig (brutto)</label>
+          <label class="block text-xs font-medium text-slate-600 mb-1">%-sats rörlig (av profit)</label>
           <input type="number" step="0.5" data-bind="variablePercentage" value="${s.variablePercentage}"
                  class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
         </div>
@@ -4545,6 +4545,11 @@ const views = {
           </tbody>
         </table>
       </div>
+
+      <p class="text-[11px] text-amber-700 mt-2">
+        Brutto = lön före skatt, dvs. efter att arbetsgivaravgifter räknats av. Raden
+        "Rörligt utrymme före arb.avg." är bolagets lönekostnad för den rörliga delen.
+      </p>
 
       <div id="offer-summary-cards" class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
         ${this._offerSummaryHtml(s, calc)}
@@ -4597,10 +4602,10 @@ const views = {
       { label: 'Totalt antal timmar', vals: calc.months.map((m) => m.totalHours), total: calc.yearly.totalHours, money: false, tone: 'gray' },
       { label: 'Arvode / månad', vals: calc.months.map((m) => m.revenue), total: calc.yearly.revenue, money: true, tone: 'gray' },
       { label: '− Lönekostnad (profit)', vals: calc.months.map((m) => m.profit), total: calc.yearly.profit, money: true, tone: 'muted' },
-      { label: 'Rörlig lön brutto', vals: calc.months.map((m) => m.variableGross), total: calc.yearly.variableGross, money: true, tone: 'gray' },
-      { label: 'Rörlig lön netto', vals: calc.months.map((m) => m.variableNet), total: calc.yearly.variableNet, money: true, tone: 'green' },
-      { label: 'Sem.tillägg rörlig (Apr)', vals: calc.months.map((m) => m.semesterSupplementNet), total: calc.yearly.semesterSupplementNet, money: true, tone: 'green' },
-      { label: 'Fast + rörlig (netto)', vals: calc.months.map((m) => m.total), total: calc.yearly.total, money: true, tone: 'strong' },
+      { label: 'Rörligt utrymme före arb.avg.', vals: calc.months.map((m) => m.variableGross), total: calc.yearly.variableGross, money: true, tone: 'gray' },
+      { label: 'Rörlig lön brutto (efter arb.avg.)', vals: calc.months.map((m) => m.variableNet), total: calc.yearly.variableNet, money: true, tone: 'green' },
+      { label: 'Sem.tillägg rörlig, brutto (Apr)', vals: calc.months.map((m) => m.semesterSupplementNet), total: calc.yearly.semesterSupplementNet, money: true, tone: 'green' },
+      { label: 'Fast + rörlig (brutto)', vals: calc.months.map((m) => m.total), total: calc.yearly.total, money: true, tone: 'strong' },
     ].map((row) => `
       <tr class="bg-slate-50/50">
         <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-slate-50/50">${row.label}</td>
@@ -4619,16 +4624,16 @@ const views = {
         <p class="text-[11px] text-slate-500 mt-0.5">12 × fast månadslön</p>
       </div>
       <div class="p-3 border border-slate-200 rounded-lg bg-white">
-        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön rörlig (netto)</p>
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön rörlig (brutto)</p>
         <p class="text-lg font-semibold mt-0.5 text-emerald-700">${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr</p>
         <p class="text-[11px] text-slate-500 mt-0.5">${this.escapeHtml(String(s.variablePercentage))}% + sem.tillägg</p>
       </div>
       <div class="p-3 border border-slate-200 rounded-lg bg-white">
-        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Total årslön (netto)</p>
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Total årslön (brutto)</p>
         <p class="text-lg font-semibold mt-0.5 text-blue-700">${fmt(calc.yearly.total)} kr</p>
       </div>
       <div class="p-3 border border-slate-200 rounded-lg bg-white">
-        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Snittlön / mån</p>
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Månadslön / snitt (brutto)</p>
         <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.averageMonthly)} kr</p>
       </div>
     `;
