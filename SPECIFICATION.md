@@ -189,6 +189,9 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      antal timmar, arvode, lönekostnad, rörlig brutto/netto, semestertillägg,
      fast + rörlig). Summary cards for årslön fast/rörlig/total and snittlön/mån.
    - **Live preview** of the contract text with the live numbers folded in.
+   - Typing only refreshes the *derived* parts of the modal (breakdown rows,
+     sums, summary cards, preview) — the input elements themselves are never
+     re-rendered, so the caret stays where the user put it.
    - **Submit** generates two artefacts: the contract `.docx` (filled-in copy of
      `templates/contract-template.docx`) and a salary-attachment `.pdf` (the
      monthly table + summary cards). Both files are persisted under `uploads/`

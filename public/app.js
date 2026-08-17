@@ -4393,6 +4393,10 @@ const views = {
     const root = document.getElementById('offer-modal-root');
     if (root) root.remove();
     document.body.style.overflow = '';
+    if (this._offerRerenderTimer) {
+      clearTimeout(this._offerRerenderTimer);
+      this._offerRerenderTimer = null;
+    }
     this._offerState = null;
   },
 
@@ -4415,10 +4419,6 @@ const views = {
 
     const months = this._SALARY_CONST.MONTH_LABELS_SV;
     const fmt = (n) => this._formatSwedishNumber(n);
-
-    const previewClause = s.contractType === 'permanent'
-      ? 'tillsvidareanställning med en uppsägningstid på 1 månad'
-      : 'provanställning i 6 månader (uppsägningstid 2 veckor), därefter tillsvidare med uppsägningstid 1 månad';
 
     body.innerHTML = `
       <!-- Contract fields -->
@@ -4523,7 +4523,7 @@ const views = {
                          class="w-full px-1 py-1 text-right border border-slate-200 rounded text-xs">
                 </td>
               `).join('')}
-              <td class="px-2 py-1 text-right font-semibold text-slate-800">${fmt(s.maxHours.reduce((a, b) => a + (Number(b) || 0), 0))}</td>
+              <td id="offer-sum-maxhours" class="px-2 py-1 text-right font-semibold text-slate-800">${fmt(s.maxHours.reduce((a, b) => a + (Number(b) || 0), 0))}</td>
             </tr>
             <tr class="bg-white">
               <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-white">Semesterdagar</td>
@@ -4534,57 +4534,24 @@ const views = {
                          class="w-full px-1 py-1 text-right border border-slate-200 rounded text-xs">
                 </td>
               `).join('')}
-              <td class="px-2 py-1 text-right font-semibold text-slate-800">${fmt(s.vacationDays.reduce((a, b) => a + (Number(b) || 0), 0))}</td>
+              <td id="offer-sum-vacation" class="px-2 py-1 text-right font-semibold text-slate-800">${fmt(s.vacationDays.reduce((a, b) => a + (Number(b) || 0), 0))}</td>
             </tr>
-            ${[
-              { label: 'Totalt antal timmar', vals: calc.months.map((m) => m.totalHours), total: calc.yearly.totalHours, money: false, tone: 'gray' },
-              { label: 'Arvode / månad', vals: calc.months.map((m) => m.revenue), total: calc.yearly.revenue, money: true, tone: 'gray' },
-              { label: '− Lönekostnad (profit)', vals: calc.months.map((m) => m.profit), total: calc.yearly.profit, money: true, tone: 'muted' },
-              { label: 'Rörlig lön brutto', vals: calc.months.map((m) => m.variableGross), total: calc.yearly.variableGross, money: true, tone: 'gray' },
-              { label: 'Rörlig lön netto', vals: calc.months.map((m) => m.variableNet), total: calc.yearly.variableNet, money: true, tone: 'green' },
-              { label: 'Sem.tillägg rörlig (Apr)', vals: calc.months.map((m) => m.semesterSupplementNet), total: calc.yearly.semesterSupplementNet, money: true, tone: 'green' },
-              { label: 'Fast + rörlig (netto)', vals: calc.months.map((m) => m.total), total: calc.yearly.total, money: true, tone: 'strong' },
-            ].map((row) => `
-              <tr class="bg-slate-50/50">
-                <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-slate-50/50">${row.label}</td>
-                ${row.vals.map((v) => `<td class="px-2 py-1 text-right ${row.tone === 'green' ? 'text-emerald-700 font-medium' : row.tone === 'strong' ? 'text-blue-700 font-semibold' : row.tone === 'muted' ? 'text-slate-400' : 'text-slate-800'}">${fmt(v)}</td>`).join('')}
-                <td class="px-2 py-1 text-right ${row.tone === 'green' ? 'text-emerald-700' : row.tone === 'strong' ? 'text-blue-700' : 'text-slate-800'} font-semibold">${fmt(row.total)}</td>
-              </tr>
-            `).join('')}
+          </tbody>
+          <tbody id="offer-calc-rows" class="divide-y divide-slate-100">
+            ${this._offerCalcRowsHtml(calc)}
           </tbody>
         </table>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
-        <div class="p-3 border border-slate-200 rounded-lg bg-white">
-          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön fast</p>
-          <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.annualFixed)} kr</p>
-          <p class="text-[11px] text-slate-500 mt-0.5">12 × fast månadslön</p>
-        </div>
-        <div class="p-3 border border-slate-200 rounded-lg bg-white">
-          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön rörlig (netto)</p>
-          <p class="text-lg font-semibold mt-0.5 text-emerald-700">${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr</p>
-          <p class="text-[11px] text-slate-500 mt-0.5">${s.variablePercentage}% + sem.tillägg</p>
-        </div>
-        <div class="p-3 border border-slate-200 rounded-lg bg-white">
-          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Total årslön (netto)</p>
-          <p class="text-lg font-semibold mt-0.5 text-blue-700">${fmt(calc.yearly.total)} kr</p>
-        </div>
-        <div class="p-3 border border-slate-200 rounded-lg bg-white">
-          <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Snittlön / mån</p>
-          <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.averageMonthly)} kr</p>
-        </div>
+      <div id="offer-summary-cards" class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
+        ${this._offerSummaryHtml(s, calc)}
       </div>
 
       <hr class="my-4 border-slate-200">
 
       <h4 class="font-semibold text-slate-800 mb-2">Förhandsvisning av kontraktstext</h4>
-      <div class="bg-slate-50 border border-slate-200 rounded-md p-3 text-sm text-slate-700 space-y-1.5 mb-4">
-        <p><strong>${s.contractType === 'permanent' ? 'Tillsvidareanställning' : 'Provanställning'}</strong> i ${this.escapeHtml(s.workLocation || '—')} på avdelning ${this.escapeHtml(s.department || '—')}, från och med ${this.escapeHtml(s.startDate || '—')}.</p>
-        <p>${this.escapeHtml(s.candidateName || '—')} (${this.escapeHtml(s.personalNumber || '—')}) anställs som ${previewClause}.</p>
-        <p>Lönen fastställs till <strong>${fmt(s.fixedSalary)} kr/mån</strong> (oberoende av ${s.salaryYear} års lönesamtal).</p>
-        <p>Beräknad <strong>total årslön (netto): ${fmt(calc.yearly.total)} kr</strong>, varav rörlig ${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr.</p>
-        <p class="text-xs text-slate-500">Signerare: ${this.escapeHtml(s.signerName || '')} — ${this.escapeHtml(s.signerTitle || '')}</p>
+      <div id="offer-preview" class="bg-slate-50 border border-slate-200 rounded-md p-3 text-sm text-slate-700 space-y-1.5 mb-4">
+        ${this._offerPreviewHtml(s, calc)}
       </div>
 
       <div class="flex justify-end gap-2 sticky bottom-0 bg-white pt-4 border-t border-slate-200 -mx-6 px-6 -mb-4 pb-4">
@@ -4608,7 +4575,7 @@ const views = {
           v = v === '' ? '' : Number(v);
         }
         this._offerState[k] = v;
-        this._scheduleOfferRerender();
+        this._scheduleOfferUpdate();
       });
     });
     body.querySelectorAll('[data-bind-arr]').forEach((el) => {
@@ -4617,32 +4584,106 @@ const views = {
         const i = Number(el.dataset.idx);
         const v = el.value === '' ? 0 : Number(el.value);
         this._offerState[k][i] = isFinite(v) ? v : 0;
-        this._scheduleOfferRerender();
+        this._scheduleOfferUpdate();
       });
     });
   },
 
-  _scheduleOfferRerender() {
+  _offerCalcRowsHtml(calc) {
+    return [
+      { label: 'Totalt antal timmar', vals: calc.months.map((m) => m.totalHours), total: calc.yearly.totalHours, money: false, tone: 'gray' },
+      { label: 'Arvode / månad', vals: calc.months.map((m) => m.revenue), total: calc.yearly.revenue, money: true, tone: 'gray' },
+      { label: '− Lönekostnad (profit)', vals: calc.months.map((m) => m.profit), total: calc.yearly.profit, money: true, tone: 'muted' },
+      { label: 'Rörlig lön brutto', vals: calc.months.map((m) => m.variableGross), total: calc.yearly.variableGross, money: true, tone: 'gray' },
+      { label: 'Rörlig lön netto', vals: calc.months.map((m) => m.variableNet), total: calc.yearly.variableNet, money: true, tone: 'green' },
+      { label: 'Sem.tillägg rörlig (Apr)', vals: calc.months.map((m) => m.semesterSupplementNet), total: calc.yearly.semesterSupplementNet, money: true, tone: 'green' },
+      { label: 'Fast + rörlig (netto)', vals: calc.months.map((m) => m.total), total: calc.yearly.total, money: true, tone: 'strong' },
+    ].map((row) => `
+      <tr class="bg-slate-50/50">
+        <td class="px-2 py-1 text-slate-700 font-medium sticky left-0 bg-slate-50/50">${row.label}</td>
+        ${row.vals.map((v) => `<td class="px-2 py-1 text-right ${row.tone === 'green' ? 'text-emerald-700 font-medium' : row.tone === 'strong' ? 'text-blue-700 font-semibold' : row.tone === 'muted' ? 'text-slate-400' : 'text-slate-800'}">${this._formatSwedishNumber(v)}</td>`).join('')}
+        <td class="px-2 py-1 text-right ${row.tone === 'green' ? 'text-emerald-700' : row.tone === 'strong' ? 'text-blue-700' : 'text-slate-800'} font-semibold">${this._formatSwedishNumber(row.total)}</td>
+      </tr>
+    `).join('');
+  },
+
+  _offerSummaryHtml(s, calc) {
+    const fmt = (n) => this._formatSwedishNumber(n);
+    return `
+      <div class="p-3 border border-slate-200 rounded-lg bg-white">
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön fast</p>
+        <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.annualFixed)} kr</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">12 × fast månadslön</p>
+      </div>
+      <div class="p-3 border border-slate-200 rounded-lg bg-white">
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Årslön rörlig (netto)</p>
+        <p class="text-lg font-semibold mt-0.5 text-emerald-700">${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">${this.escapeHtml(String(s.variablePercentage))}% + sem.tillägg</p>
+      </div>
+      <div class="p-3 border border-slate-200 rounded-lg bg-white">
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Total årslön (netto)</p>
+        <p class="text-lg font-semibold mt-0.5 text-blue-700">${fmt(calc.yearly.total)} kr</p>
+      </div>
+      <div class="p-3 border border-slate-200 rounded-lg bg-white">
+        <p class="text-[11px] uppercase tracking-wider text-slate-500 font-medium">Snittlön / mån</p>
+        <p class="text-lg font-semibold mt-0.5 text-slate-900">${fmt(calc.yearly.averageMonthly)} kr</p>
+      </div>
+    `;
+  },
+
+  _offerPreviewHtml(s, calc) {
+    const fmt = (n) => this._formatSwedishNumber(n);
+    const previewClause = s.contractType === 'permanent'
+      ? 'tillsvidareanställning med en uppsägningstid på 1 månad'
+      : 'provanställning i 6 månader (uppsägningstid 2 veckor), därefter tillsvidare med uppsägningstid 1 månad';
+    return `
+      <p><strong>${s.contractType === 'permanent' ? 'Tillsvidareanställning' : 'Provanställning'}</strong> i ${this.escapeHtml(s.workLocation || '—')} på avdelning ${this.escapeHtml(s.department || '—')}, från och med ${this.escapeHtml(s.startDate || '—')}.</p>
+      <p>${this.escapeHtml(s.candidateName || '—')} (${this.escapeHtml(s.personalNumber || '—')}) anställs som ${previewClause}.</p>
+      <p>Lönen fastställs till <strong>${fmt(s.fixedSalary)} kr/mån</strong> (oberoende av ${this.escapeHtml(String(s.salaryYear))} års lönesamtal).</p>
+      <p>Beräknad <strong>total årslön (netto): ${fmt(calc.yearly.total)} kr</strong>, varav rörlig ${fmt(calc.yearly.variableNet + calc.yearly.semesterSupplementNet)} kr.</p>
+      <p class="text-xs text-slate-500">Signerare: ${this.escapeHtml(s.signerName || '')} — ${this.escapeHtml(s.signerTitle || '')}</p>
+    `;
+  },
+
+  // Refresh only the derived parts of the modal (computed rows, sums, summary
+  // cards, contract preview). The bound inputs are deliberately left alone:
+  // re-rendering them while the user types resets the caret — and since
+  // <input type="number"> doesn't support setSelectionRange, the caret ended up
+  // at position 0 and digits came out in reverse order.
+  _updateOfferComputed() {
+    const s = this._offerState;
+    if (!s) return;
+    const body = document.getElementById('offer-modal-body');
+    if (!body) return;
+
+    const calc = this._computeVariableSalary({
+      fixedSalary: Number(s.fixedSalary) || 0,
+      expectedRate: Number(s.expectedRate) || 0,
+      variablePercentage: Number(s.variablePercentage) || 0,
+      maxHours: s.maxHours,
+      vacationDays: s.vacationDays,
+      internalHours: new Array(12).fill(0),
+      extraHours: new Array(12).fill(0),
+    });
+    s.calc = calc;
+
+    const sum = (arr) => this._formatSwedishNumber(arr.reduce((a, b) => a + (Number(b) || 0), 0));
+    const set = (id, html) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    };
+    set('offer-sum-maxhours', sum(s.maxHours));
+    set('offer-sum-vacation', sum(s.vacationDays));
+    set('offer-calc-rows', this._offerCalcRowsHtml(calc));
+    set('offer-summary-cards', this._offerSummaryHtml(s, calc));
+    set('offer-preview', this._offerPreviewHtml(s, calc));
+  },
+
+  _scheduleOfferUpdate() {
     if (this._offerRerenderTimer) return;
     this._offerRerenderTimer = setTimeout(() => {
       this._offerRerenderTimer = null;
-      const focused = document.activeElement;
-      const focusedSel = focused && focused.dataset && focused.dataset.bind
-        ? `[data-bind="${focused.dataset.bind}"]`
-        : focused && focused.dataset && focused.dataset.bindArr
-        ? `[data-bind-arr="${focused.dataset.bindArr}"][data-idx="${focused.dataset.idx}"]`
-        : null;
-      const cursor = focused && typeof focused.selectionStart === 'number' ? focused.selectionStart : null;
-      this.renderOfferModalBody();
-      if (focusedSel) {
-        const el = document.querySelector('#offer-modal-body ' + focusedSel);
-        if (el) {
-          el.focus();
-          if (cursor != null && el.setSelectionRange) {
-            try { el.setSelectionRange(cursor, cursor); } catch (e) { /* ignore */ }
-          }
-        }
-      }
+      this._updateOfferComputed();
     }, 80);
   },
 
