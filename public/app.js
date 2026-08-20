@@ -4764,13 +4764,17 @@ const views = {
           </svg>
           Loading preview...
         </div>
-        <iframe id="pdf-iframe"
-                src="/api/candidates/${candidateId}/files/${fileId}?inline=true"
-                class="w-full border border-slate-200 rounded-lg hidden"
-                style="height: 800px;"
-                onload="views.onPdfLoaded()"
-                onerror="views.onPdfError()">
-        </iframe>
+        <div class="flex justify-center">
+          <!-- A4-shaped frame, as tall as the viewport allows, so a full page
+               fits without scrolling inside the viewer. -->
+          <iframe id="pdf-iframe"
+                  src="/api/candidates/${candidateId}/files/${fileId}?inline=true#view=Fit"
+                  class="max-w-full border border-slate-200 rounded-lg hidden"
+                  style="height: calc(100vh - 160px); min-height: 800px; aspect-ratio: 1 / 1.414;"
+                  onload="views.onPdfLoaded()"
+                  onerror="views.onPdfError()">
+          </iframe>
+        </div>
         <div id="pdf-error" class="hidden text-center py-8 text-slate-400">
           Preview not available. <a href="/api/candidates/${candidateId}/files/${fileId}" download class="text-rose-600 hover:text-rose-700">Download instead</a>
         </div>
