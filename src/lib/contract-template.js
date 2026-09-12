@@ -14,6 +14,11 @@ const TEMPLATE_PATH = path.join(__dirname, '..', '..', 'templates', 'contract-te
 const PROBATIONARY_CLAUSE = 'Anställningen är en provanställning i 6 månader och under denna tid är uppsägningstiden 2 veckor. Därefter övergår anställningen till en tillsvidare anställning med en uppsägningstid på 1 månad.';
 const PERMANENT_CLAUSE = 'Anställningen är en tillsvidareanställning med en uppsägningstid på 1 månad.';
 
+// Third signature column in the contract (next to the employee and the signing
+// manager). Fixed for every contract unless the caller overrides it.
+const DEFAULT_SIGNER2_NAME = 'Toni Risteski';
+const DEFAULT_SIGNER2_TITLE = 'President, Sigma Technology Software Solutions AB';
+
 function escapeXml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -79,6 +84,8 @@ function buildDocxBuffer(entries) {
  * @param {string} values.signDate          e.g. "2026-05-07"
  * @param {string} values.signerName
  * @param {string} values.signerTitle
+ * @param {string} [values.signer2Name]  third signatory, defaults to Toni Risteski
+ * @param {string} [values.signer2Title] third signatory's title
  * @param {number} values.salaryYear
  * @param {number} values.fixedSalary       SEK / month
  * @param {number} values.variablePercentage e.g. 10 for 10 %
@@ -111,6 +118,8 @@ async function renderContractDocx(values) {
     '{{SIGN_DATE}}': escapeXml(values.signDate || ''),
     '{{SIGNER_NAME}}': escapeXml(values.signerName || ''),
     '{{SIGNER_TITLE}}': escapeXml(values.signerTitle || ''),
+    '{{SIGNER2_NAME}}': escapeXml(values.signer2Name || DEFAULT_SIGNER2_NAME),
+    '{{SIGNER2_TITLE}}': escapeXml(values.signer2Title || DEFAULT_SIGNER2_TITLE),
   };
 
   for (const [k, v] of Object.entries(replacements)) {
@@ -120,7 +129,7 @@ async function renderContractDocx(values) {
   }
 
   // Sanity: nothing of the form {{...}} should remain.
-  const leftover = xml.match(/\{\{[A-Z_]+\}\}/);
+  const leftover = xml.match(/\{\{[A-Z0-9_]+\}\}/);
   if (leftover) {
     throw new Error('Unfilled placeholder in contract: ' + leftover[0]);
   }
@@ -129,4 +138,4 @@ async function renderContractDocx(values) {
   return await buildDocxBuffer(entries);
 }
 
-module.exports = { renderContractDocx };
+module.exports = { renderContractDocx, DEFAULT_SIGNER2_NAME, DEFAULT_SIGNER2_TITLE };

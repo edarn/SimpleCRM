@@ -113,6 +113,8 @@ module.exports = function (uploadsDir) {
         signDate: p.signDate || new Date().toISOString().slice(0, 10),
         signerName: p.signerName,
         signerTitle: p.signerTitle,
+        signer2Name: p.signer2Name,
+        signer2Title: p.signer2Title,
         salaryYear: p.salaryYear,
         fixedSalary: Number(p.fixedSalary) || 0,
         variablePercentage: Number(p.variablePercentage) || 0,

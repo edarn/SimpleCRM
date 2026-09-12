@@ -133,6 +133,91 @@ function replaceFragmentedSpan(xml, texts, replacementRun, searchFrom = 0) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Appendix: "Terms of employment and additional policies" (English, static).
+// The text lives in templates/terms-of-employment.txt so it can be edited and
+// diffed as plain text; this turns it into WordprocessingML paragraphs.
+//
+// Text conventions: "# " = document title, "## " = section heading,
+// "- " / "  - " = bullet / sub-bullet, "**...**" = bold, blank line = new
+// paragraph (consecutive non-blank lines belong to the same paragraph).
+// ---------------------------------------------------------------------------
+
+const TERMS_PATH = path.join(__dirname, '..', 'templates', 'terms-of-employment.txt');
+
+function escapeXml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Child order follows CT_RPr (rFonts, b, ..., sz, szCs, ..., lang).
+function enRpr({ bold = false, size = 20 } = {}) {
+  return '<w:rFonts w:asciiTheme="minorHAnsi" w:eastAsia="Times New Roman" w:hAnsiTheme="minorHAnsi" w:cstheme="minorHAnsi"/>'
+    + (bold ? '<w:b/><w:bCs/>' : '')
+    + `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>`
+    + '<w:lang w:val="en-US" w:eastAsia="sv-SE"/>';
+}
+
+// Split "plain **bold** plain" into runs.
+function termRuns(text, opts = {}) {
+  return text.split('**').map((seg, i) => {
+    if (!seg) return '';
+    const rpr = enRpr({ ...opts, bold: i % 2 === 1 || opts.bold });
+    return `<w:r><w:rPr>${rpr}</w:rPr><w:t xml:space="preserve">${escapeXml(seg)}</w:t></w:r>`;
+  }).join('');
+}
+
+// pPr child order follows CT_PPr (pageBreakBefore, spacing, ind, rPr).
+function termPara(text, { size = 20, bold = false, pageBreak = false, before = 0, after = 120, indent = 0 } = {}) {
+  const ppr = (pageBreak ? '<w:pageBreakBefore/>' : '')
+    + `<w:spacing w:before="${before}" w:after="${after}"/>`
+    + (indent ? `<w:ind w:left="${indent}"/>` : '')
+    + `<w:rPr>${enRpr({ bold, size })}</w:rPr>`;
+  return `<w:p><w:pPr>${ppr}</w:pPr>${termRuns(text, { size, bold })}</w:p>`;
+}
+
+function buildTermsXml(text) {
+  const paras = [];
+  let buffer = [];
+  let pageBreakPending = true;
+
+  function flush() {
+    if (!buffer.length) return;
+    paras.push(termPara(buffer.join(' ')));
+    buffer = [];
+  }
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) { flush(); continue; }
+
+    const bullet = line.match(/^(\s*)-\s+(.*)$/);
+    if (line.startsWith('# ')) {
+      flush();
+      paras.push(termPara(line.slice(2), { size: 28, bold: true, pageBreak: pageBreakPending, after: 240 }));
+      pageBreakPending = false;
+    } else if (line.startsWith('## ')) {
+      flush();
+      paras.push(termPara(line.slice(3), { size: 22, bold: true, before: 240, after: 60 }));
+    } else if (bullet) {
+      flush();
+      const sub = bullet[1].length > 0;
+      paras.push(termPara((sub ? 'o ' : '\u2022 ') + bullet[2], { after: 40, indent: sub ? 720 : 360 }));
+    } else {
+      buffer.push(line.trim());
+    }
+  }
+  flush();
+
+  if (paras.length < 20) {
+    throw new Error('Terms appendix looks empty (' + paras.length + ' paragraphs)');
+  }
+  return paras.join('');
+}
+
 function transformDocumentXml(xml) {
   let out = xml;
   let cursor = 0;
@@ -226,6 +311,51 @@ function transformDocumentXml(xml) {
     + cleanRun(' NN har rätt till 25 dagars betald semester per år.')
     + out.slice(paraEnd);
 
+  // 17. Signature table: two columns -> three, so the employee, the signing
+  // manager and the president sign next to each other. The page has 9072
+  // twips of body width, so the table shrinks from 2x3860 to 3x2990.
+  const gridOld = '<w:tblGrid><w:gridCol w:w="3860"/><w:gridCol w:w="3860"/></w:tblGrid>';
+  if (!out.includes(gridOld) || !out.includes('<w:tblW w:w="7720" w:type="dxa"/>')) {
+    throw new Error('Signature table anchors not found; did the upstream template change?');
+  }
+  out = out.replace('<w:tblW w:w="7720" w:type="dxa"/>', '<w:tblW w:w="8970" w:type="dxa"/>');
+  out = out.replace(gridOld, '<w:tblGrid><w:gridCol w:w="2990"/><w:gridCol w:w="2990"/><w:gridCol w:w="2990"/></w:tblGrid>');
+  out = out.split('<w:tcW w:w="3860" w:type="dxa"/>').join('<w:tcW w:w="2990" w:type="dxa"/>');
+
+  const CELL_RPR = '<w:rFonts w:asciiTheme="minorHAnsi" w:eastAsia="Times New Roman" w:hAnsiTheme="minorHAnsi" w:cstheme="minorHAnsi"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:eastAsia="sv-SE"/>';
+
+  function signatureCell(paragraphs) {
+    const body = paragraphs.map((text) =>
+      `<w:p><w:pPr><w:pStyle w:val="Default"/><w:rPr>${CELL_RPR}</w:rPr></w:pPr>`
+      + `<w:r><w:rPr>${CELL_RPR}</w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+    ).join('');
+    return `<w:tc><w:tcPr><w:tcW w:w="2990" w:type="dxa"/></w:tcPr>${body}</w:tc>`;
+  }
+
+  // Append a third cell to each of the two rows, right before its </w:tr>.
+  function appendCellAfter(xml, anchor, cellXml) {
+    const at = xml.indexOf(anchor);
+    if (at === -1) throw new Error('Signature row anchor not found: ' + anchor);
+    const rowEnd = xml.indexOf('</w:tr>', at);
+    if (rowEnd === -1) throw new Error('No </w:tr> after anchor: ' + anchor);
+    return xml.slice(0, rowEnd) + cellXml + xml.slice(rowEnd);
+  }
+
+  out = appendCellAfter(out, '{{SIGNER_NAME}}',
+    signatureCell(['_________________________ ', '{{SIGNER2_NAME}}']));
+  out = appendCellAfter(out, '{{SIGNER_TITLE}}',
+    signatureCell(['{{SIGNER2_TITLE}}']));
+
+  // 18. Appendix on a fresh page after the signatures: the English terms of
+  // employment / additional policies. Inserted at the end of the body so it
+  // keeps the document's header and footer.
+  const termsXml = buildTermsXml(fs.readFileSync(TERMS_PATH, 'utf8'));
+  const sectPrPos = out.lastIndexOf('<w:sectPr');
+  if (sectPrPos === -1) {
+    throw new Error('No trailing <w:sectPr> found in document.xml');
+  }
+  out = out.slice(0, sectPrPos) + termsXml + out.slice(sectPrPos);
+
   return out;
 }
 
@@ -235,7 +365,10 @@ function verify(xml) {
     '{{START_DATE}}', '{{WORK_LOCATION}}', '{{CONTRACT_CLAUSE}}', '{{SALARY_YEAR}}',
     '{{FIXED_SALARY}}', '{{VARIABLE_PERCENTAGE}}', '{{ESTIMATED_MONTHLY}}',
     '{{SIGN_LOCATION}}', '{{SIGN_DATE}}', '{{SIGNER_NAME}}', '{{SIGNER_TITLE}}',
+    '{{SIGNER2_NAME}}', '{{SIGNER2_TITLE}}',
     'NN har rätt till 25 dagars betald semester per år.',
+    'TERMS OF EMPLOYMENT AND ADDITIONAL POLICIES',
+    '§ 1 Working hours', '§ 20 Personal Data', '<w:pageBreakBefore/>',
   ];
   const missing = required.filter((p) => !xml.includes(p));
   if (missing.length) {
@@ -244,6 +377,12 @@ function verify(xml) {
   const nameCount = (xml.match(/\{\{CANDIDATE_NAME\}\}/g) || []).length;
   if (nameCount !== 2) {
     throw new Error(`Expected 2 occurrences of {{CANDIDATE_NAME}}, got ${nameCount}`);
+  }
+  // The signature table must now have three equal columns and three cells per row.
+  const gridCols = (xml.match(/<w:gridCol w:w="2990"\/>/g) || []).length;
+  const cells = (xml.match(/<w:tcW w:w="2990" w:type="dxa"\/>/g) || []).length;
+  if (gridCols !== 3 || cells !== 6) {
+    throw new Error(`Signature table not 3x2: gridCols=${gridCols}, cells=${cells}`);
   }
   // Make sure no original sample data remains.
   const leaks = ['Tequamnesh', 'YYYMMDD', '45 000', 'Thomas Hermansson', 'Karlskrona'];

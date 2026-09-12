@@ -206,6 +206,19 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      with "NN har rätt till 25 dagars betald semester per år." Both are baked
      into `templates/contract-template.docx` by
      `scripts/build-contract-template.js`.
+   - **Signatures**: the signature table has three columns side by side — the
+     employee, the signing manager (`signerName` / `signerTitle` from the form)
+     and a fixed third signatory, Toni Risteski, President Sigma Technology
+     Software Solutions AB. The third one comes from
+     `DEFAULT_SIGNER2_NAME` / `DEFAULT_SIGNER2_TITLE` in
+     `src/lib/contract-template.js` and can be overridden per offer with
+     `signer2Name` / `signer2Title` in the POST body.
+   - **Appendix**: the contract ends with the English "Terms of employment and
+     additional policies" (§ 1 – § 20), starting on a page of its own after the
+     signatures. The wording lives in `templates/terms-of-employment.txt` as
+     plain text (`#` title, `##` section, `- ` bullet, `**bold**`) and is
+     converted to WordprocessingML by `scripts/build-contract-template.js`, so
+     editing the text means editing that file and re-running the build script.
    - **Submit** generates two artefacts: the contract `.docx` (filled-in copy of
      `templates/contract-template.docx`) and a salary-attachment `.pdf` (the
      monthly table + summary cards). Both files are persisted under `uploads/`
@@ -1145,7 +1158,8 @@ VibeCodingProject/
 │   ├── index.html         # Main HTML file
 │   └── app.js             # Frontend JavaScript
 ├── templates/
-│   └── contract-template.docx # Employment contract docx with {{PLACEHOLDER}}s
+│   ├── contract-template.docx # Employment contract docx with {{PLACEHOLDER}}s
+│   └── terms-of-employment.txt # Appendix text baked into the contract
 ├── src/
 │   ├── database.js        # Database initialization
 │   ├── data.js            # Data layer functions
