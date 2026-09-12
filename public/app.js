@@ -4964,17 +4964,7 @@ const views = {
       if (item.type === 'comment') {
         return `
           <div class="border-l-4 border-rose-300 pl-4 py-2 bg-rose-50/30 rounded-r-lg" data-comment-id="${item.id}">
-            <div class="flex justify-between items-start">
-              <div class="flex-1">
-                <span class="inline-block px-2 py-0.5 text-xs rounded-full bg-rose-100 text-rose-700 font-medium mb-1">Comment</span>
-                <p class="text-slate-700 whitespace-pre-wrap">${this.escapeHtml(item.content)}</p>
-              </div>
-              <div class="flex gap-2 ml-4">
-                <button onclick="views.editCandidateComment('${entityId}', '${item.id}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
-                <button onclick="views.deleteCandidateComment('${entityId}', '${item.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
-              </div>
-            </div>
-            <p class="text-xs text-slate-400 mt-1">${formatDateTime(item.createdAt)}</p>
+            ${this._candidateCommentBodyHtml(item, entityId)}
           </div>
         `;
       } else {
@@ -5096,27 +5086,98 @@ const views = {
     }
   },
 
-  async editCandidateComment(candidateId, commentId) {
-    const comment = this._currentCandidate.comments.find(c => c.id === commentId);
-    if (!comment) return;
-
-    modal.show(`
-      <h3 class="text-lg font-semibold text-slate-800 mb-4">Edit Comment</h3>
-      <textarea id="edit-candidate-comment-content" rows="4" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">${this.escapeHtml(comment.content)}</textarea>
-      <div class="flex justify-end gap-2 mt-4">
-        <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
-        <button onclick="views.saveCandidateComment('${candidateId}', '${commentId}')" class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-4 py-2 rounded-lg hover:from-rose-600 hover:to-pink-700 font-medium shadow-sm">Save</button>
+  // Read mode of a comment: rendered both by the activity list and when an
+  // in-place edit is saved/cancelled, so both paths stay in sync.
+  _candidateCommentBodyHtml(comment, candidateId) {
+    return `
+      <div class="flex justify-between items-start">
+        <div class="flex-1">
+          <span class="inline-block px-2 py-0.5 text-xs rounded-full bg-rose-100 text-rose-700 font-medium mb-1">Comment</span>
+          <p class="text-slate-700 whitespace-pre-wrap">${this.escapeHtml(comment.content)}</p>
+        </div>
+        <div class="flex gap-2 ml-4">
+          <button onclick="views.editCandidateComment('${candidateId}', '${comment.id}')" class="text-slate-400 hover:text-slate-600 text-sm">Edit</button>
+          <button onclick="views.deleteCandidateComment('${candidateId}', '${comment.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
+        </div>
       </div>
-    `);
+      <p class="text-xs text-slate-400 mt-1">${formatDateTime(comment.createdAt)}</p>
+    `;
+  },
+
+  // Edit the comment where it sits: swap the comment block's body for a
+  // textarea instead of opening a modal.
+  editCandidateComment(candidateId, commentId) {
+    const comment = (this._currentCandidate?.comments || []).find(c => c.id === commentId);
+    const block = document.querySelector(`[data-comment-id="${commentId}"]`);
+    if (!comment || !block) return;
+
+    const existing = block.querySelector('textarea');
+    if (existing) { existing.focus(); return; }
+
+    const rows = Math.min(12, Math.max(3, (comment.content || '').split('\n').length + 1));
+    block.innerHTML = `
+      <span class="inline-block px-2 py-0.5 text-xs rounded-full bg-rose-100 text-rose-700 font-medium mb-1">Comment</span>
+      <textarea rows="${rows}"
+                onkeydown="views.onCandidateCommentEditKeydown(event, '${candidateId}', '${commentId}')"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">${this.escapeHtml(comment.content)}</textarea>
+      <div class="flex items-center justify-between gap-3 mt-2">
+        <span class="text-xs text-slate-400">Esc to cancel, Ctrl+Enter to save</span>
+        <div class="flex gap-2">
+          <button onclick="views.cancelEditCandidateComment('${commentId}')" class="px-3 py-1.5 text-slate-600 hover:text-slate-800 font-medium text-sm">Cancel</button>
+          <button data-comment-save onclick="views.saveCandidateComment('${candidateId}', '${commentId}')" class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-3 py-1.5 rounded-lg hover:from-rose-600 hover:to-pink-700 font-medium text-sm shadow-sm">Save</button>
+        </div>
+      </div>
+    `;
+
+    const textarea = block.querySelector('textarea');
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  },
+
+  onCandidateCommentEditKeydown(event, candidateId, commentId) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelEditCandidateComment(commentId);
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      this.saveCandidateComment(candidateId, commentId);
+    }
+  },
+
+  cancelEditCandidateComment(commentId) {
+    const candidate = this._currentCandidate;
+    const comment = (candidate?.comments || []).find(c => c.id === commentId);
+    const block = document.querySelector(`[data-comment-id="${commentId}"]`);
+    if (!comment || !block) return;
+    block.innerHTML = this._candidateCommentBodyHtml(comment, candidate.id);
   },
 
   async saveCandidateComment(candidateId, commentId) {
-    const content = document.getElementById('edit-candidate-comment-content').value.trim();
+    const block = document.querySelector(`[data-comment-id="${commentId}"]`);
+    const textarea = block?.querySelector('textarea');
+    if (!textarea) return;
+
+    const content = textarea.value.trim();
     if (!content) return;
 
-    await api.put(`/api/candidates/${candidateId}/comments/${commentId}`, { content });
-    modal.hide();
-    router.navigate('candidate-detail', { id: candidateId });
+    const button = block.querySelector('[data-comment-save]');
+    if (button) { button.disabled = true; button.textContent = 'Saving...'; }
+
+    try {
+      await api.put(`/api/candidates/${candidateId}/comments/${commentId}`, { content });
+    } catch (err) {
+      if (button) { button.disabled = false; button.textContent = 'Save'; }
+      if (err.message !== 'Authentication required') {
+        alert('Error saving comment: ' + err.message);
+      }
+      return;
+    }
+
+    // Keep the cached candidate in sync so cancel/re-edit and re-sorting of
+    // the activity list show the new text without a round trip.
+    const comment = (this._currentCandidate?.comments || []).find(c => c.id === commentId);
+    if (comment) comment.content = content;
+    this.cancelEditCandidateComment(commentId);
   },
 
   async deleteCandidateComment(candidateId, commentId) {
