@@ -87,6 +87,21 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Owner filter (team users)**: On the candidates list, a dropdown lets a team user choose whose candidates to view — their own (default), any other team member's, or all team candidates. An "Added By" column is shown for team users. Solo users see their own candidates with no dropdown.
    - **Status column**: A two-line "Status" column on the candidates list shows the row's owner label on top ("My Candidates" if owned by the current user, otherwise the owner's username) and the category label below (e.g. "In Progress"). This makes it obvious which rows came from the active filter vs. the secondary "all candidates" search results.
    - **Transfer between team members**: On the candidate detail page, team users see a "Transfer" button that opens a modal with a dropdown of other team members. Transferring reassigns the candidate's owner (`created_by`) so it appears in the new owner's list. Only the current candidate owner or the team owner can transfer; the target must be a member of the same team.
+   - **Share with a colleague**: A "Share" button on the candidate detail page
+     opens a modal (Swedish UI) with a recipient field — teammates' addresses are
+     offered as suggestions, any address can be typed — and a choice between
+     *Länk till profilen* and *CV som bilaga*. Attachment mode lists the
+     candidate's uploaded files with checkboxes (all selected by default) and is
+     disabled when the candidate has no files. "Öppna i Outlook" downloads an
+     `.eml` draft (`X-Unsent: 1`, same builder as offers/requests) that opens in
+     Outlook: link mode carries `<base>/#candidate-detail/<id>` plus a note that
+     the reader must be logged in and in the same team; attachment mode carries
+     the chosen files as base64 attachments. Both include the candidate's name,
+     role, email, phone and skills. `<base>` is `APP_BASE_URL` when set,
+     otherwise the request's own origin. When a recipient is given, a comment
+     "Profil delad med <addr> (länk|CV som bilaga)" is added to the candidate's
+     history. The recipient is validated as a single address (no header
+     injection) and unknown `fileIds` are ignored — an empty result is a 400.
 
 6. **Notes & ToDos Management**
    - Notes and ToDos are displayed in a unified "Notes & ToDos" list
@@ -1316,6 +1331,7 @@ VibeCodingProject/
 | PUT | /api/candidates/:id | Update candidate (multipart/form-data) |
 | DELETE | /api/candidates/:id | Delete candidate |
 | POST | /api/candidates/:id/transfer | Transfer candidate ownership to another team member (`{ newOwnerId }`) |
+| POST | /api/candidates/:id/share-eml | Outlook-draft .eml sharing the profile: `{ to?, mode: 'link'\|'attachment', fileIds? }` |
 | GET | /api/candidates/:id/resume | Download resume file |
 | POST | /api/candidates/:id/comments | Add comment |
 | PUT | /api/candidates/:id/comments/:commentId | Update comment |

@@ -8,10 +8,12 @@ function generateBoundary() {
   return '----=_Boundary_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
 }
 
-// RFC 2047 encoded-word for non-ASCII header values.
+// RFC 2047 encoded-word for header values that are not plain printable
+// ASCII — non-ASCII text, but also control characters (CR/LF), so a value
+// taken from user data can never inject an extra header line.
 function encodeHeader(value) {
   const v = String(value || '');
-  if (/^[\x00-\x7F]*$/.test(v)) return v;
+  if (/^[\x20-\x7E]*$/.test(v)) return v;
   return '=?UTF-8?B?' + Buffer.from(v, 'utf8').toString('base64') + '?=';
 }
 

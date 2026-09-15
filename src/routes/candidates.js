@@ -3,6 +3,29 @@ const data = require('../data');
 const path = require('path');
 const fs = require('fs');
 const { validateFileMagic } = require('../middleware/file-validate');
+const { buildOutlookDraftEml } = require('../lib/eml-builder');
+
+const FILE_CONTENT_TYPES = {
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.doc': 'application/msword'
+};
+
+// Filename-safe slug for the downloaded .eml (same rules as the offer files).
+function safeFilenameSegment(s) {
+  return String(s || '')
+    .normalize('NFKD')
+    .replace(/[^\w\d-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'profil';
+}
+
+// The link a colleague opens to land on this profile. APP_BASE_URL wins when
+// set (public hostname behind a proxy); otherwise the request's own origin.
+function profileUrlFor(req, candidateId) {
+  const base = (process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+  return `${base}/#candidate-detail/${candidateId}`;
+}
 
 // Fix multer's latin1 encoding of originalname for Swedish characters
 function fixOriginalName(file) {
@@ -454,6 +477,117 @@ router.get('/:id/files/:fileId', (req, res) => {
     res.sendFile(filePath);
   } catch (err) {
     console.error('Error downloading file:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/candidates/:id/share-eml - Outlook draft for sharing a profile
+// with a colleague: either a link to the profile page or the CV file(s) as
+// attachments. Body: { to?, mode: 'link' | 'attachment', fileIds?: [] }.
+router.post('/:id/share-eml', (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const candidate = data.getCandidateById(req.params.id, userId);
+    if (!candidate) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
+
+    const { to, mode, fileIds } = req.body || {};
+    const recipient = String(to || '').trim();
+    if (recipient && (recipient.length > 254 || !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(recipient))) {
+      return res.status(400).json({ error: 'Invalid recipient email' });
+    }
+    if (mode !== 'link' && mode !== 'attachment') {
+      return res.status(400).json({ error: "mode must be 'link' or 'attachment'" });
+    }
+
+    const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const displayName = `${candidate.name}${candidate.role ? ' — ' + candidate.role : ''}`;
+
+    const attachments = [];
+    if (mode === 'attachment') {
+      const allFiles = data.getCandidateFiles(candidate.id);
+      const wanted = Array.isArray(fileIds) && fileIds.length > 0
+        ? allFiles.filter(f => fileIds.includes(f.id))
+        : allFiles;
+      if (!uploadsDir) {
+        return res.status(500).json({ error: 'Uploads not configured' });
+      }
+      for (const file of wanted) {
+        const filePath = path.join(uploadsDir, file.filename);
+        if (!fs.existsSync(filePath)) continue;
+        const ext = path.extname(file.originalName || file.filename).toLowerCase();
+        attachments.push({
+          filename: file.originalName || file.filename,
+          content: fs.readFileSync(filePath),
+          contentType: FILE_CONTENT_TYPES[ext] || 'application/octet-stream'
+        });
+      }
+      if (attachments.length === 0) {
+        return res.status(400).json({ error: 'Candidate has no files to attach' });
+      }
+    }
+
+    const facts = [];
+    if (candidate.email) facts.push(['E-post', candidate.email]);
+    if (candidate.phone) facts.push(['Telefon', candidate.phone]);
+    if (candidate.skills) facts.push(['Kompetenser', candidate.skills]);
+
+    const plain = [`Hej,`, ``];
+    let htmlLead;
+    if (mode === 'link') {
+      const url = profileUrlFor(req, candidate.id);
+      plain.push(`Här är en kandidatprofil jag vill dela med dig: ${displayName}`, ``, url, ``,
+        `(Länken kräver att du är inloggad i SimpleCRM och medlem i samma team.)`);
+      htmlLead = `<p>Här är en kandidatprofil jag vill dela med dig:</p>
+<p style="font-size: 15px;"><b>${esc(candidate.name)}</b>${candidate.role ? ` <span style="color: #64748b;">— ${esc(candidate.role)}</span>` : ''}</p>
+<p><a href="${esc(url)}" style="color: #e11d48;">${esc(url)}</a></p>
+<p style="font-size: 12px; color: #94a3b8;">Länken kräver att du är inloggad i SimpleCRM och medlem i samma team.</p>`;
+    } else {
+      plain.push(`Bifogat hittar du CV för: ${displayName}`);
+      htmlLead = `<p>Bifogat hittar du CV för:</p>
+<p style="font-size: 15px;"><b>${esc(candidate.name)}</b>${candidate.role ? ` <span style="color: #64748b;">— ${esc(candidate.role)}</span>` : ''}</p>
+<p style="font-size: 12px; color: #94a3b8;">${attachments.length === 1 ? 'CV:t är bifogat i detta mail.' : `${attachments.length} filer är bifogade i detta mail.`}</p>`;
+    }
+    if (facts.length) {
+      plain.push('');
+      for (const [k, v] of facts) plain.push(`${k}: ${v}`);
+    }
+
+    const htmlBody = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #1e293b;">
+<p>Hej,</p>
+${htmlLead}
+${facts.length ? `<table style="border-collapse: collapse; font-size: 13px; margin-top: 8px;">
+${facts.map(([k, v]) => `<tr><td style="color: #64748b; padding: 2px 12px 2px 0; vertical-align: top;">${esc(k)}</td><td style="padding: 2px 0;">${esc(v)}</td></tr>`).join('\n')}
+</table>` : ''}
+</body></html>`;
+
+    const eml = buildOutlookDraftEml({
+      to: recipient,
+      subject: mode === 'link' ? `Kandidatprofil: ${candidate.name}` : `CV: ${candidate.name}`,
+      body: plain.join('\n'),
+      htmlBody,
+      attachments
+    });
+
+    // Leave a trace in the candidate's history when we know who it went to.
+    // Guarded so a note failure never blocks the .eml download.
+    if (recipient) {
+      try {
+        data.createCandidateComment(candidate.id,
+          `Profil delad med ${recipient} (${mode === 'link' ? 'länk' : 'CV som bilaga'})`, userId);
+      } catch (noteErr) {
+        console.error('Error adding share note for candidate', candidate.id, noteErr);
+      }
+    }
+
+    res.setHeader('Content-Type', 'message/rfc822');
+    res.setHeader('Content-Disposition', `attachment; filename="Profil_${safeFilenameSegment(candidate.name)}.eml"`);
+    res.send(eml);
+  } catch (err) {
+    console.error('Error generating share EML:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
