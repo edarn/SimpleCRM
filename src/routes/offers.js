@@ -3,11 +3,22 @@ const fs = require('fs');
 const path = require('path');
 const data = require('../data');
 const { computeVariableSalary, getWorkingHoursForYear, DEFAULT_VACATION_DAYS, DEFAULT_SALARY_COST_FACTOR, DEFAULT_SOCIAL_FEES_DIVISOR } = require('../lib/salary-model');
-const { renderContractDocx } = require('../lib/contract-template');
+const { renderContractDocx, normalizeLanguage } = require('../lib/contract-template');
 const { renderOfferPdf } = require('../lib/offer-pdf');
 const { buildOutlookDraftEml } = require('../lib/eml-builder');
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+// Optional third attachment: the salary-model explainer, generated from
+// docs/"Lönemodell Fast och Rorlig - Förklaring.docx" by
+// scripts/build-salary-model-pdf.js. It is the same static file for every
+// offer (and holds both a Swedish and an English version of the text), so it
+// is read from templates/ rather than copied into uploads/.
+const SALARY_MODEL_PDF = path.join(__dirname, '..', '..', 'templates', 'salary-model-explained.pdf');
+const SALARY_MODEL_NAMES = {
+  sv: 'Lonemodell_fast_och_rorlig_lon.pdf',
+  en: 'Salary_model_fixed_and_variable_pay.pdf',
+};
 
 function safeFilenameSegment(s) {
   return String(s || '')
@@ -17,18 +28,59 @@ function safeFilenameSegment(s) {
     .slice(0, 60) || 'offer';
 }
 
-function makeContractName(candidateName) {
+function makeContractName(candidateName, language) {
   const stamp = new Date().toISOString().slice(0, 10);
-  return `Anstallningsavtal_${safeFilenameSegment(candidateName)}_${stamp}.docx`;
+  const stem = language === 'en' ? 'Employment_contract' : 'Anstallningsavtal';
+  return `${stem}_${safeFilenameSegment(candidateName)}_${stamp}.docx`;
 }
 
-function makeAttachmentName(candidateName) {
+function makeAttachmentName(candidateName, language) {
   const stamp = new Date().toISOString().slice(0, 10);
-  return `Rorlig_lon_bilaga_${safeFilenameSegment(candidateName)}_${stamp}.pdf`;
+  const stem = language === 'en' ? 'Variable_salary_appendix' : 'Rorlig_lon_bilaga';
+  return `${stem}_${safeFilenameSegment(candidateName)}_${stamp}.pdf`;
 }
 
-function makeEmlName(candidateName) {
-  return `Erbjudande_${safeFilenameSegment(candidateName)}.eml`;
+function makeEmlName(candidateName, language) {
+  const stem = language === 'en' ? 'Offer' : 'Erbjudande';
+  return `${stem}_${safeFilenameSegment(candidateName)}.eml`;
+}
+
+// Default covering note for the Outlook draft, in the contract's language.
+function defaultEmail(offer, language, withSalaryModel) {
+  if (language === 'en') {
+    const bullets = [
+      ' \u2022 Employment contract',
+      ' \u2022 Appendix showing how the variable part of the salary is calculated',
+    ];
+    if (withSalaryModel) bullets.push(' \u2022 An explanation of the salary model');
+    return {
+      subject: `Employment offer \u2013 ${offer.candidateName}`,
+      body:
+        `Hi ${offer.candidateName},\n\n` +
+        `As discussed, please find your employment offer below.\n` +
+        `Attached you will find:\n` +
+        bullets.join('\n') + `\n\n` +
+        `Let me know if you have any questions.\n\n` +
+        `Best regards,\n` +
+        `${offer.signerName || ''}`,
+    };
+  }
+  const bullets = [
+    ' \u2022 Anställningsavtal',
+    ' \u2022 Bilaga som visar hur den rörliga delen av lönen beräknas',
+  ];
+  if (withSalaryModel) bullets.push(' \u2022 En förklaring av lönemodellen');
+  return {
+    subject: `Anställningserbjudande \u2013 ${offer.candidateName}`,
+    body:
+      `Hej ${offer.candidateName},\n\n` +
+      `Som diskuterat skickar jag här ditt anställningserbjudande.\n` +
+      `Bifogat finner du:\n` +
+      bullets.join('\n') + `\n\n` +
+      `Hör av dig om du har frågor.\n\n` +
+      `Med vänlig hälsning,\n` +
+      `${offer.signerName || ''}`,
+  };
 }
 
 function buildCalculationFromPayload(p) {
@@ -99,10 +151,16 @@ module.exports = function (uploadsDir) {
         return res.status(400).json({ error: 'Invalid contractType' });
       }
 
+      // Page 1 of the contract is Swedish or English; the terms-of-employment
+      // appendix is English either way.
+      const language = normalizeLanguage(p.language);
+      const includeSalaryModel = !!p.includeSalaryModel;
+
       const calc = buildCalculationFromPayload(p);
 
       // Render artefacts.
       const contractBuf = await renderContractDocx({
+        language,
         contractType: p.contractType,
         candidateName: p.candidateName,
         personalNumber: p.personalNumber,
@@ -132,8 +190,8 @@ module.exports = function (uploadsDir) {
 
       const contractFilename = `offer-${data.generateId()}.docx`;
       const attachmentFilename = `offer-${data.generateId()}.pdf`;
-      const contractOriginalName = makeContractName(p.candidateName);
-      const attachmentOriginalName = makeAttachmentName(p.candidateName);
+      const contractOriginalName = makeContractName(p.candidateName, language);
+      const attachmentOriginalName = makeAttachmentName(p.candidateName, language);
 
       const contractPath = path.join(uploadsDir, contractFilename);
       const attachmentPath = path.join(uploadsDir, attachmentFilename);
@@ -158,6 +216,8 @@ module.exports = function (uploadsDir) {
         variablePercentage: Number(p.variablePercentage) || 0,
         salaryYear: Number(p.salaryYear) || new Date().getFullYear(),
         calculation: calc,
+        language,
+        includeSalaryModel,
         contractFilename,
         contractOriginalName,
         attachmentFilename,
@@ -243,34 +303,56 @@ module.exports = function (uploadsDir) {
       const contractBuf = fs.readFileSync(contractPath);
       const pdfBuf = fs.readFileSync(pdfPath);
 
-      const subject = offer.emailSubject || `Anställningserbjudande – ${offer.candidateName}`;
-      const body = offer.emailBody || (
-        `Hej ${offer.candidateName},\n\n` +
-        `Som diskuterat skickar jag här ditt anställningserbjudande.\n` +
-        `Bifogat finner du:\n` +
-        ` • Anställningsavtal\n` +
-        ` • Bilaga som visar hur den rörliga delen av lönen beräknas\n\n` +
-        `Hör av dig om du har frågor.\n\n` +
-        `Med vänlig hälsning,\n` +
-        `${offer.signerName || ''}`
-      );
+      const language = normalizeLanguage(offer.language);
+      const attachments = [
+        { filename: offer.contractOriginalName, content: contractBuf, contentType: DOCX_MIME },
+        { filename: offer.attachmentOriginalName, content: pdfBuf, contentType: 'application/pdf' },
+      ];
+      // Best effort: a missing explainer must not cost the user their draft.
+      let salaryModelAttached = false;
+      if (offer.includeSalaryModel && fs.existsSync(SALARY_MODEL_PDF)) {
+        attachments.push({
+          filename: SALARY_MODEL_NAMES[language],
+          content: fs.readFileSync(SALARY_MODEL_PDF),
+          contentType: 'application/pdf',
+        });
+        salaryModelAttached = true;
+      }
 
+      const fallback = defaultEmail(offer, language, salaryModelAttached);
       const eml = buildOutlookDraftEml({
         to: candidate.email || '',
-        subject,
-        body,
-        attachments: [
-          { filename: offer.contractOriginalName, content: contractBuf, contentType: DOCX_MIME },
-          { filename: offer.attachmentOriginalName, content: pdfBuf, contentType: 'application/pdf' },
-        ],
+        subject: offer.emailSubject || fallback.subject,
+        body: offer.emailBody || fallback.body,
+        attachments,
       });
 
-      const emlName = makeEmlName(offer.candidateName);
+      const emlName = makeEmlName(offer.candidateName, language);
       res.setHeader('Content-Type', 'message/rfc822');
       res.setHeader('Content-Disposition', `attachment; filename="${emlName}"`);
       res.send(eml);
     } catch (err) {
       console.error('Error generating .eml:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/candidates/:candidateId/offers/:offerId/salary-model
+  // The static salary-model explainer PDF, named for the offer's language.
+  router.get('/:offerId/salary-model', (req, res) => {
+    try {
+      const userId = req.session.userId;
+      const offer = data.getOfferById(req.params.candidateId, req.params.offerId, userId);
+      if (!offer) return res.status(404).json({ error: 'Offer not found' });
+      if (!fs.existsSync(SALARY_MODEL_PDF)) {
+        return res.status(404).json({ error: 'Salary-model PDF not built; run scripts/build-salary-model-pdf.js' });
+      }
+      const name = SALARY_MODEL_NAMES[normalizeLanguage(offer.language)];
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
+      res.sendFile(SALARY_MODEL_PDF);
+    } catch (err) {
+      console.error('Error downloading salary-model PDF:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

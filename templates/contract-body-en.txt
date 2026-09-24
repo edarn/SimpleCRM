@@ -1,0 +1,23 @@
+# EMPLOYMENT CONTRACT
+~ {{TITLE}}
+
+
+This employment contract has been made between Sigma Technology Software Solution AB, corporate identity number 559283-3791, referred to as "the Company", which is a company within Sigma Technology Group, and {{CANDIDATE_NAME}} (NN), personal identity number {{PERSONAL_NUMBER}}.
+
+- NN is employed by the Company on a full-time basis as a consultant in department {{DEPARTMENT}} from {{START_DATE}}, with {{WORK_LOCATION}} as the principal place of work. {{CONTRACT_CLAUSE}}
+
+- NN's salary has been set at {{FIXED_SALARY}} SEK per month, irrespective of the {{SALARY_YEAR}} salary review. In addition, NN has a variable salary component of {{VARIABLE_PERCENTAGE}} %, which is calculated in accordance with the attached appendix. The estimated monthly salary (fixed + variable, gross) is {{ESTIMATED_MONTHLY}} SEK. (additional salary as described below not included)
+
+> The Company offers its employees the option of choosing additional salary instead of a provision to Flexpension. The employee confirms this choice on the Company's intranet no later than two months from the start of the employment. The provision follows the agreements between the parties to the collective agreement and is gradually increased to 2 % on top of the fixed monthly salary. This salary component is stated separately on the payslip. Employees who choose additional salary may later switch to Flexpension. (ITP occupational pension is paid according to the collective agreement.)
+
+- Terms of employment|The Company's general terms of employment are the Company's Terms of Employment together with the agreement between Innovationsföretagen and Unionen / Sveriges Ingenjörer / Sveriges Arkitekter. Further information is available on the Company's intranet. NN is entitled to 25 days of paid vacation per year.
+
+- Confidentiality|The employee shall observe complete confidentiality regarding information that may be considered sensitive in nature or that may constitute a business secret of the Client, the Company or the Sigma Group, and of which the employee becomes aware in the course of their employment as a consultant. This duty of confidentiality also applies for 5 years after the employee has left their employment with the Company.
+
+- The Agency Work Act (Uthyrningslagen)|The employee is employed for the purpose of working in various delivery formats that may vary depending on the client's preferences and needs. The Company is therefore not a staffing agency, and consequently neither the employee nor the Company is covered by the Agency Work Act (Lag (2012:856) om uthyrning av arbetstagare). This applies regardless of the nature of the employee's assignment in the individual case.
+
+This contract has been drawn up in two copies, of which each party has taken one.
+
+{{SIGN_LOCATION}}, {{SIGN_DATE}}
+
+

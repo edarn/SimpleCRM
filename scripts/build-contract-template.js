@@ -19,6 +19,7 @@ const archiver = require('archiver');
 const SOURCE = path.join(__dirname, '..', 'variable-salary-calculator-export', 'Provanställning Tequamnesh.docx');
 const TARGET_DIR = path.join(__dirname, '..', 'templates');
 const TARGET = path.join(TARGET_DIR, 'contract-template.docx');
+const TARGET_EN = path.join(TARGET_DIR, 'contract-template-en.docx');
 
 async function readDocxEntries(filePath) {
   const entries = {};
@@ -218,6 +219,85 @@ function buildTermsXml(text) {
   return paras.join('');
 }
 
+// ---------------------------------------------------------------------------
+// English first page: templates/contract-body-en.txt -> WordprocessingML.
+//
+// The Swedish page 1 comes verbatim from the source .docx. The English one has
+// no such source, so it is generated from a plain-text file that can be edited
+// and diffed like the terms appendix. Markup, one paragraph per line:
+//   "# "  document title (centred, bold)
+//   "~ "  subtitle under the title (centred, italic) — holds {{TITLE}}
+//   "- "  numbered clause (1., 2., ... continuous)
+//   "> "  indented continuation paragraph, no number of its own
+//   ""    an empty spacing paragraph
+//   "|"   line break inside a paragraph (used after a clause heading)
+// {{PLACEHOLDER}}s pass straight through and are filled at runtime by
+// src/lib/contract-template.js, exactly as in the Swedish template.
+// ---------------------------------------------------------------------------
+
+const BODY_EN_PATH = path.join(__dirname, '..', 'templates', 'contract-body-en.txt');
+
+const EN_BODY_RPR = '<w:rFonts w:asciiTheme="minorHAnsi" w:eastAsia="Times New Roman" w:hAnsiTheme="minorHAnsi" w:cstheme="minorHAnsi"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="en-US" w:eastAsia="sv-SE"/>';
+const EN_TITLE_RPR = '<w:rFonts w:asciiTheme="majorHAnsi" w:eastAsia="Times New Roman" w:hAnsiTheme="majorHAnsi" w:cs="Arial"/><w:b/><w:bCs/><w:sz w:val="36"/><w:szCs w:val="36"/><w:lang w:val="en-US" w:eastAsia="sv-SE"/>';
+const EN_SUBTITLE_RPR = '<w:rFonts w:asciiTheme="majorHAnsi" w:eastAsia="Times New Roman" w:hAnsiTheme="majorHAnsi" w:cs="Arial"/><w:bCs/><w:i/><w:lang w:val="en-US" w:eastAsia="sv-SE"/>';
+// pPr children must follow CT_PPr order: keepNext, autoSpace*, numPr, ind,
+// contextualSpacing, jc, outlineLvl, rPr.
+const EN_CENTER_PPR = '<w:keepNext/><w:autoSpaceDE w:val="0"/><w:autoSpaceDN w:val="0"/><w:jc w:val="center"/><w:outlineLvl w:val="5"/>';
+// numId 1 and 7 share abstractNum 3 in the template's numbering.xml, so one
+// numId is enough to get a single continuous 1..n sequence.
+const EN_NUMBERED_PPR = '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:ind w:left="785"/><w:contextualSpacing/>';
+const EN_INDENT_PPR = '<w:ind w:left="785"/><w:contextualSpacing/>';
+
+function enRuns(text, rpr) {
+  // "|" becomes a line break; both sides keep the same run properties.
+  return text.split('|').map((seg, i) =>
+    `<w:r><w:rPr>${rpr}</w:rPr>${i ? '<w:br/>' : ''}<w:t xml:space="preserve">${escapeXml(seg)}</w:t></w:r>`
+  ).join('');
+}
+
+function enPara(text, { ppr = '', rpr = EN_BODY_RPR } = {}) {
+  const runs = text === '' ? '' : enRuns(text, rpr);
+  return `<w:p><w:pPr>${ppr}<w:rPr>${rpr}</w:rPr></w:pPr>${runs}</w:p>`;
+}
+
+function buildEnglishBodyXml(text) {
+  const paras = text.split(/\r?\n/).map((raw) => {
+    const line = raw.replace(/\s+$/, '');
+    if (line.startsWith('# ')) return enPara(line.slice(2), { ppr: EN_CENTER_PPR, rpr: EN_TITLE_RPR });
+    if (line.startsWith('~ ')) return enPara(line.slice(2), { ppr: EN_CENTER_PPR, rpr: EN_SUBTITLE_RPR });
+    if (line.startsWith('- ')) return enPara(line.slice(2), { ppr: EN_NUMBERED_PPR });
+    if (line.startsWith('> ')) return enPara(line.slice(2), { ppr: EN_INDENT_PPR });
+    return enPara(line);
+  });
+  if (paras.length < 15) {
+    throw new Error('English contract body looks empty (' + paras.length + ' paragraphs)');
+  }
+  return paras.join('');
+}
+
+// Swap the Swedish page 1 for the English one. Everything from the signature
+// table onwards (table, terms appendix, sectPr) is shared, so only the
+// paragraphs between <w:body> and the first <w:tbl> are replaced — plus the
+// table's one Swedish word, the "Anställd" column label.
+function buildEnglishDocumentXml(svXml) {
+  const BODY_OPEN = '<w:body>';
+  const bodyStart = svXml.indexOf(BODY_OPEN);
+  if (bodyStart === -1) throw new Error('No <w:body> in document.xml');
+  const tblStart = svXml.indexOf('<w:tbl>');
+  if (tblStart === -1) throw new Error('No signature table found in document.xml');
+  if (tblStart < bodyStart) throw new Error('Signature table precedes the body?');
+
+  const enBody = buildEnglishBodyXml(fs.readFileSync(BODY_EN_PATH, 'utf8'));
+  let out = svXml.slice(0, bodyStart + BODY_OPEN.length) + enBody + svXml.slice(tblStart);
+
+  const EMPLOYEE_LABEL = '<w:t xml:space="preserve">Anställd ';
+  if (!out.includes(EMPLOYEE_LABEL)) {
+    throw new Error('Signature table "Anställd" label not found');
+  }
+  out = out.replace(EMPLOYEE_LABEL, '<w:t xml:space="preserve">Employee ');
+  return out;
+}
+
 function transformDocumentXml(xml) {
   let out = xml;
   let cursor = 0;
@@ -359,30 +439,68 @@ function transformDocumentXml(xml) {
   return out;
 }
 
-function verify(xml) {
+const REQUIRED_PLACEHOLDERS = [
+  '{{TITLE}}', '{{CANDIDATE_NAME}}', '{{PERSONAL_NUMBER}}', '{{DEPARTMENT}}',
+  '{{START_DATE}}', '{{WORK_LOCATION}}', '{{CONTRACT_CLAUSE}}', '{{SALARY_YEAR}}',
+  '{{FIXED_SALARY}}', '{{VARIABLE_PERCENTAGE}}', '{{ESTIMATED_MONTHLY}}',
+  '{{SIGN_LOCATION}}', '{{SIGN_DATE}}', '{{SIGNER_NAME}}', '{{SIGNER_TITLE}}',
+  '{{SIGNER2_NAME}}', '{{SIGNER2_TITLE}}',
+];
+
+// Shared by both language variants: placeholders, the English terms appendix
+// and the 3x2 signature table all have to survive whatever surgery ran.
+function verifyCommon(xml, label) {
   const required = [
-    '{{TITLE}}', '{{CANDIDATE_NAME}}', '{{PERSONAL_NUMBER}}', '{{DEPARTMENT}}',
-    '{{START_DATE}}', '{{WORK_LOCATION}}', '{{CONTRACT_CLAUSE}}', '{{SALARY_YEAR}}',
-    '{{FIXED_SALARY}}', '{{VARIABLE_PERCENTAGE}}', '{{ESTIMATED_MONTHLY}}',
-    '{{SIGN_LOCATION}}', '{{SIGN_DATE}}', '{{SIGNER_NAME}}', '{{SIGNER_TITLE}}',
-    '{{SIGNER2_NAME}}', '{{SIGNER2_TITLE}}',
-    'NN har rätt till 25 dagars betald semester per år.',
+    ...REQUIRED_PLACEHOLDERS,
     'TERMS OF EMPLOYMENT AND ADDITIONAL POLICIES',
     '§ 1 Working hours', '§ 20 Personal Data', '<w:pageBreakBefore/>',
   ];
-  const missing = required.filter((p) => !xml.includes(p));
+  const missing = required.filter((t) => !xml.includes(t));
   if (missing.length) {
-    throw new Error('Missing placeholders after transform: ' + missing.join(', '));
+    throw new Error(`[${label}] Missing after transform: ` + missing.join(', '));
   }
   const nameCount = (xml.match(/\{\{CANDIDATE_NAME\}\}/g) || []).length;
   if (nameCount !== 2) {
-    throw new Error(`Expected 2 occurrences of {{CANDIDATE_NAME}}, got ${nameCount}`);
+    throw new Error(`[${label}] Expected 2 occurrences of {{CANDIDATE_NAME}}, got ${nameCount}`);
   }
-  // The signature table must now have three equal columns and three cells per row.
   const gridCols = (xml.match(/<w:gridCol w:w="2990"\/>/g) || []).length;
   const cells = (xml.match(/<w:tcW w:w="2990" w:type="dxa"\/>/g) || []).length;
   if (gridCols !== 3 || cells !== 6) {
-    throw new Error(`Signature table not 3x2: gridCols=${gridCols}, cells=${cells}`);
+    throw new Error(`[${label}] Signature table not 3x2: gridCols=${gridCols}, cells=${cells}`);
+  }
+}
+
+// The English variant must have no Swedish page-1 text left. Swedish *names*
+// (Innovationsföretagen, Uthyrningslagen, the statute reference) are quoted on
+// purpose, so only whole clauses are checked.
+function verifyEnglish(xml) {
+  verifyCommon(xml, 'en');
+  const svLeftovers = [
+    'har träffats mellan',
+    'NNs lön har fastställts',
+    'Såsom allmänna anställningsvillkor',
+    'Det åligger Medarbetaren',
+    'Detta avtal har upprättats',
+    '>Anställd ',
+  ];
+  for (const leak of svLeftovers) {
+    if (xml.includes(leak)) {
+      throw new Error('[en] Swedish page-1 text still present: ' + leak);
+    }
+  }
+  if (!xml.includes('EMPLOYMENT CONTRACT') || !xml.includes('Employee ')) {
+    throw new Error('[en] English page 1 not spliced in');
+  }
+}
+
+function verify(xml) {
+  verifyCommon(xml, 'sv');
+  const required = [
+    'NN har rätt till 25 dagars betald semester per år.',
+  ];
+  const missing = required.filter((t) => !xml.includes(t));
+  if (missing.length) {
+    throw new Error('[sv] Missing after transform: ' + missing.join(', '));
   }
   // Make sure no original sample data remains.
   const leaks = ['Tequamnesh', 'YYYMMDD', '45 000', 'Thomas Hermansson', 'Karlskrona'];
@@ -413,6 +531,12 @@ async function main() {
   entries['word/document.xml'] = Buffer.from(transformedXml, 'utf8');
   await writeDocx(entries, TARGET);
   console.log('Wrote', TARGET);
+
+  const englishXml = buildEnglishDocumentXml(transformedXml);
+  verifyEnglish(englishXml);
+  entries['word/document.xml'] = Buffer.from(englishXml, 'utf8');
+  await writeDocx(entries, TARGET_EN);
+  console.log('Wrote', TARGET_EN);
 }
 
 main().catch((err) => {

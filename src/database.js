@@ -434,6 +434,8 @@ function migrateExistingData() {
       variable_percentage REAL NOT NULL DEFAULT 0,
       salary_year INTEGER NOT NULL DEFAULT 0,
       calculation_json TEXT NOT NULL DEFAULT '{}',
+      language TEXT NOT NULL DEFAULT 'sv',
+      include_salary_model INTEGER NOT NULL DEFAULT 0,
       contract_filename TEXT DEFAULT '',
       contract_original_name TEXT DEFAULT '',
       attachment_filename TEXT DEFAULT '',
@@ -694,6 +696,12 @@ function migrateExistingData() {
   // 'extracting_resumes', 'matching', 'executing'). `status` alone covers a
   // multi-minute span with no feedback, which reads as a hung page.
   addColumnIfNotExists('email_inbox', 'stage', 'TEXT DEFAULT NULL');
+
+  // Employment offers: which language page 1 of the contract is written in
+  // ('sv' | 'en'; the terms-of-employment appendix is always English), and
+  // whether the salary-model explainer PDF rides along in the Outlook draft.
+  addColumnIfNotExists('candidate_offers', 'language', "TEXT DEFAULT 'sv'");
+  addColumnIfNotExists('candidate_offers', 'include_salary_model', 'INTEGER DEFAULT 0');
 
   // Migrate todos linked_type to also allow 'general' for email-generated todos
   migrateTodosLinkedTypeGeneral();

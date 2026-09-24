@@ -193,9 +193,11 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - On the candidate detail page, "Skapa erbjudande" opens a full-screen modal
      with a contract form and an embedded variable-salary calculator (port of
      Sigma Technology Group's "Rörligtmål" model).
-   - **Contract form**: contract type (probationary / permanent), candidate name,
-     personal number, start date, work location, department, sign location, sign
-     date, signer name, signer title, salary year. Defaults are sensible
+   - **Contract form**: contract type (probationary / permanent), contract
+     language (Swedish / English), candidate name, personal number, start date,
+     work location, department, sign location, sign date, signer name, signer
+     title, salary year, and a checkbox for the salary-model explainer.
+     Defaults are sensible
      (Karlskrona / 2402 / Thomas Hermansson / Vice President, Sigma Technology
      Software Solution); the company name and org. nr are baked into the .docx
      template and cannot be changed per-offer.
@@ -211,6 +213,18 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      part) is labelled "Rörligt utrymme före arb.avg." so the two sides of the
      social-fee divisor are never confused. The model's own field names are
      unchanged; only the labels are.
+   - **Contract language**: the contract body (page 1 — parties, employment,
+     salary, terms, confidentiality, the Agency Work Act, signatures) is
+     rendered in Swedish or English; the appendix is always English. The two
+     variants are two built templates —
+     `templates/contract-template.docx` (Swedish, from the original .docx) and
+     `templates/contract-template-en.docx`, whose page 1 is generated from
+     `templates/contract-body-en.txt` and spliced in front of the shared
+     signature table + appendix. `src/lib/contract-template.js` picks the
+     template and the matching subtitle / notice-period wording; an unknown
+     language falls back to Swedish. The language also drives the artefact
+     filenames, the Outlook draft's subject and covering note, and the live
+     preview in the modal. The salary attachment PDF itself stays Swedish.
    - **Live preview** of the contract text with the live numbers folded in.
    - Typing only refreshes the *derived* parts of the modal (breakdown rows,
      sums, summary cards, preview) — the input elements themselves are never
@@ -234,15 +248,26 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      plain text (`#` title, `##` section, `- ` bullet, `**bold**`) and is
      converted to WordprocessingML by `scripts/build-contract-template.js`, so
      editing the text means editing that file and re-running the build script.
+   - **Salary-model explainer** (optional): ticking "Bifoga förklaring av
+     lönemodellen" attaches `templates/salary-model-explained.pdf` to the
+     Outlook draft as a third file. It is a static PDF holding both the Swedish
+     and the English text, rendered from
+     `docs/Lönemodell Fast och Rorlig - Förklaring.docx` by
+     `scripts/build-salary-model-pdf.js` (there is no Word/LibreOffice on the
+     server, so the script walks `word/document.xml` and repaints it with
+     pdfkit). Edit the Word file, re-run the script, commit the PDF. The same
+     file is also downloadable from the offer row.
    - **Submit** generates two artefacts: the contract `.docx` (filled-in copy of
      `templates/contract-template.docx`) and a salary-attachment `.pdf` (the
      monthly table + summary cards). Both files are persisted under `uploads/`
      and tracked on a `candidate_offers` row that snapshots all inputs and the
      full computed `ModelResult` as JSON.
    - **Outlook integration**: after submit, the browser auto-downloads an `.eml`
-     file with `X-Unsent: 1`, the candidate's email pre-filled, and both
-     artefacts as base64 attachments. On Windows the file opens in Outlook as a
-     draft message with the attachments already in place.
+     file with `X-Unsent: 1`, the candidate's email pre-filled, and the
+     artefacts as base64 attachments (the salary-model explainer too, when it
+     was ticked). Subject and covering note follow the contract language. On
+     Windows the file opens in Outlook as a draft message with the attachments
+     already in place.
    - **Revisions**: each submit creates a *new* offer row (with new files), so
      prior versions stay around for traceability. The "Revidera" button on a
      listed offer pre-fills the modal with that offer's values to make it easy
@@ -878,6 +903,8 @@ CREATE TABLE candidate_offers (
   variable_percentage REAL NOT NULL DEFAULT 0,
   salary_year INTEGER NOT NULL DEFAULT 0,
   calculation_json TEXT NOT NULL DEFAULT '{}',
+  language TEXT NOT NULL DEFAULT 'sv',          -- contract page-1 language ('sv' | 'en')
+  include_salary_model INTEGER NOT NULL DEFAULT 0, -- attach the salary-model explainer PDF
   contract_filename TEXT DEFAULT '',
   contract_original_name TEXT DEFAULT '',
   attachment_filename TEXT DEFAULT '',
@@ -1173,8 +1200,11 @@ VibeCodingProject/
 │   ├── index.html         # Main HTML file
 │   └── app.js             # Frontend JavaScript
 ├── templates/
-│   ├── contract-template.docx # Employment contract docx with {{PLACEHOLDER}}s
-│   └── terms-of-employment.txt # Appendix text baked into the contract
+│   ├── contract-template.docx    # Swedish employment contract with {{PLACEHOLDER}}s
+│   ├── contract-template-en.docx # English variant of the same contract
+│   ├── contract-body-en.txt      # English page-1 text (source for the -en docx)
+│   ├── terms-of-employment.txt   # Appendix text baked into both contracts
+│   └── salary-model-explained.pdf # Optional salary-model attachment (generated)
 ├── src/
 │   ├── database.js        # Database initialization
 │   ├── data.js            # Data layer functions
@@ -1215,7 +1245,8 @@ VibeCodingProject/
 │       ├── requests.js    # Consultant request routes
 │       └── user-emails.js # User email management routes
 └── scripts/
-    ├── build-contract-template.js # One-shot: build templates/contract-template.docx
+    ├── build-contract-template.js # Build both contract-template*.docx
+    ├── build-salary-model-pdf.js  # Build templates/salary-model-explained.pdf
     ├── migrate-json-to-sqlite.js  # Migration script
     └── seed-test-data.js          # Test data seeder
 ```
@@ -1348,10 +1379,11 @@ VibeCodingProject/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | /api/candidates/:candidateId/offers | List employment offers for the candidate (newest first) |
-| POST | /api/candidates/:candidateId/offers | Create a new offer; renders contract.docx + attachment.pdf |
+| POST | /api/candidates/:candidateId/offers | Create a new offer; renders contract.docx + attachment.pdf (`language`: `sv`\|`en`, `includeSalaryModel`: bool) |
 | GET | /api/candidates/:candidateId/offers/:offerId/contract | Download the filled contract .docx |
 | GET | /api/candidates/:candidateId/offers/:offerId/attachment | Download the salary attachment .pdf |
-| GET | /api/candidates/:candidateId/offers/:offerId/eml | Download an Outlook-draft .eml with both attachments |
+| GET | /api/candidates/:candidateId/offers/:offerId/salary-model | Download the salary-model explainer .pdf |
+| GET | /api/candidates/:candidateId/offers/:offerId/eml | Download an Outlook-draft .eml with the attachments |
 | DELETE | /api/candidates/:candidateId/offers/:offerId | Delete the offer (creator / team owner only) |
 
 ### Search (Protected)

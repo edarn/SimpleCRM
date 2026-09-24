@@ -4180,6 +4180,9 @@ const views = {
                   <div class="font-medium text-slate-800">
                     ${o.contractType === 'permanent' ? 'Tillsvidare' : 'Provanställning'} —
                     ${this.escapeHtml(this._formatSwedishNumber(o.fixedSalary))} kr/mån + ${o.variablePercentage}%
+                    <span class="ml-1 align-middle text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                      ${o.language === 'en' ? 'EN' : 'SV'}
+                    </span>
                   </div>
                   <div class="text-xs text-slate-500 mt-0.5">
                     Skapat ${new Date(o.createdAt).toLocaleString('sv-SE')}
@@ -4200,6 +4203,11 @@ const views = {
                      class="text-blue-700 hover:text-blue-800 text-xs font-medium px-2 py-1 bg-blue-50 rounded">
                     Bilaga (.pdf)
                   </a>
+                  ${o.includeSalaryModel ? `
+                  <a href="/api/candidates/${candidateId}/offers/${o.id}/salary-model" download
+                     class="text-blue-700 hover:text-blue-800 text-xs font-medium px-2 py-1 bg-blue-50 rounded">
+                    Lönemodell (.pdf)
+                  </a>` : ''}
                   <button onclick="views.reviseOffer('${candidateId}', '${o.id}')"
                           class="text-slate-700 hover:text-slate-900 text-xs font-medium px-2 py-1 bg-slate-100 rounded">
                     Revidera
@@ -4342,6 +4350,8 @@ const views = {
 
     const state = {
       contractType: (prefill && prefill.contractType) || 'probationary',
+      language: (prefill && prefill.language) === 'en' ? 'en' : 'sv',
+      includeSalaryModel: !!(prefill && prefill.includeSalaryModel),
       candidateName: (prefill && prefill.candidateName) || candidate.name || '',
       personalNumber: (prefill && prefill.personalNumber) || '',
       startDate: (prefill && prefill.startDate) || '',
@@ -4438,6 +4448,14 @@ const views = {
           </select>
         </div>
         <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Kontraktsspråk</label>
+          <select data-bind="language" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+            <option value="sv" ${s.language === 'sv' ? 'selected' : ''}>Svenska</option>
+            <option value="en" ${s.language === 'en' ? 'selected' : ''}>Engelska</option>
+          </select>
+          <p class="text-[11px] text-slate-400 mt-1">Bilagan "Terms of employment" är alltid på engelska.</p>
+        </div>
+        <div>
           <label class="block text-xs font-medium text-slate-600 mb-1">Kandidatens namn *</label>
           <input data-bind="candidateName" value="${this.escapeHtml(s.candidateName)}"
                  class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
@@ -4488,6 +4506,15 @@ const views = {
                  class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
         </div>
       </div>
+
+      <label class="flex items-start gap-2 mb-4 text-sm text-slate-700 cursor-pointer">
+        <input type="checkbox" data-bind="includeSalaryModel" ${s.includeSalaryModel ? 'checked' : ''}
+               class="mt-0.5 rounded border-slate-300">
+        <span>
+          Bifoga förklaring av lönemodellen (PDF)
+          <span class="block text-xs text-slate-400">Lönemodell – Fast och rörlig lön, med svensk och engelsk text.</span>
+        </span>
+      </label>
 
       <hr class="my-4 border-slate-200">
 
@@ -4582,7 +4609,7 @@ const views = {
     body.querySelectorAll('[data-bind]').forEach((el) => {
       el.addEventListener('input', (e) => {
         const k = el.dataset.bind;
-        let v = el.value;
+        let v = el.type === 'checkbox' ? el.checked : el.value;
         if (['fixedSalary', 'expectedRate', 'variablePercentage', 'salaryYear'].includes(k)) {
           v = v === '' ? '' : Number(v);
         }
@@ -4643,18 +4670,38 @@ const views = {
     `;
   },
 
+  // Mirrors the wording of the generated contract, so it follows the chosen
+  // contract language rather than the (always Swedish) CRM interface.
   _offerPreviewHtml(s, calc) {
     const fmt = (n) => this._formatSwedishNumber(n);
-    const previewClause = s.contractType === 'permanent'
+    const permanent = s.contractType === 'permanent';
+    const variablePerMonth = (calc.yearly.variableNet + calc.yearly.semesterSupplementNet) / 12;
+    const signer = `<p class="text-xs text-slate-500">${s.language === 'en' ? 'Signed by' : 'Signerare'}: ${this.escapeHtml(s.signerName || '')} — ${this.escapeHtml(s.signerTitle || '')}</p>`;
+
+    if (s.language === 'en') {
+      const clause = permanent
+        ? 'a permanent employment with a period of notice of 1 month'
+        : 'a probationary employment for 6 months (2 weeks notice), thereafter permanent with 1 month notice';
+      return `
+      <p><strong>${permanent ? 'Permanent employment' : 'Probationary employment'}</strong> in ${this.escapeHtml(s.workLocation || '—')}, department ${this.escapeHtml(s.department || '—')}, from ${this.escapeHtml(s.startDate || '—')}.</p>
+      <p>${this.escapeHtml(s.candidateName || '—')} (${this.escapeHtml(s.personalNumber || '—')}) is employed on ${clause}.</p>
+      <p>The salary is set at <strong>${fmt(s.fixedSalary)} SEK/month</strong> (irrespective of the ${this.escapeHtml(String(s.salaryYear))} salary review).</p>
+      <p>Estimated <strong>monthly salary (fixed + variable, gross): ${fmt(calc.yearly.averageMonthly)} SEK</strong>, of which variable ${fmt(variablePerMonth)} SEK/month.</p>
+      <p>NN is entitled to 25 days of paid vacation per year.</p>
+      ${signer}
+    `;
+    }
+
+    const previewClause = permanent
       ? 'tillsvidareanställning med en uppsägningstid på 1 månad'
       : 'provanställning i 6 månader (uppsägningstid 2 veckor), därefter tillsvidare med uppsägningstid 1 månad';
     return `
-      <p><strong>${s.contractType === 'permanent' ? 'Tillsvidareanställning' : 'Provanställning'}</strong> i ${this.escapeHtml(s.workLocation || '—')} på avdelning ${this.escapeHtml(s.department || '—')}, från och med ${this.escapeHtml(s.startDate || '—')}.</p>
+      <p><strong>${permanent ? 'Tillsvidareanställning' : 'Provanställning'}</strong> i ${this.escapeHtml(s.workLocation || '—')} på avdelning ${this.escapeHtml(s.department || '—')}, från och med ${this.escapeHtml(s.startDate || '—')}.</p>
       <p>${this.escapeHtml(s.candidateName || '—')} (${this.escapeHtml(s.personalNumber || '—')}) anställs som ${previewClause}.</p>
       <p>Lönen fastställs till <strong>${fmt(s.fixedSalary)} kr/mån</strong> (oberoende av ${this.escapeHtml(String(s.salaryYear))} års lönesamtal).</p>
-      <p>Den uppskattade <strong>månadslönen (fast + rörlig, brutto): ${fmt(calc.yearly.averageMonthly)} kr</strong>, varav rörlig ${fmt((calc.yearly.variableNet + calc.yearly.semesterSupplementNet) / 12)} kr/mån.</p>
+      <p>Den uppskattade <strong>månadslönen (fast + rörlig, brutto): ${fmt(calc.yearly.averageMonthly)} kr</strong>, varav rörlig ${fmt(variablePerMonth)} kr/mån.</p>
       <p>NN har rätt till 25 dagars betald semester per år.</p>
-      <p class="text-xs text-slate-500">Signerare: ${this.escapeHtml(s.signerName || '')} — ${this.escapeHtml(s.signerTitle || '')}</p>
+      ${signer}
     `;
   },
 
@@ -4719,6 +4766,8 @@ const views = {
     try {
       const offer = await api.post(`/api/candidates/${candidateId}/offers`, {
         contractType: s.contractType,
+        language: s.language === 'en' ? 'en' : 'sv',
+        includeSalaryModel: !!s.includeSalaryModel,
         candidateName: s.candidateName,
         personalNumber: s.personalNumber,
         startDate: s.startDate,

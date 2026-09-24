@@ -2211,6 +2211,8 @@ function formatOfferRow(row) {
     variablePercentage: row.variable_percentage,
     salaryYear: row.salary_year,
     calculation: row.calculation_json ? JSON.parse(row.calculation_json) : null,
+    language: row.language || 'sv',
+    includeSalaryModel: row.include_salary_model ? 1 : 0,
     contractFilename: row.contract_filename || '',
     contractOriginalName: row.contract_original_name || '',
     attachmentFilename: row.attachment_filename || '',
@@ -2262,9 +2264,10 @@ function createOffer(candidateId, payload, userId) {
       id, candidate_id, contract_type, candidate_name, personal_number, start_date,
       work_location, department, sign_location, sign_date, signer_name, signer_title,
       fixed_salary, expected_rate, variable_percentage, salary_year, calculation_json,
+      language, include_salary_model,
       contract_filename, contract_original_name, attachment_filename, attachment_original_name,
       email_subject, email_body, team_id, created_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     candidateId,
@@ -2283,6 +2286,8 @@ function createOffer(candidateId, payload, userId) {
     payload.variablePercentage || 0,
     payload.salaryYear || 0,
     JSON.stringify(payload.calculation || {}),
+    payload.language === 'en' ? 'en' : 'sv',
+    payload.includeSalaryModel ? 1 : 0,
     payload.contractFilename || '',
     payload.contractOriginalName || '',
     payload.attachmentFilename || '',

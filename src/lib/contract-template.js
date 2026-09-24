@@ -1,7 +1,8 @@
-// Reads templates/contract-template.docx, replaces {{PLACEHOLDER}} strings in
-// word/document.xml with offer values, and returns the assembled .docx as a
-// Buffer. The build script (scripts/build-contract-template.js) is what put
-// the placeholders in the template in the first place.
+// Reads the contract template for the requested language, replaces
+// {{PLACEHOLDER}} strings in word/document.xml with offer values, and returns
+// the assembled .docx as a Buffer. The build script
+// (scripts/build-contract-template.js) is what put the placeholders in the
+// templates in the first place.
 
 const fs = require('fs');
 const path = require('path');
@@ -9,10 +10,38 @@ const unzipper = require('unzipper');
 const archiver = require('archiver');
 const { Writable } = require('stream');
 
-const TEMPLATE_PATH = path.join(__dirname, '..', '..', 'templates', 'contract-template.docx');
+// One template per contract language. They share everything from the
+// signature table onwards (including the English terms-of-employment
+// appendix); only page 1 differs. Both are built by
+// scripts/build-contract-template.js.
+const TEMPLATE_PATHS = {
+  sv: path.join(__dirname, '..', '..', 'templates', 'contract-template.docx'),
+  en: path.join(__dirname, '..', '..', 'templates', 'contract-template-en.docx'),
+};
+const DEFAULT_LANGUAGE = 'sv';
+const LANGUAGES = Object.keys(TEMPLATE_PATHS);
 
-const PROBATIONARY_CLAUSE = 'Anställningen är en provanställning i 6 månader och under denna tid är uppsägningstiden 2 veckor. Därefter övergår anställningen till en tillsvidare anställning med en uppsägningstid på 1 månad.';
-const PERMANENT_CLAUSE = 'Anställningen är en tillsvidareanställning med en uppsägningstid på 1 månad.';
+// Subtitle under the "ANSTÄLLNINGSAVTAL" / "EMPLOYMENT CONTRACT" heading.
+const TITLES = {
+  sv: { probationary: 'Provanställning', permanent: 'Tillsvidareanställning' },
+  en: { probationary: 'Probationary employment', permanent: 'Permanent employment' },
+};
+
+// The sentence that ends clause 1 and spells out the notice periods.
+const CLAUSES = {
+  sv: {
+    probationary: 'Anställningen är en provanställning i 6 månader och under denna tid är uppsägningstiden 2 veckor. Därefter övergår anställningen till en tillsvidare anställning med en uppsägningstid på 1 månad.',
+    permanent: 'Anställningen är en tillsvidareanställning med en uppsägningstid på 1 månad.',
+  },
+  en: {
+    probationary: 'The employment is a probationary employment for 6 months, during which the period of notice is 2 weeks. It then becomes a permanent employment (tillsvidareanställning) with a period of notice of 1 month.',
+    permanent: 'The employment is a permanent employment (tillsvidareanställning) with a period of notice of 1 month.',
+  },
+};
+
+function normalizeLanguage(lang) {
+  return LANGUAGES.includes(lang) ? lang : DEFAULT_LANGUAGE;
+}
 
 // Third signature column in the contract (next to the employee and the signing
 // manager). Fixed for every contract unless the caller overrides it.
@@ -75,6 +104,7 @@ function buildDocxBuffer(entries) {
  *
  * @param {Object} values
  * @param {'probationary'|'permanent'} values.contractType
+ * @param {'sv'|'en'} [values.language]   page-1 language; the appendix is always English
  * @param {string} values.candidateName
  * @param {string} values.personalNumber
  * @param {string} values.startDate         e.g. "2026-09-01"
@@ -93,14 +123,15 @@ function buildDocxBuffer(entries) {
  * @returns {Promise<Buffer>} the .docx file as a Buffer
  */
 async function renderContractDocx(values) {
-  const entries = await readDocxEntries(TEMPLATE_PATH);
+  const language = normalizeLanguage(values.language);
+  const entries = await readDocxEntries(TEMPLATE_PATHS[language]);
   if (!entries['word/document.xml']) {
     throw new Error('Template missing word/document.xml');
   }
   let xml = entries['word/document.xml'].toString('utf8');
 
-  const titleMap = { probationary: 'Provanställning', permanent: 'Tillsvidareanställning' };
-  const clauseMap = { probationary: PROBATIONARY_CLAUSE, permanent: PERMANENT_CLAUSE };
+  const titleMap = TITLES[language];
+  const clauseMap = CLAUSES[language];
 
   const replacements = {
     '{{TITLE}}': escapeXml(titleMap[values.contractType] || values.contractType || ''),
@@ -138,4 +169,11 @@ async function renderContractDocx(values) {
   return await buildDocxBuffer(entries);
 }
 
-module.exports = { renderContractDocx, DEFAULT_SIGNER2_NAME, DEFAULT_SIGNER2_TITLE };
+module.exports = {
+  renderContractDocx,
+  normalizeLanguage,
+  LANGUAGES,
+  DEFAULT_LANGUAGE,
+  DEFAULT_SIGNER2_NAME,
+  DEFAULT_SIGNER2_TITLE,
+};
