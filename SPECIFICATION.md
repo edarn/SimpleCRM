@@ -583,11 +583,44 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      CV text in addition to name, email, phone, role, and skills.
 
 18. **Browser History Support**
-   - Every navigation pushes to browser history with hash URLs
-     (e.g. #contacts, #candidate-detail/uuid, #request-detail/uuid).
-   - Back/forward buttons navigate between views correctly.
-   - Deep-linking and bookmarking URLs works — reload restores the view.
-   - Split-view contact clicks use replaceState to avoid history flooding.
+   - Navigation uses hash URLs (e.g. #contacts, #candidate-detail/uuid,
+     #request-detail/uuid). Params other than `id` ride along as a query
+     string (`#contact-form?companyId=…`) so a reload keeps them.
+   - Deep-linking and bookmarking works — reload restores the view, and
+     logging in lands on the hash the user arrived with.
+   - **What pushes and what replaces** (`router.navigate(route, params, opts)`):
+     - Navigating to the route + params you are *already* on replaces the
+       entry. Many actions re-render by navigating to their own route (every
+       ToDo action, notes, candidate files and comments); each of those used
+       to stack a duplicate entry and cost one dead Back press.
+     - `{ replace: true }` is used for the first route after boot (pushing
+       there left the page-load entry underneath, so the first Back was always
+       a no-op), for redirects after a save (the submitted form must not be
+       re-enterable) and after a delete / archive / transfer (the entry being
+       left points at a record that would render a 404 on Back).
+     - Split-view contact clicks replace, so Back leaves the list rather than
+       stepping through every contact glanced at.
+   - **`router.back(fallbackRoute)`** backs the "← Back to X" links and form
+     Cancel buttons. It calls `history.back()` when the app has pushed an
+     entry this session, and only falls back to replacing with the list route
+     for deep links. They used to navigate *forward* to the list, so Back sent
+     the user straight back into the page they had just left.
+   - **Scroll position** is recorded per history entry (on navigation and,
+     throttled, while scrolling) and restored on Back; forward navigation
+     starts at the top. `history.scrollRestoration` is set to `manual`, since
+     the browser's own attempt runs before the async view render has produced
+     anything to scroll.
+   - **Overlays** (`#modal`, the offer modal) are mounted outside `#app`, so
+     every navigation closes them. Otherwise they floated over the new view
+     and the offer modal left `document.body` scroll-locked.
+   - **List state** (search text, candidate category, ToDo All/Active/
+     Completed) lives on the view object rather than only in the DOM, so
+     Back to a list shows the same list the user left.
+   - Back does not steal focus: `[autofocus]` is skipped when a render comes
+     from `popstate`, so returning to a list does not pop up the mobile
+     keyboard.
+   - Logging out clears the hash and the history depth so Back cannot walk
+     into views the session is no longer authenticated for.
 
 19. **Matching at Scale — distilled profiles, local prefilter, per-pair cache**
 
@@ -1247,6 +1280,7 @@ VibeCodingProject/
 └── scripts/
     ├── build-contract-template.js # Build both contract-template*.docx
     ├── build-salary-model-pdf.js  # Build templates/salary-model-explained.pdf
+    ├── check-router-history.mjs   # Regression check for the router's history rules
     ├── migrate-json-to-sqlite.js  # Migration script
     └── seed-test-data.js          # Test data seeder
 ```

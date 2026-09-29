@@ -429,7 +429,10 @@ const auth = {
       this.currentUser = data;
       this.showLoggedInUI();
       await teamManager.checkInvitations();
-      router.navigate('contacts');
+      // Honour the hash the user arrived with, and replace the landing-page
+      // entry rather than stacking a view they cannot go back to anyway.
+      const target = router._fromHash(location.hash);
+      router.navigate(target.route || 'contacts', target.params, { replace: true });
     } catch (err) {
       console.error('Login error:', err);
       this.showAuthError('Connection error. Please try again.');
@@ -460,7 +463,10 @@ const auth = {
       this.currentUser = data;
       this.showLoggedInUI();
       await teamManager.checkInvitations();
-      router.navigate('contacts');
+      // Honour the hash the user arrived with, and replace the landing-page
+      // entry rather than stacking a view they cannot go back to anyway.
+      const target = router._fromHash(location.hash);
+      router.navigate(target.route || 'contacts', target.params, { replace: true });
     } catch (err) {
       console.error('Register error:', err);
       this.showAuthError('Connection error. Please try again.');
@@ -474,6 +480,11 @@ const auth = {
       console.error('Logout error:', err);
     }
     this.currentUser = null;
+    // Drop the hash and the app's history depth: Back must not walk into views
+    // this session is no longer authenticated for.
+    router.currentRoute = null;
+    router._idx = 0;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
     this.showLandingPage();
   }
 };
@@ -526,36 +537,115 @@ const api = {
   }
 };
 
-// Simple router with browser history support
+// Overlays are mounted outside #app — #modal lives in index.html and the offer
+// modal is appended to <body> — so a route change does not take them with it.
+// Closing them on every navigation keeps them from floating over the new view,
+// and makes sure the offer modal's body scroll lock is always released.
+function closeOverlays() {
+  const m = document.getElementById('modal');
+  if (m && !m.classList.contains('hidden')) modal.hide();
+  if (document.getElementById('offer-modal-root')) views.hideOfferModal();
+}
+
+// Simple router with browser history support.
+//
+// History rules, so that Back lands where the user expects:
+//   - navigating to the place you are already on *replaces* the entry instead
+//     of stacking a duplicate — many actions re-render by navigating to their
+//     own route, and each of those used to cost one dead Back press;
+//   - { replace: true } is for entries that must not be re-enterable: the
+//     first route after boot, and every redirect that follows a save, a
+//     delete or an archive;
+//   - back(fallback) steps back through real history when the app put an entry
+//     there, and only falls back to a route for deep links;
+//   - every entry remembers its scroll offset.
 const router = {
   currentRoute: null,
-  _skipPush: false, // flag to prevent pushing state on popstate
+  _skipPush: false,      // set while handling popstate: the entry already exists
+  _idx: 0,               // how deep into the app's own history we are
+  _restoreScroll: null,  // scroll offset recorded on the entry being restored
+  _skipAutofocus: false, // Back must not steal focus (or pop the mobile keyboard)
 
-  // Build hash URL from route + params, e.g. #contacts, #contact-detail/abc123
+  // Build hash URL from route + params, e.g. #contacts, #contact-detail/abc123.
+  // Params other than `id` ride along as a query string so a reload or a
+  // bookmark keeps them (contact-form's companyId, for instance).
   _toHash(route, params) {
     let hash = '#' + route;
-    if (params.id) hash += '/' + params.id;
+    if (params.id) hash += '/' + encodeURIComponent(params.id);
+    const rest = Object.entries(params)
+      .filter(([k, v]) => k !== 'id' && v !== undefined && v !== null && v !== '');
+    if (rest.length) hash += '?' + new URLSearchParams(rest).toString();
     return hash;
   },
 
   // Parse hash URL back to route + params
   _fromHash(hash) {
     if (!hash || hash === '#') return { route: 'contacts', params: {} };
-    const parts = hash.replace(/^#/, '').split('/');
-    const route = parts[0];
+    const [pathPart, queryPart] = hash.replace(/^#/, '').split('?');
+    const parts = pathPart.split('/');
     const params = {};
-    if (parts[1]) params.id = parts[1];
-    return { route, params };
+    if (parts[1]) params.id = decodeURIComponent(parts[1]);
+    if (queryPart) {
+      for (const [k, v] of new URLSearchParams(queryPart)) params[k] = v;
+    }
+    return { route: parts[0], params };
   },
 
-  navigate(route, params = {}) {
-    this.currentRoute = { route, params };
-    // Push to browser history unless we're handling a popstate event
-    if (!this._skipPush) {
-      history.pushState({ route, params }, '', this._toHash(route, params));
+  // Same route and same params = the user is already standing here.
+  _isCurrent(route, params) {
+    const cur = this.currentRoute;
+    if (!cur || cur.route !== route) return false;
+    const a = cur.params || {};
+    const b = params || {};
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (String(a[k] ?? '') !== String(b[k] ?? '')) return false;
     }
+    return true;
+  },
+
+  // Record where the page was scrolled before we leave the current entry.
+  _rememberScroll() {
+    if (!history.state) return;
+    try {
+      history.replaceState({ ...history.state, scrollY: window.scrollY }, '');
+    } catch (_) { /* best effort — an unclonable state just loses the offset */ }
+  },
+
+  navigate(route, params = {}, opts = {}) {
+    closeOverlays();
+
+    const replace = opts.replace || this._isCurrent(route, params);
+    this.currentRoute = { route, params };
+
+    if (!this._skipPush) {
+      const hash = this._toHash(route, params);
+      if (replace) {
+        history.replaceState({ route, params, idx: this._idx }, '', hash);
+      } else {
+        this._rememberScroll();
+        this._idx++;
+        history.pushState({ route, params, idx: this._idx }, '', hash);
+      }
+      this._restoreScroll = null; // a forward move always starts at the top
+    }
+
     this.render();
     this.updateNav();
+  },
+
+  // For "← Back to X" links and form Cancel buttons. They used to navigate
+  // forward to the list, which left Back pointing straight back into the page
+  // the user had just left.
+  back(fallbackRoute) {
+    closeOverlays();
+    if (this._idx > 0) {
+      this._rememberScroll();
+      history.back();
+      return;
+    }
+    // Deep link straight into a detail view: there is nothing of ours behind
+    // us, so put the list in this entry's place rather than stacking one.
+    this.navigate(fallbackRoute, {}, { replace: true });
   },
 
   updateNav() {
@@ -611,9 +701,6 @@ const router = {
         case 'todos':
           await views.todoList(app);
           break;
-        case 'todo-form':
-          await views.todoForm(app, params.linkedType, params.linkedId);
-          break;
         case 'candidates':
           await views.candidateList(app);
           break;
@@ -657,8 +744,15 @@ const router = {
       }
     }
 
+    // Put the page back where this history entry left it (set by popstate);
+    // a forward navigation starts at the top instead of keeping the previous
+    // view's offset.
+    window.scrollTo(0, this._restoreScroll || 0);
+    this._restoreScroll = null;
+
     // Auto-focus first element with [autofocus] after route render
-    focusAutofocus(app);
+    if (!this._skipAutofocus) focusAutofocus(app);
+    this._skipAutofocus = false;
   }
 };
 
@@ -897,6 +991,8 @@ const views = {
 
   // Contact List View (Main) - supports both full-width and split-view modes
   async contactList(container, selectedId = null) {
+    // Kept on the view so Back from a contact restores the same search.
+    if (this._contactQuery === undefined) this._contactQuery = '';
     const contacts = await api.get('/api/contacts');
     this._contacts = contacts;
     this._currentSort = 'name';
@@ -924,6 +1020,7 @@ const views = {
 
             <div class="mb-3">
               <input type="text" id="search-input" placeholder="Search..." autofocus
+                     value="${this.escapeHtml(this._contactQuery)}"
                      class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors text-sm"
                      oninput="views.filterContactsCompact()">
             </div>
@@ -939,6 +1036,8 @@ const views = {
           </div>
         </div>
       `;
+
+      this.filterContactsCompact();
 
       // Load the selected contact's details
       await this.loadContactDetailPanel(selectedId);
@@ -958,6 +1057,7 @@ const views = {
 
         <div class="mb-4">
           <input type="text" id="search-input" placeholder="Search contacts..." autofocus
+                 value="${this.escapeHtml(this._contactQuery)}"
                  class="w-full md:w-96 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors"
                  oninput="views.filterContacts()">
         </div>
@@ -987,6 +1087,7 @@ const views = {
         </div>
       `;
       document.getElementById('sort-name').textContent = '↑';
+      this.filterContacts();
     }
   },
 
@@ -1026,8 +1127,18 @@ const views = {
     // Already in split-view, just update the selection
     this.selectedContactId = id;
 
-    // Update URL for bookmarking (replaceState to avoid extra history entries for split-view clicks)
-    history.replaceState({ route: 'contact-detail', params: { id } }, '', `#contact-detail/${id}`);
+    // Update URL for bookmarking. Replace rather than push: stepping Back
+    // through every contact glanced at in the split view is not what Back is
+    // for. Keep router.currentRoute and the history depth in sync too — they
+    // used to drift, leaving the router pointing at the previously selected
+    // contact while the URL showed this one.
+    const params = { id };
+    router.currentRoute = { route: 'contact-detail', params };
+    history.replaceState(
+      { route: 'contact-detail', params, idx: router._idx },
+      '',
+      router._toHash('contact-detail', params)
+    );
 
     // Update selection highlight in list
     this.updateContactSelection(id);
@@ -1135,12 +1246,15 @@ const views = {
   // Close contact detail and return to full-width list
   closeContactDetail() {
     this.selectedContactId = null;
-    router.navigate('contacts');
+    // Replace: closing the detail panel collapses the split view in place.
+    // Pushing here meant Back re-opened the contact the user just closed.
+    router.navigate('contacts', {}, { replace: true });
   },
 
   // Filter for compact list in split-view
   filterContactsCompact() {
-    const query = document.getElementById('search-input').value.toLowerCase();
+    this._contactQuery = document.getElementById('search-input').value;
+    const query = this._contactQuery.toLowerCase();
     const filtered = this._contacts.filter(c =>
       c.name.toLowerCase().includes(query) ||
       (c.companyName || '').toLowerCase().includes(query) ||
@@ -1166,7 +1280,8 @@ const views = {
   },
 
   filterContacts() {
-    const query = document.getElementById('search-input').value.toLowerCase();
+    this._contactQuery = document.getElementById('search-input').value;
+    const query = this._contactQuery.toLowerCase();
     const filtered = this._contacts.filter(c =>
       c.name.toLowerCase().includes(query) ||
       (c.companyName || '').toLowerCase().includes(query) ||
@@ -1210,7 +1325,9 @@ const views = {
     });
 
     document.getElementById(`sort-${field}`).textContent = this._sortAsc ? '↑' : '↓';
-    document.getElementById('contacts-table').innerHTML = this.renderContactRows(sorted);
+    // Re-render through the filter so an active search survives sorting.
+    this._contacts = sorted;
+    this.filterContacts();
   },
 
   // Contact Detail View
@@ -1223,7 +1340,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
+        <a href="#" onclick="router.back('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
           ← Back to Contacts
         </a>
       </div>
@@ -1513,7 +1630,9 @@ const views = {
     if (!confirm('Archive this contact? You can restore it later from the Archive.')) return;
     try {
       await api.delete(`/api/contacts/${id}`);
-      router.navigate('contacts');
+      // Replace: the entry we are leaving points at a record that no longer
+      // exists, so Back would render a 404 page.
+      router.navigate('contacts', {}, { replace: true });
     } catch (err) {
       console.error('Error archiving contact:', err);
       alert('Failed to archive contact: ' + err.message);
@@ -1541,7 +1660,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
+        <a href="#" onclick="router.back('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
           ← Back to Contacts
         </a>
       </div>
@@ -1604,7 +1723,7 @@ const views = {
           </div>
 
           <div class="flex justify-end gap-4 pt-4">
-            <button type="button" onclick="router.navigate('contacts')"
+            <button type="button" onclick="router.back('contacts')"
                     class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
             <button type="submit"
                     class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-6 py-2 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-medium shadow-sm">Save</button>
@@ -1657,12 +1776,14 @@ const views = {
       phone: document.getElementById('contact-phone').value
     };
 
+    // Replace: the form has been submitted, so Back should skip past it to
+    // wherever the user opened it from.
     if (id) {
       await api.put(`/api/contacts/${id}`, data);
-      router.navigate('contact-detail', { id });
+      router.navigate('contact-detail', { id }, { replace: true });
     } else {
       const contact = await api.post('/api/contacts', data);
-      router.navigate('contact-detail', { id: contact.id });
+      router.navigate('contact-detail', { id: contact.id }, { replace: true });
     }
   },
 
@@ -1717,7 +1838,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('companies'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
+        <a href="#" onclick="router.back('companies'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
           ← Back to Companies
         </a>
       </div>
@@ -1812,7 +1933,9 @@ const views = {
     if (!confirm('Archive this company and all its contacts? You can restore it later from the Archive.')) return;
     try {
       await api.delete(`/api/companies/${id}`);
-      router.navigate('companies');
+      // Replace: the entry we are leaving points at a record that no longer
+      // exists, so Back would render a 404 page.
+      router.navigate('companies', {}, { replace: true });
     } catch (err) {
       console.error('Error archiving company:', err);
       alert('Failed to archive company: ' + err.message);
@@ -1962,7 +2085,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('companies'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
+        <a href="#" onclick="router.back('companies'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
           ← Back to Companies
         </a>
       </div>
@@ -1998,7 +2121,7 @@ const views = {
           </div>
 
           <div class="flex justify-end gap-4 pt-4">
-            <button type="button" onclick="router.navigate('companies')"
+            <button type="button" onclick="router.back('companies')"
                     class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
             <button type="submit"
                     class="bg-gradient-to-r from-violet-600 to-purple-600 text-white px-6 py-2 rounded-lg hover:from-violet-700 hover:to-purple-700 transition-all font-medium shadow-sm">Save</button>
@@ -2018,12 +2141,14 @@ const views = {
       technologies: document.getElementById('company-technologies').value
     };
 
+    // Replace: the form has been submitted, so Back should skip past it to
+    // wherever the user opened it from.
     if (id) {
       await api.put(`/api/companies/${id}`, data);
-      router.navigate('company-detail', { id });
+      router.navigate('company-detail', { id }, { replace: true });
     } else {
       const company = await api.post('/api/companies', data);
-      router.navigate('company-detail', { id: company.id });
+      router.navigate('company-detail', { id: company.id }, { replace: true });
     }
   },
 
@@ -2091,7 +2216,10 @@ const views = {
     `;
 
     this._todos = todos;
-    this._todoFilter = 'all';
+    // Every todo action re-renders this list, so the All/Active/Completed
+    // choice has to survive the rebuild rather than snap back to "all".
+    if (this._todoFilter === undefined) this._todoFilter = 'all';
+    this.filterTodos(this._todoFilter);
   },
 
   renderTodoRows(todos) {
@@ -3022,6 +3150,13 @@ const views = {
     if (this._candidateOwnerFilter === undefined) {
       this._candidateOwnerFilter = auth.currentUser?.id || '';
     }
+    // Search text and category live on the view, not only in the DOM: this
+    // markup is rebuilt from scratch on every render, so coming back from a
+    // candidate (or switching owner) would otherwise clear both.
+    if (this._candidateListState === undefined) {
+      this._candidateListState = { query: '', category: 'in_progress' };
+    }
+    const listState = this._candidateListState;
 
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
     let teamMembers = [];
@@ -3074,15 +3209,16 @@ const views = {
 
       <div class="mb-4 flex flex-col sm:flex-row gap-3">
         <input type="text" id="candidate-search-input" placeholder="Search candidates..." autofocus
+               value="${this.escapeHtml(listState.query)}"
                class="w-full sm:flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors"
                oninput="views.filterCandidates()" onkeydown="views.candidateSearchKey(event)" autocomplete="off">
         ${ownerFilterHtml}
         <select id="candidate-category-filter"
                 class="px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white text-slate-700"
                 onchange="views.filterCandidates()">
-          <option value="">All Categories</option>
+          <option value="" ${listState.category === '' ? 'selected' : ''}>All Categories</option>
           ${Object.entries(categoryLabels).map(([key, label]) =>
-            `<option value="${key}" ${key === 'in_progress' ? 'selected' : ''}>${label}</option>`
+            `<option value="${key}" ${key === listState.category ? 'selected' : ''}>${label}</option>`
           ).join('')}
         </select>
       </div>
@@ -3342,7 +3478,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
+        <a href="#" onclick="router.back('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
           ← Tillbaka till kandidater
         </a>
       </div>
@@ -3737,8 +3873,11 @@ const views = {
   },
 
   filterCandidates() {
-    const query = document.getElementById('candidate-search-input').value.toLowerCase();
+    const rawQuery = document.getElementById('candidate-search-input').value;
     const categoryFilter = document.getElementById('candidate-category-filter').value;
+    // Remember the choice so the next render of this list can restore it.
+    this._candidateListState = { query: rawQuery, category: categoryFilter };
+    const query = rawQuery.toLowerCase();
     const ownerFilter = this._candidateOwnerFilter; // user id, 'all', or ''
     const all = this._candidates || [];
 
@@ -3863,7 +4002,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
+        <a href="#" onclick="router.back('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
           ← Back to Candidates
         </a>
       </div>
@@ -4909,7 +5048,9 @@ const views = {
     try {
       await api.post(`/api/candidates/${candidateId}/transfer`, { newOwnerId });
       modal.hide();
-      router.navigate('candidates');
+      // Replace: the candidate now belongs to someone else and may no longer
+      // be visible here, so Back must not return to its detail page.
+      router.navigate('candidates', {}, { replace: true });
     } catch (err) {
       alert(`Transfer failed: ${err.message}`);
     }
@@ -5027,7 +5168,9 @@ const views = {
     if (!confirm('Delete this candidate? This cannot be undone.')) return;
     try {
       await api.delete(`/api/candidates/${id}`);
-      router.navigate('candidates');
+      // Replace: the entry we are leaving points at a record that no longer
+      // exists, so Back would render a 404 page.
+      router.navigate('candidates', {}, { replace: true });
     } catch (err) {
       console.error('Error deleting candidate:', err);
       alert('Failed to delete candidate: ' + err.message);
@@ -5359,7 +5502,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
+        <a href="#" onclick="router.back('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
           ← Back to Candidates
         </a>
       </div>
@@ -5445,7 +5588,7 @@ const views = {
           </div>
 
           <div class="flex justify-end gap-4 pt-4">
-            <button type="button" onclick="router.navigate('candidates')"
+            <button type="button" onclick="router.back('candidates')"
                     class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
             <button type="submit"
                     class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-6 py-2 rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all font-medium shadow-sm">Save</button>
@@ -5574,7 +5717,7 @@ const views = {
       if (response.status === 409) {
         const data = await response.json();
         if (data.existingId && confirm(`${data.error}\n\nOpen the existing candidate?`)) {
-          router.navigate('candidate-detail', { id: data.existingId });
+          router.navigate('candidate-detail', { id: data.existingId }, { replace: true });
         }
         return;
       }
@@ -5585,7 +5728,8 @@ const views = {
       }
 
       const candidate = await response.json();
-      router.navigate('candidate-detail', { id: candidate.id });
+      // Replace: the form has been submitted, so Back should skip past it.
+      router.navigate('candidate-detail', { id: candidate.id }, { replace: true });
     } catch (err) {
       if (err.message !== 'Authentication required') {
         alert('Error: ' + err.message);
@@ -5603,7 +5747,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
+        <a href="#" onclick="router.back('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
           ← Back to Contacts
         </a>
       </div>
@@ -6171,7 +6315,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
+        <a href="#" onclick="router.back('contacts'); return false;" class="text-sky-600 hover:text-sky-700 font-medium">
           ← Back to Contacts
         </a>
       </div>
@@ -6391,7 +6535,7 @@ const views = {
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('inbox'); return false;" class="text-indigo-600 hover:text-indigo-700 font-medium">
+        <a href="#" onclick="router.back('inbox'); return false;" class="text-indigo-600 hover:text-indigo-700 font-medium">
           ← Back to Inbox
         </a>
       </div>
@@ -6708,7 +6852,9 @@ We're looking for a senior Java developer..."></textarea>
     if (!confirm('Delete this email from inbox?')) return;
     try {
       await api.delete(`/api/inbox/${emailId}`);
-      router.navigate('inbox');
+      // Replace: the entry we are leaving points at a record that no longer
+      // exists, so Back would render a 404 page.
+      router.navigate('inbox', {}, { replace: true });
     } catch (err) {
       alert('Error: ' + err.message);
     }
@@ -6743,6 +6889,8 @@ We're looking for a senior Java developer..."></textarea>
   // ============ Consultant Requests ============
 
   async requestList(container) {
+    // Kept on the view so Back from a request restores the same search.
+    if (this._requestQuery === undefined) this._requestQuery = '';
     const requests = await api.get('/api/requests');
 
     // Sort: active first (open, in_progress), then closed/filled
@@ -6764,6 +6912,7 @@ We're looking for a senior Java developer..."></textarea>
 
       <div class="mb-4">
         <input type="text" id="request-search-input" placeholder="Search requests..." autofocus
+               value="${this.escapeHtml(this._requestQuery)}"
                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition-colors"
                oninput="views.filterRequests()" onkeydown="views.requestSearchKey(event)" autocomplete="off">
       </div>
@@ -6791,6 +6940,7 @@ We're looking for a senior Java developer..."></textarea>
 
     this._requests = sorted;
     this._requestActiveIndex = -1;
+    this.filterRequests();
   },
 
   renderRequestRows(requests) {
@@ -6841,7 +6991,8 @@ We're looking for a senior Java developer..."></textarea>
     if (!tbody) return;
     const all = this._requests || [];
     if (all.length === 0) return; // keep the "no requests yet" message
-    const query = (input ? input.value : '').toLowerCase();
+    this._requestQuery = input ? input.value : '';
+    const query = this._requestQuery.toLowerCase();
     const filtered = query ? all.filter(r => this._requestMatchesQuery(r, query)) : all;
     tbody.innerHTML = this.renderRequestRows(filtered);
 
@@ -6901,7 +7052,7 @@ We're looking for a senior Java developer..."></textarea>
 
     container.innerHTML = `
       <div class="mb-6">
-        <a href="#" onclick="router.navigate('requests'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
+        <a href="#" onclick="router.back('requests'); return false;" class="text-violet-600 hover:text-violet-700 font-medium">
           ← Back to Requests
         </a>
       </div>
@@ -7523,7 +7674,9 @@ We're looking for a senior Java developer..."></textarea>
     if (!confirm('Delete this request?')) return;
     try {
       await api.delete(`/api/requests/${requestId}`);
-      router.navigate('requests');
+      // Replace: the entry we are leaving points at a record that no longer
+      // exists, so Back would render a 404 page.
+      router.navigate('requests', {}, { replace: true });
     } catch (err) {
       alert('Error: ' + err.message);
     }
@@ -7544,20 +7697,44 @@ We're looking for a senior Java developer..."></textarea>
 // Handle browser back/forward buttons
 window.addEventListener('popstate', (e) => {
   if (!auth.currentUser) return; // not logged in, ignore
-  const { route, params } = e.state || router._fromHash(location.hash);
+  const state = e.state;
+  const { route, params } = state || router._fromHash(location.hash);
+  router._idx = state && typeof state.idx === 'number' ? state.idx : 0;
+  router._restoreScroll = state ? state.scrollY : null;
+  router._skipAutofocus = true;
   router._skipPush = true;
   router.navigate(route || 'contacts', params || {});
   router._skipPush = false;
 });
 
+// Keep the current entry's scroll offset current. navigate() records it when
+// the user moves forward, but the browser's own Back button reports no
+// outgoing position, so Forward would come back to the top without this.
+// Throttled: browsers rate-limit replaceState, and once or twice a second
+// while actually scrolling is plenty.
+let scrollSaveTimer = null;
+window.addEventListener('scroll', () => {
+  if (scrollSaveTimer || !auth.currentUser) return;
+  scrollSaveTimer = setTimeout(() => {
+    scrollSaveTimer = null;
+    router._rememberScroll();
+  }, 300);
+}, { passive: true });
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize i18n for landing page
   i18n.init();
 
+  // We restore scroll offsets ourselves — the browser's own attempt runs
+  // before the async view render has produced any content to scroll.
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
   const isAuthenticated = await auth.checkAuth();
   if (isAuthenticated) {
-    // Restore route from URL hash if present, otherwise default to contacts
+    // Restore route from URL hash if present, otherwise default to contacts.
+    // Replace, don't push: pushing leaves the page-load entry underneath with
+    // the same hash, and the first Back press just re-renders the same view.
     const { route, params } = router._fromHash(location.hash);
-    router.navigate(route, params);
+    router.navigate(route, params, { replace: true });
   }
 });
