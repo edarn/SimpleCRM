@@ -202,6 +202,9 @@ app.use('/api/candidates', requireAuth, require('./src/routes/candidates')(uploa
 // Candidate employment offer routes (mounted under candidates)
 app.use('/api/candidates/:candidateId/offers', requireAuth, require('./src/routes/offers')(uploadsDir));
 
+// Client screening pipeline (the "Apple" tab)
+app.use('/api/pipeline', requireAuth, require('./src/routes/pipeline'));
+
 // Team management routes (with logo upload support)
 app.use('/api/team', requireAuth, require('./src/routes/team')(logoUpload, uploadsDir));
 app.use('/api/invitations', requireAuth, require('./src/routes/invitations'));

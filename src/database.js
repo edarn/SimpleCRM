@@ -451,6 +451,43 @@ function migrateExistingData() {
       FOREIGN KEY (created_by) REFERENCES users(id)
     )
   `);
+  // Client screening pipeline (the "Apple" tab). One row per candidate being
+  // taken through one client's process; `client` is a column so a second
+  // customer is configuration rather than a migration. The steps live as JSON
+  // — same house style as checklist_items_state — and nothing derived from
+  // them (outcome, progress, next action) is cached, so a row can never
+  // disagree with itself. See src/lib/pipeline.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS client_pipeline (
+      id TEXT PRIMARY KEY,
+      client TEXT NOT NULL DEFAULT 'apple',
+      candidate_id TEXT NOT NULL,
+      team TEXT DEFAULT '',
+      steps_json TEXT NOT NULL DEFAULT '{}',
+      feedback_status TEXT NOT NULL DEFAULT 'pending' CHECK (feedback_status IN ('pending', 'done')),
+      feedback_date TEXT DEFAULT '',
+      start_date TEXT DEFAULT '',
+      ended_at TEXT,
+      note TEXT DEFAULT '',
+      team_id TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+      FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )
+  `);
+  try {
+    // One row per candidate per client: adding someone twice is a no-op, which
+    // is what the bulk "add to flow" paths rely on.
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_client_pipeline_unique ON client_pipeline(client, candidate_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_client_pipeline_client ON client_pipeline(client)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_client_pipeline_team_id ON client_pipeline(team_id)`);
+  } catch (err) {
+    console.log('client_pipeline index error:', err.message);
+  }
+
   try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_candidate_offers_candidate_id ON candidate_offers(candidate_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_candidate_offers_team_id ON candidate_offers(team_id)`);

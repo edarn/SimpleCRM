@@ -498,6 +498,9 @@ const api = {
       throw new Error('Authentication required');
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // 204 = the thing legitimately does not exist (a candidate outside the
+    // pipeline, say). res.json() on an empty body throws, so answer null.
+    if (res.status === 204) return null;
     return res.json();
   },
   async post(url, data) {
@@ -516,6 +519,19 @@ const api = {
   async put(url, data) {
     const res = await fetch(url, {
       method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.status === 401) {
+      auth.showLoginModal();
+      throw new Error('Authentication required');
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+  async patch(url, data) {
+    const res = await fetch(url, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
@@ -712,6 +728,9 @@ const router = {
           break;
         case 'candidate-duplicates':
           await views.candidateDuplicates(app);
+          break;
+        case 'apple':
+          await views.appleView(app);
           break;
         case 'team-settings':
           await views.teamSettings(app);
@@ -3263,6 +3282,7 @@ const views = {
     document.getElementById('sort-candidate-name').textContent = '↑';
     // Apply default filter
     this.filterCandidates();
+    this.loadAppleBadges();
   },
 
   showCVImportModal() {
@@ -3290,6 +3310,27 @@ const views = {
             </label>
           </div>
         </div>
+        <div class="mb-4 border border-slate-200 rounded-lg p-3">
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" id="cv-import-apple" onchange="views.toggleCVImportApple()"
+                   class="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-800 focus:ring-slate-500">
+            <span>
+              <span class="text-sm text-slate-700">Lägg även till i Apple-flödet</span>
+              <span class="block text-xs text-slate-400">Alla profiler i den här importen hamnar överst i flödet med "Skicka provlänk" som nästa åtgärd.</span>
+            </span>
+          </label>
+          <div id="cv-import-apple-team" class="hidden mt-3 pl-6">
+            <label for="cv-import-team" class="block text-xs font-medium text-slate-600 mb-1">Team för hela omgången</label>
+            <select id="cv-import-team" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-slate-700">
+              <option value="">Utan team — sätts per person senare</option>
+              <option value="Java Backend">Java Backend</option>
+              <option value="TypeScript Frontend">TypeScript Frontend</option>
+              <option value="iOS">iOS</option>
+              <option value="Java/Scala">Java/Scala</option>
+              <option value="Machine Learning">Machine Learning</option>
+            </select>
+          </div>
+        </div>
         <div id="cv-import-progress" class="hidden mb-4">
           <div class="text-sm text-slate-600 mb-1" id="cv-import-status">Processing...</div>
           <div class="w-full bg-slate-200 rounded-full h-2.5">
@@ -3306,6 +3347,12 @@ const views = {
       </form>
     `;
     modal.show();
+  },
+
+  toggleCVImportApple() {
+    const box = document.getElementById('cv-import-apple');
+    const teamRow = document.getElementById('cv-import-apple-team');
+    if (teamRow) teamRow.classList.toggle('hidden', !box.checked);
   },
 
   async submitCVImport(e) {
@@ -3334,6 +3381,15 @@ const views = {
       formData.append('cvFiles', file);
     }
     formData.append('category', category);
+
+    // "Lägg även till i Apple-flödet". Merged duplicates come along too, so a
+    // re-imported CV still puts a known candidate in the flow.
+    const appleBox = document.getElementById('cv-import-apple');
+    if (appleBox && appleBox.checked) {
+      formData.append('addToPipeline', 'true');
+      formData.append('pipelineClient', 'apple');
+      formData.append('pipelineTeam', document.getElementById('cv-import-team').value);
+    }
 
     try {
       const response = await fetch('/api/candidates/import-cvs', {
@@ -3429,7 +3485,8 @@ const views = {
 
     if (evt.type === 'done') {
       bar.style.width = '100%';
-      statusEl.textContent = `Done: ${evt.created} created` + (evt.merged > 0 ? `, ${evt.merged} merged` : '') + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`;
+      statusEl.textContent = `Done: ${evt.created} created` + (evt.merged > 0 ? `, ${evt.merged} merged` : '') + (evt.failed > 0 ? `, ${evt.failed} failed` : '') + ` of ${evt.total}`
+        + (evt.pipelineAdded > 0 ? ` · ${evt.pipelineAdded} tillagda i Apple-flödet` : '');
 
       // A batch where CVs had no email is exactly how duplicates slipped in
       // unnoticed last time — say it out loud and offer the review screen.
@@ -3811,6 +3868,28 @@ const views = {
                   title="Underkonsult — anlitas via eget bolag eller underleverantör">Underkonsult</span>`;
   },
 
+  // Candidates in the Apple flow, fetched once per list render. Absence of the
+  // badge is the signal, exactly like the Underkonsult one.
+  _appleIds: null,
+
+  _appleBadge(candidate) {
+    return this._appleIds && this._appleIds.has(candidate.id)
+      ? '<span class="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full tracking-wide">APPLE</span>'
+      : '';
+  },
+
+  async loadAppleBadges() {
+    try {
+      const res = await api.get('/api/pipeline/apple/candidate-ids');
+      this._appleIds = new Set(res.ids || []);
+    } catch (_) {
+      this._appleIds = null; // a badge is not worth failing a list over
+      return;
+    }
+    const tbody = document.getElementById('candidates-table');
+    if (tbody && this._candidates) this.filterCandidates();
+  },
+
   renderCandidateRows(candidates) {
     const categoryLabels = this._candidateCategories;
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
@@ -3830,6 +3909,7 @@ const views = {
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-medium text-slate-800">${this.escapeHtml(c.name)}</span>
             ${this._subcontractorBadge(c)}
+            ${this._appleBadge(c)}
           </div>
           ${c.skills ? `<div class="text-xs text-slate-400 mt-0.5 truncate max-w-md">${this.escapeHtml(c.skills)}</div>` : ''}
         </td>
@@ -4098,6 +4178,10 @@ const views = {
         </div>
 
         <div class="mt-4 pt-4 border-t border-slate-200">
+          <div id="apple-section"></div>
+        </div>
+
+        <div class="mt-4 pt-4 border-t border-slate-200">
           <div class="flex justify-between items-center mb-3">
             <h3 class="text-sm font-medium text-slate-500">Anställningserbjudanden</h3>
             <button onclick="views.showOfferModal('${candidate.id}')"
@@ -4156,8 +4240,9 @@ const views = {
       });
     }
 
-    // Load offers and request matches in the background
+    // Load offers, the Apple flow and request matches in the background
     this.loadOffersList(candidate.id);
+    this.loadAppleSection(candidate.id);
     this.loadCandidateRequestMatches(candidate.id);
   },
 
@@ -4469,6 +4554,739 @@ const views = {
         socialFeesDivisor,
       },
     };
+  },
+
+  // ===================== Apple / client pipeline =====================
+  //
+  // Every rule about where someone stands lives on the server
+  // (src/lib/pipeline.js) and arrives with each row: outcome, progress, the
+  // next action and the sort order. This file only draws it.
+
+  // Filters and the chosen sub-view survive a re-render (and Back) by living
+  // here rather than only in the DOM.
+  _appleState: { client: 'apple', tab: 'flow', filter: 'all', team: '', form: '', query: '' },
+
+  _APPLE_OUTCOMES: {
+    done: { label: 'KLARA', cls: 'bg-emerald-50 text-emerald-700' },
+    active: { label: 'PÅGÅENDE', cls: 'bg-white text-slate-700' },
+    rejected: { label: 'AVSLAG', cls: 'bg-red-50 text-red-800' },
+  },
+
+  async appleView(container) {
+    const s = this._appleState;
+    container.innerHTML = '<p class="text-sm text-slate-400">Laddar…</p>';
+
+    let board;
+    try {
+      board = await api.get(`/api/pipeline/${s.client}`);
+    } catch (err) {
+      if (err.message === 'Authentication required') return;
+      container.innerHTML = '<p class="text-sm text-red-500">Kunde inte ladda flödet.</p>';
+      return;
+    }
+    this._appleBoard = board;
+
+    container.innerHTML = `
+      <div class="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-3">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">${this.escapeHtml(board.clientLabel)}</h2>
+          <p class="text-slate-500">${board.summary.total} i flödet · ${board.summary.done} tillsatta</p>
+        </div>
+        <button onclick="views.showApplePicker()"
+                class="bg-slate-800 text-white px-5 py-2.5 rounded-lg hover:bg-slate-900 transition-all font-medium shadow-sm text-sm">
+          + Lägg till kandidater
+        </button>
+      </div>
+
+      <div class="flex gap-6 border-b border-slate-200 mb-5">
+        <button onclick="views.setAppleTab('flow')"
+                class="pb-2.5 text-sm ${s.tab === 'flow' ? 'font-semibold text-slate-800 border-b-2 border-slate-800 -mb-px' : 'font-medium text-slate-500 hover:text-slate-700'}">
+          Flödet <span class="text-slate-400 font-normal">${board.summary.total}</span>
+        </button>
+        <button onclick="views.setAppleTab('roster')"
+                class="pb-2.5 text-sm ${s.tab === 'roster' ? 'font-semibold text-slate-800 border-b-2 border-slate-800 -mb-px' : 'font-medium text-slate-500 hover:text-slate-700'}">
+          Klara &amp; startande <span class="text-slate-400 font-normal">${board.summary.done}</span>
+        </button>
+      </div>
+
+      <div id="apple-body"></div>
+    `;
+    this.renderAppleBody();
+  },
+
+  setAppleTab(tab) {
+    this._appleState.tab = tab;
+    const container = document.getElementById('app');
+    if (container) this.appleView(container);
+  },
+
+  setAppleFilter(filter) {
+    this._appleState.filter = filter;
+    this.renderAppleBody();
+  },
+
+  changeAppleFacet(key, value) {
+    this._appleState[key] = value;
+    this.renderAppleBody();
+  },
+
+  filterAppleRows() {
+    const input = document.getElementById('apple-search');
+    this._appleState.query = input ? input.value : '';
+    const list = document.getElementById('apple-rows');
+    if (list) list.innerHTML = this._appleRowsHtml(this._visibleAppleRows());
+  },
+
+  _visibleAppleRows() {
+    const s = this._appleState;
+    const rows = (this._appleBoard && this._appleBoard.rows) || [];
+    const q = s.query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (s.filter === 'needs' && !(r.outcome === 'active' && (r.nextAction.kind === 'mine' || r.waitingDays > 0))) return false;
+      if (s.filter === 'feedback' && !(r.outcome === 'rejected' && r.nextAction.kind === 'mine')) return false;
+      if (s.filter === 'done' && r.outcome !== 'done') return false;
+      if (s.filter === 'rejected' && r.outcome !== 'rejected') return false;
+      if (s.team && r.team !== s.team) return false;
+      if (s.form === 'employment' && r.isSubcontractor) return false;
+      if (s.form === 'subcontractor' && !r.isSubcontractor) return false;
+      if (q && !(`${r.candidateName} ${r.candidateRole} ${r.team}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  },
+
+  renderAppleBody() {
+    const body = document.getElementById('apple-body');
+    if (!body) return;
+    const board = this._appleBoard;
+    body.innerHTML = this._appleState.tab === 'roster'
+      ? this._appleRosterHtml(board)
+      : this._appleFlowHtml(board);
+  },
+
+  // ----- the flow (matrix) -----
+
+  _appleFlowHtml(board) {
+    const s = this._appleState;
+    const sum = board.summary;
+    const byKey = Object.fromEntries(sum.steps.map((x) => [x.key, x]));
+    const funnel = [
+      { n: sum.total, label: 'I flödet', hint: `${sum.employment} anst. · ${sum.subcontractor} UK` },
+      ...board.steps.slice(0, 4).map((st) => ({
+        n: byKey[st.key].cleared,
+        label: st.label,
+        hint: [byKey[st.key].waiting ? `${byKey[st.key].waiting} väntar` : '', byKey[st.key].rejected ? `${byKey[st.key].rejected} nej` : ''].filter(Boolean).join(' · '),
+      })),
+      { n: byKey.signed.cleared, label: 'Avtal signerat', hint: `${sum.done} klara`, accent: true },
+    ];
+
+    const chip = (key, label, count, tone) => `
+      <button onclick="views.setAppleFilter('${key}')"
+              class="px-3.5 py-1.5 rounded-lg text-sm transition-colors ${s.filter === key
+                ? 'bg-slate-800 text-white font-semibold'
+                : tone === 'warn' ? 'bg-amber-100 text-amber-900 font-medium hover:bg-amber-200'
+                : 'bg-slate-100 text-slate-600 font-medium hover:bg-slate-200'}">
+        ${label} ${count}
+      </button>`;
+
+    return `
+      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        ${funnel.map((f) => `
+          <div class="pl-3.5 border-l-[3px] ${f.accent ? 'border-emerald-700' : 'border-slate-300'}">
+            <div class="text-2xl font-bold leading-tight ${f.accent ? 'text-emerald-700' : 'text-slate-800'}">${f.n}</div>
+            <div class="text-xs font-semibold text-slate-600 mt-0.5">${this.escapeHtml(f.label)}</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">${this.escapeHtml(f.hint || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
+        <div class="flex gap-1.5 flex-wrap">
+          ${chip('all', 'Alla', sum.total)}
+          ${chip('needs', 'Behöver åtgärd', sum.needsAction, 'warn')}
+          ${chip('feedback', 'Att återkoppla', sum.awaitingFeedback, 'warn')}
+          ${chip('done', 'Klara', sum.done)}
+          ${chip('rejected', 'Avslag', sum.rejected)}
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <select onchange="views.changeAppleFacet('form', this.value)"
+                  class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-slate-700">
+            <option value="" ${s.form === '' ? 'selected' : ''}>Alla former</option>
+            <option value="employment" ${s.form === 'employment' ? 'selected' : ''}>Anställning</option>
+            <option value="subcontractor" ${s.form === 'subcontractor' ? 'selected' : ''}>Underkonsult</option>
+          </select>
+          <select onchange="views.changeAppleFacet('team', this.value)"
+                  class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-slate-700">
+            <option value="" ${s.team === '' ? 'selected' : ''}>Alla team</option>
+            ${board.teams.map((t) => `<option value="${this.escapeHtml(t)}" ${s.team === t ? 'selected' : ''}>${this.escapeHtml(t)}</option>`).join('')}
+          </select>
+          <input id="apple-search" type="text" placeholder="Sök…" value="${this.escapeHtml(s.query)}"
+                 oninput="views.filterAppleRows()" autocomplete="off"
+                 class="w-44 px-3.5 py-2 border border-slate-300 rounded-lg text-sm">
+        </div>
+      </div>
+
+      <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-x-auto">
+        <div style="min-width: 1180px">
+          <div class="grid items-end px-5 pt-2.5 pb-2 bg-slate-50 border-b border-slate-200" style="${this._APPLE_GRID}">
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">KANDIDAT</div>
+            ${board.steps.map((st, i) => `
+              <div class="text-[11px] font-bold text-slate-500 tracking-wide leading-tight ${i === 4 ? 'pl-1 border-l border-slate-200' : ''}">
+                ${this.escapeHtml(st.key === 'offer' ? 'Erbjudande / Pris' : st.label).toUpperCase()}
+              </div>
+            `).join('')}
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">NÄSTA ÅTGÄRD</div>
+          </div>
+          <div id="apple-rows">${this._appleRowsHtml(this._visibleAppleRows())}</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-5 flex-wrap mt-3 px-1">
+        ${[['pending', 'Ej påbörjat'], ['active', 'Skickat / bokat — väntar'], ['passed', 'Ok'], ['failed', 'Nej'], ['skipped', 'Hoppades över']]
+          .map(([st, label]) => `<span class="flex items-center gap-2">${this._appleGlyph(st, 20)}<span class="text-xs text-slate-600">${label}</span></span>`).join('')}
+      </div>
+    `;
+  },
+
+  _APPLE_GRID: 'grid-template-columns: 260px repeat(7, 96px) minmax(240px, 1fr)',
+
+  _appleRowsHtml(rows) {
+    if (!rows.length) {
+      return '<div class="px-5 py-8 text-center text-slate-400 text-sm">Inga kandidater matchar.</div>';
+    }
+    let lastOutcome = null;
+    return rows.map((r) => {
+      let header = '';
+      if (r.outcome !== lastOutcome) {
+        const o = this._APPLE_OUTCOMES[r.outcome];
+        const count = rows.filter((x) => x.outcome === r.outcome).length;
+        header = `<div class="px-5 py-2 border-b border-slate-100 ${o.cls} ${lastOutcome ? 'border-t border-slate-200' : ''}">
+            <span class="text-xs font-bold tracking-wide">${o.label}</span>
+            <span class="text-xs opacity-70 ml-1.5">${count}</span>
+          </div>`;
+        lastOutcome = r.outcome;
+      }
+      return header + this._appleRowHtml(r);
+    }).join('');
+  },
+
+  _appleRowHtml(r) {
+    // Faintly red once rejected; amber while something is waiting on someone.
+    const tone = r.outcome === 'rejected' ? 'bg-red-50/70'
+      : r.outcome === 'active' && (r.nextAction.kind === 'mine' || r.waitingDays > 0) ? 'bg-amber-50/40'
+      : '';
+    const dim = r.outcome === 'rejected' ? 'text-slate-500' : 'text-slate-800';
+
+    return `
+      <div class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_GRID}">
+        <div class="pr-3 min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <a href="#" onclick="router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;"
+               class="text-sm font-semibold ${dim} hover:text-rose-600 truncate">${this.escapeHtml(r.candidateName)}</a>
+            ${this._appleFormBadge(r.isSubcontractor)}
+          </div>
+          <div class="text-xs mt-0.5 truncate">
+            <span class="text-slate-600 font-medium">${this.escapeHtml(r.team || 'Utan team')}</span>
+            ${r.candidateRole ? `<span class="text-slate-400"> · ${this.escapeHtml(r.candidateRole)}</span>` : ''}
+          </div>
+        </div>
+        ${r.stepLabels.map((st, i) => this._appleCellHtml(r, st, i)).join('')}
+        <div class="pl-2">${this._appleActionHtml(r)}</div>
+      </div>
+    `;
+  },
+
+  _appleFormBadge(isSubcontractor) {
+    return isSubcontractor
+      ? '<span class="shrink-0 text-[10px] font-bold text-green-800 bg-green-100 px-2 py-0.5 rounded-full">UNDERKONSULT</span>'
+      : '<span class="shrink-0 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">ANSTÄLLNING</span>';
+  },
+
+  _appleCellHtml(r, step, index) {
+    const cell = r.steps[step.key];
+    // Steps after a rejection are not "to do" — they are not applicable.
+    const inactive = r.inactiveFrom != null && index >= r.inactiveFrom;
+    const border = index === 4 ? 'border-l border-slate-100 pl-1' : '';
+    if (inactive) {
+      return `<div class="${border} opacity-30"><span class="inline-flex w-6 h-6 rounded-full border-2 border-dotted border-slate-300"></span><div class="h-3.5 mt-0.5"></div></div>`;
+    }
+    const dateText = cell.date ? this._appleShortDate(cell.date) : (cell.status === 'active' ? 'väntar' : '');
+    const dateTone = cell.status === 'active' ? 'text-amber-700 font-semibold' : 'text-slate-400';
+    return `
+      <div class="${border}">
+        <button onclick="views.showAppleStepModal('${r.id}', '${step.key}')"
+                title="${this.escapeHtml(step.label)}${cell.note ? ' — ' + this.escapeHtml(cell.note) : ''}"
+                class="block rounded-full hover:ring-2 hover:ring-slate-300 focus:ring-2 focus:ring-slate-400 focus:outline-none">
+          ${this._appleGlyph(cell.status)}
+        </button>
+        <div class="h-3.5 mt-0.5 text-[10px] ${dateTone} truncate">${this.escapeHtml(dateText)}</div>
+      </div>
+    `;
+  },
+
+  _appleGlyph(status, size) {
+    const box = size === 20 ? 'w-5 h-5' : 'w-6 h-6';
+    const base = `inline-flex items-center justify-center ${box} rounded-full shrink-0`;
+    if (status === 'passed') return `<span class="${base} bg-emerald-700 text-white text-[13px] font-bold">✓</span>`;
+    if (status === 'failed') return `<span class="${base} bg-red-700 text-white text-xs font-bold">✕</span>`;
+    if (status === 'skipped') return `<span class="${base} bg-slate-100 text-slate-500 text-sm font-bold">–</span>`;
+    if (status === 'active') {
+      return `<span class="${base} border-2 border-amber-700 bg-amber-50">
+        <svg class="${size === 20 ? 'w-2.5 h-2.5' : 'w-3 h-3'}" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline>
+        </svg></span>`;
+    }
+    return `<span class="inline-flex ${box} rounded-full border-2 border-dashed border-slate-300 shrink-0"></span>`;
+  },
+
+  _appleActionHtml(r) {
+    const dot = { mine: 'bg-indigo-700', waiting: 'bg-amber-600', soon: 'bg-emerald-700', closed: 'bg-slate-300' }[r.nextAction.kind] || 'bg-slate-300';
+    const text = { mine: 'text-slate-700 font-semibold', waiting: 'text-slate-700', soon: 'text-emerald-700 font-semibold', closed: 'text-slate-400' }[r.nextAction.kind] || 'text-slate-600';
+    const days = r.nextAction.days > 0
+      ? `<span class="text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full shrink-0">${r.nextAction.days} dgr</span>`
+      : '';
+    return `<div class="flex items-center gap-2 min-w-0">
+        <span class="w-[7px] h-[7px] rounded-full ${dot} shrink-0"></span>
+        <span class="text-[13px] ${text} truncate">${this.escapeHtml(r.nextAction.label)}</span>
+        ${days}
+      </div>`;
+  },
+
+  _appleShortDate(value) {
+    const d = new Date(value.length <= 10 ? value + 'T00:00:00Z' : value);
+    if (isNaN(d.getTime())) return '';
+    const months = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    return `${d.getUTCDate()} ${months[d.getUTCMonth()]}`;
+  },
+
+  // ----- the roster (Klara & startande) -----
+
+  _appleRosterHtml(board) {
+    const placed = board.rows.filter((r) => r.outcome === 'done');
+    const onSite = placed.filter((r) => r.nextAction.kind === 'closed' && r.startDate).length;
+    const starting = placed.filter((r) => r.nextAction.kind === 'soon').length;
+    const noDate = placed.filter((r) => !r.startDate).length;
+
+    const groups = [...board.teams, ''].map((team) => ({
+      team,
+      label: team || 'Utan team',
+      rows: placed.filter((r) => (r.team || '') === team),
+      inFlow: board.rows.filter((r) => r.outcome === 'active' && (r.team || '') === team).length,
+    })).filter((g) => g.rows.length || g.inFlow);
+
+    return `
+      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        ${[
+          { n: onSite, label: 'På plats hos ' + board.clientLabel, cls: 'border-emerald-700 text-emerald-700' },
+          { n: starting, label: 'Startar senare', cls: 'border-indigo-700 text-indigo-700' },
+          { n: noDate, label: 'Saknar startdatum', cls: 'border-amber-700 text-amber-700', hint: noDate ? 'behöver åtgärd' : '' },
+          { n: groups.filter((g) => g.rows.length).length, label: 'Team med tillsatta', cls: 'border-slate-300 text-slate-800', hint: `${placed.filter((r) => !r.isSubcontractor).length} anställda · ${placed.filter((r) => r.isSubcontractor).length} underkonsulter` },
+        ].map((c) => `
+          <div class="pl-3.5 border-l-[3px] ${c.cls}">
+            <div class="text-2xl font-bold leading-tight">${c.n}</div>
+            <div class="text-xs font-semibold text-slate-600 mt-0.5">${this.escapeHtml(c.label)}</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">${this.escapeHtml(c.hint || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      ${placed.length === 0 ? '<p class="text-sm text-slate-400">Ingen är klar ännu.</p>' : `
+      <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-x-auto">
+        <div style="min-width: 900px">
+          <div class="grid items-center px-5 py-2.5 bg-slate-50 border-b border-slate-200" style="${this._APPLE_ROSTER_GRID}">
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">NAMN</div>
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">ROLL</div>
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">AVTAL</div>
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">STARTDATUM</div>
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">STATUS</div>
+          </div>
+          ${groups.map((g) => `
+            <div class="px-5 py-2 border-b border-slate-100 border-t border-slate-200 flex items-center gap-2">
+              <span class="text-xs font-bold tracking-wide ${g.rows.length ? 'text-slate-700' : 'text-slate-400'}">${this.escapeHtml(g.label.toUpperCase())}</span>
+              <span class="text-xs text-slate-400">${g.rows.length}</span>
+            </div>
+            ${g.rows.length ? g.rows.map((r) => this._appleRosterRowHtml(r)).join('') : `
+              <div class="px-5 py-3 flex items-center gap-2">
+                <span class="text-[13px] text-slate-400">Ingen tillsatt ännu.</span>
+                <button onclick="views.setAppleTab('flow')" class="text-[13px] font-semibold text-indigo-700 hover:text-indigo-800">${g.inFlow} i flödet →</button>
+              </div>`}
+          `).join('')}
+        </div>
+      </div>`}
+    `;
+  },
+
+  _APPLE_ROSTER_GRID: 'grid-template-columns: minmax(240px, 1.2fr) minmax(180px, 1fr) 120px 140px minmax(200px, 1.2fr)',
+
+  _appleRosterRowHtml(r) {
+    const signed = r.steps.signed.date || r.steps.confirmed.date;
+    const tone = !r.startDate ? 'bg-amber-50/40' : '';
+    return `
+      <div class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_ROSTER_GRID}">
+        <div class="flex items-center gap-2 min-w-0 pr-3">
+          <a href="#" onclick="router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;"
+             class="text-sm font-semibold text-slate-800 hover:text-rose-600 truncate">${this.escapeHtml(r.candidateName)}</a>
+          ${this._appleFormBadge(r.isSubcontractor)}
+        </div>
+        <div class="text-[13px] text-slate-500 truncate pr-3">${this.escapeHtml(r.candidateRole || '—')}</div>
+        <div class="text-[13px] text-slate-500">${this.escapeHtml(signed ? this._appleShortDate(signed) : '—')}</div>
+        <div>
+          ${r.startDate
+            ? `<button onclick="views.editAppleStartDate('${r.id}')" class="text-[13px] font-medium text-slate-800 hover:text-indigo-700">${this.escapeHtml(this._appleShortDate(r.startDate))}</button>`
+            : `<button onclick="views.editAppleStartDate('${r.id}')" class="text-xs font-semibold text-amber-900 bg-amber-50 border border-dashed border-amber-700 px-2.5 py-1 rounded-md hover:bg-amber-100">Sätt datum</button>`}
+        </div>
+        <div>${this._appleActionHtml(r)}</div>
+      </div>
+    `;
+  },
+
+  editAppleStartDate(rowId) {
+    const row = (this._appleBoard.rows || []).find((r) => r.id === rowId);
+    if (!row) return;
+    modal.show(`
+      <h3 class="text-lg font-semibold text-slate-800 mb-1">Startdatum</h3>
+      <p class="text-sm text-slate-500 mb-4">${this.escapeHtml(row.candidateName)}</p>
+      <label for="apple-start" class="block text-xs font-medium text-slate-600 mb-1">Startar hos ${this.escapeHtml(row.clientLabel)}</label>
+      <input id="apple-start" type="date" value="${this.escapeHtml(row.startDate)}" autofocus
+             class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm mb-4">
+      <label for="apple-ended" class="block text-xs font-medium text-slate-600 mb-1">Uppdraget avslutat (valfritt)</label>
+      <input id="apple-ended" type="date" value="${this.escapeHtml(row.endedAt || '')}"
+             class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+      <div class="flex justify-end gap-2 mt-5">
+        <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium text-sm">Avbryt</button>
+        <button onclick="views.saveAppleStartDate('${rowId}')"
+                class="bg-slate-800 text-white px-5 py-2 rounded-lg hover:bg-slate-900 font-medium text-sm">Spara</button>
+      </div>
+    `);
+  },
+
+  async saveAppleStartDate(rowId) {
+    const startDate = document.getElementById('apple-start').value;
+    const endedAt = document.getElementById('apple-ended').value;
+    try {
+      await api.patch(`/api/pipeline/${this._appleState.client}/rows/${rowId}`, { startDate, endedAt: endedAt || null });
+      modal.hide();
+      await this.reloadAppleBoard();
+    } catch (err) {
+      alert('Kunde inte spara: ' + (err.message || err));
+    }
+  },
+
+  // ----- one step -----
+
+  showAppleStepModal(rowId, stepKey) {
+    const board = this._appleBoard;
+    const row = (board.rows || []).find((r) => r.id === rowId);
+    if (!row) return;
+    const step = row.stepLabels.find((s) => s.key === stepKey);
+    const cell = row.steps[stepKey];
+    const labels = board.statusLabels[stepKey] || {};
+    const form = row.isSubcontractor ? 'sub' : 'no';
+    const tones = {
+      pending: 'border-slate-200', active: 'border-amber-700 bg-amber-50',
+      passed: 'border-emerald-700 bg-emerald-50', failed: 'border-red-700 bg-red-50',
+      skipped: 'border-slate-200',
+    };
+
+    modal.show(`
+      <div class="text-[11px] font-bold text-slate-500 tracking-wide">${this.escapeHtml(step.label.toUpperCase())}</div>
+      <h3 class="text-lg font-semibold text-slate-800 mt-1 mb-4">${this.escapeHtml(row.candidateName)}</h3>
+
+      <fieldset class="space-y-2 mb-4">
+        <legend class="text-xs font-semibold text-slate-700 mb-1.5">Status</legend>
+        ${['pending', 'active', 'passed', 'failed', 'skipped'].map((st) => `
+          <label class="flex items-center gap-3 px-3 py-2.5 border rounded-lg cursor-pointer ${cell.status === st ? (tones[st] + ' border-2') : 'border-slate-200 hover:bg-slate-50'}">
+            <input type="radio" name="apple-step-status" value="${st}" ${cell.status === st ? 'checked' : ''}
+                   onchange="views.toggleAppleFeedbackBox()" class="w-4 h-4">
+            ${this._appleGlyph(st)}
+            <span class="text-sm text-slate-800">${this.escapeHtml((labels[st] && labels[st][form]) || st)}</span>
+          </label>
+        `).join('')}
+      </fieldset>
+
+      <div class="flex gap-3 mb-4">
+        <div class="w-40">
+          <label for="apple-step-date" class="block text-xs font-medium text-slate-600 mb-1">Datum</label>
+          <input id="apple-step-date" type="date" value="${this.escapeHtml(cell.date)}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+        <div class="flex-1">
+          <label for="apple-step-note" class="block text-xs font-medium text-slate-600 mb-1">Anteckning</label>
+          <input id="apple-step-note" type="text" value="${this.escapeHtml(cell.note)}" placeholder="Kort motivering…"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+        </div>
+      </div>
+
+      <div id="apple-feedback-box" class="${cell.status === 'failed' ? '' : 'hidden'} border border-red-200 bg-red-50 rounded-lg p-4 mb-4">
+        <div class="text-xs font-bold text-red-900 tracking-wide mb-2">EFTERSOM DET BLIR NEJ</div>
+        <label class="flex items-start gap-2.5 cursor-pointer">
+          <input id="apple-feedback" type="checkbox" ${row.feedbackStatus === 'done' ? 'checked' : ''} class="mt-0.5 w-4 h-4">
+          <span class="text-[13px] font-semibold text-slate-800">Återkoppling skickad till kandidaten</span>
+        </label>
+        <p class="text-xs text-red-900 mt-2 leading-relaxed">Resten av stegen blir inte aktuella och raden hamnar under <strong>Avslag</strong>. Tills rutan är ikryssad står <strong>Återkoppla till kandidaten</strong> som nästa åtgärd.</p>
+      </div>
+
+      <div class="flex justify-between items-center gap-2">
+        <button onclick="views.removeFromApple('${rowId}')" class="text-[13px] text-red-600 hover:text-red-700">Ta bort ur flödet</button>
+        <span class="flex gap-2">
+          <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium text-sm">Avbryt</button>
+          <button onclick="views.saveAppleStep('${rowId}', '${stepKey}')"
+                  class="bg-slate-800 text-white px-5 py-2 rounded-lg hover:bg-slate-900 font-medium text-sm">Spara</button>
+        </span>
+      </div>
+    `, { size: 'md' });
+  },
+
+  toggleAppleFeedbackBox() {
+    const box = document.getElementById('apple-feedback-box');
+    const picked = document.querySelector('input[name="apple-step-status"]:checked');
+    if (box) box.classList.toggle('hidden', !picked || picked.value !== 'failed');
+  },
+
+  async saveAppleStep(rowId, stepKey) {
+    const picked = document.querySelector('input[name="apple-step-status"]:checked');
+    const status = picked ? picked.value : 'pending';
+    const date = document.getElementById('apple-step-date').value;
+    const note = document.getElementById('apple-step-note').value;
+    const feedback = document.getElementById('apple-feedback');
+    const client = this._appleState.client;
+    try {
+      await api.put(`/api/pipeline/${client}/rows/${rowId}/steps/${stepKey}`, { status, date, note });
+      // The step write resets the feedback flag whenever the row is no longer
+      // rejected, so this only ever runs on a row that still is.
+      if (status === 'failed' && feedback) {
+        await api.patch(`/api/pipeline/${client}/rows/${rowId}`, {
+          feedbackStatus: feedback.checked ? 'done' : 'pending',
+        });
+      }
+      modal.hide();
+      await this.reloadAppleBoard();
+    } catch (err) {
+      alert('Kunde inte spara steget: ' + (err.message || err));
+    }
+  },
+
+  async removeFromApple(rowId) {
+    if (!confirm('Ta bort kandidaten ur flödet? Stegen försvinner, kandidaten är kvar.')) return;
+    try {
+      await api.delete(`/api/pipeline/${this._appleState.client}/rows/${rowId}`);
+      modal.hide();
+      await this.reloadAppleBoard();
+    } catch (err) {
+      alert('Kunde inte ta bort: ' + (err.message || err));
+    }
+  },
+
+  async reloadAppleBoard() {
+    // The candidate page shows the same data, so refresh whichever is open.
+    const container = document.getElementById('app');
+    if (this._appleBoard && document.getElementById('apple-body')) {
+      this._appleBoard = await api.get(`/api/pipeline/${this._appleState.client}`);
+      this.renderAppleBody();
+    } else if (container && this._currentCandidate) {
+      await this.loadAppleSection(this._currentCandidate.id);
+    }
+  },
+
+  // ----- picker -----
+
+  async showApplePicker() {
+    const board = this._appleBoard || { teams: [], clientLabel: 'Apple' };
+    modal.show('<p class="text-sm text-slate-400">Laddar kandidater…</p>', { size: 'lg' });
+    let candidates = [];
+    try {
+      candidates = await api.get('/api/candidates?createdBy=all');
+    } catch (err) {
+      if (err.message === 'Authentication required') return;
+      candidates = [];
+    }
+    const inFlow = new Set((this._appleBoard ? this._appleBoard.rows : []).map((r) => r.candidateId));
+    this._applePickerAll = candidates;
+    this._applePickerInFlow = inFlow;
+
+    modal.show(`
+      <h3 class="text-lg font-semibold text-slate-800">Lägg till i ${this.escapeHtml(board.clientLabel)}-flödet</h3>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Sök bland alla kandidater. Går också att göra en och en från kandidatkortet.</p>
+      <div class="flex gap-2 mb-3">
+        <input id="apple-picker-search" type="text" placeholder="Sök namn, roll eller kompetens…" autofocus autocomplete="off"
+               oninput="views.renderApplePickerList()"
+               class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm">
+        <select id="apple-picker-team" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-slate-700">
+          <option value="">Utan team</option>
+          ${board.teams.map((t) => `<option value="${this.escapeHtml(t)}">${this.escapeHtml(t)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="apple-picker-list" class="border border-slate-200 rounded-lg max-h-80 overflow-y-auto"></div>
+      <p class="text-xs text-slate-500 mt-3">Teamet gäller alla du lägger till nu, och går att ändra per person efteråt.</p>
+      <div class="flex justify-between items-center gap-2 mt-4">
+        <span id="apple-picker-count" class="text-sm text-slate-500">0 valda</span>
+        <span class="flex gap-2">
+          <button onclick="modal.hide()" class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium text-sm">Avbryt</button>
+          <button onclick="views.submitApplePicker()"
+                  class="bg-slate-800 text-white px-5 py-2 rounded-lg hover:bg-slate-900 font-medium text-sm">Lägg till</button>
+        </span>
+      </div>
+    `, { size: 'lg' });
+    this.renderApplePickerList();
+  },
+
+  renderApplePickerList() {
+    const list = document.getElementById('apple-picker-list');
+    if (!list) return;
+    const input = document.getElementById('apple-picker-search');
+    const q = (input ? input.value : '').trim().toLowerCase();
+    const picked = new Set(this._applePicked || []);
+    const rows = (this._applePickerAll || []).filter((c) =>
+      !q || `${c.name} ${c.role || ''} ${c.skills || ''}`.toLowerCase().includes(q)).slice(0, 60);
+
+    list.innerHTML = rows.length === 0
+      ? '<div class="px-4 py-8 text-center text-slate-400 text-sm">Inga kandidater matchar.</div>'
+      : rows.map((c) => {
+        const already = this._applePickerInFlow.has(c.id);
+        return `
+        <label class="flex items-center gap-3 px-3.5 py-2.5 border-b border-slate-100 last:border-0 cursor-pointer ${already ? 'opacity-55' : picked.has(c.id) ? 'bg-indigo-50' : 'hover:bg-slate-50'}">
+          <input type="checkbox" value="${c.id}" ${already ? 'checked disabled' : picked.has(c.id) ? 'checked' : ''}
+                 onchange="views.toggleApplePick('${c.id}', this.checked)" class="w-4 h-4">
+          <span class="flex-1 min-w-0">
+            <span class="block text-sm font-semibold text-slate-800 truncate">${this.escapeHtml(c.name)}</span>
+            <span class="block text-xs text-slate-500 truncate">${this.escapeHtml([c.role, c.skills].filter(Boolean).join(' · ') || '—')}</span>
+          </span>
+          ${c.isSubcontractor ? '<span class="shrink-0 text-[10px] font-bold text-green-800 bg-green-100 px-2 py-0.5 rounded-full">UNDERKONSULT</span>' : ''}
+          ${already ? '<span class="shrink-0 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">REDAN I FLÖDET</span>' : ''}
+        </label>`;
+      }).join('');
+
+    const count = document.getElementById('apple-picker-count');
+    if (count) count.textContent = `${picked.size} valda`;
+  },
+
+  toggleApplePick(id, checked) {
+    const picked = new Set(this._applePicked || []);
+    if (checked) picked.add(id); else picked.delete(id);
+    this._applePicked = Array.from(picked);
+    const count = document.getElementById('apple-picker-count');
+    if (count) count.textContent = `${picked.size} valda`;
+  },
+
+  async submitApplePicker() {
+    const ids = this._applePicked || [];
+    if (!ids.length) { alert('Välj minst en kandidat.'); return; }
+    const team = document.getElementById('apple-picker-team').value;
+    try {
+      await api.post(`/api/pipeline/${this._appleState.client}/candidates`, { candidateIds: ids, team });
+      this._applePicked = [];
+      modal.hide();
+      await this.reloadAppleBoard();
+    } catch (err) {
+      alert('Kunde inte lägga till: ' + (err.message || err));
+    }
+  },
+
+  // ----- the section on the candidate page -----
+
+  async loadAppleSection(candidateId) {
+    const target = document.getElementById('apple-section');
+    if (!target) return;
+    let row = null;
+    try {
+      row = await api.get(`/api/pipeline/apple/candidates/${candidateId}`);
+    } catch (err) {
+      if (err.message === 'Authentication required') return;
+      target.innerHTML = '';
+      return;
+    }
+    this._appleCandidateRow = row;
+
+    if (!row) {
+      target.innerHTML = `
+        <div class="bg-white shadow-sm rounded-xl p-5 border border-slate-200">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-medium text-slate-500">Apple-flödet</h3>
+              <p class="text-sm text-slate-400 mt-0.5">Kandidaten är inte med i flödet.</p>
+            </div>
+            <button onclick="views.addCandidateToApple('${candidateId}')"
+                    class="bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 font-medium text-sm">
+              Lägg till i Apple-flödet
+            </button>
+          </div>
+        </div>`;
+      return;
+    }
+
+    // The board backs the step modal, so keep a one-row copy of it here too.
+    if (!this._appleBoard || !(this._appleBoard.rows || []).some((r) => r.id === row.id)) {
+      this._appleBoard = await api.get('/api/pipeline/apple');
+    }
+
+    const teams = this._appleBoard.teams || [];
+    target.innerHTML = `
+      <div class="bg-white shadow-sm rounded-xl p-5 border border-slate-200">
+        <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+          <div>
+            <h3 class="text-base font-bold text-slate-800">${this.escapeHtml(row.clientLabel)}-flödet</h3>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Team
+              <select onchange="views.setAppleRowTeam('${row.id}', this.value)"
+                      class="ml-1 px-2 py-1 border border-slate-300 rounded text-xs bg-white text-slate-700">
+                <option value="" ${!row.team ? 'selected' : ''}>Utan team</option>
+                ${teams.map((t) => `<option value="${this.escapeHtml(t)}" ${row.team === t ? 'selected' : ''}>${this.escapeHtml(t)}</option>`).join('')}
+              </select>
+              · tillagd ${new Date(row.createdAt).toLocaleDateString('sv-SE')}${row.createdByUsername ? ' av ' + this.escapeHtml(row.createdByUsername) : ''}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            ${this._appleActionHtml(row)}
+          </div>
+        </div>
+
+        <div>
+          ${row.stepLabels.map((st, i) => {
+            const cell = row.steps[st.key];
+            const inactive = row.inactiveFrom != null && i >= row.inactiveFrom;
+            const last = i === row.stepLabels.length - 1;
+            return `
+            <div class="flex gap-3.5 ${inactive ? 'opacity-40' : ''}">
+              <div class="flex flex-col items-center shrink-0">
+                ${this._appleGlyph(inactive ? 'pending' : cell.status)}
+                ${last ? '' : '<span class="w-0.5 flex-1 bg-slate-200 min-h-[18px]"></span>'}
+              </div>
+              <div class="${last ? '' : 'pb-3.5'} flex-1 min-w-0">
+                <div class="flex items-baseline gap-2.5">
+                  <span class="text-sm font-semibold ${cell.status === 'pending' || inactive ? 'text-slate-400' : 'text-slate-800'}">${this.escapeHtml(st.label)}</span>
+                  <span class="text-xs ${cell.status === 'active' ? 'text-amber-700 font-semibold' : 'text-slate-400'}">${this.escapeHtml(cell.date ? this._appleShortDate(cell.date) : (cell.status === 'active' ? 'väntar' : ''))}</span>
+                  <button onclick="views.showAppleStepModal('${row.id}', '${st.key}')"
+                          class="ml-auto text-xs text-indigo-700 hover:text-indigo-800">Ändra</button>
+                </div>
+                ${cell.note ? `<p class="text-[13px] text-slate-500 mt-0.5">${this.escapeHtml(cell.note)}</p>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+
+        <div class="flex items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-1">
+          <button onclick="views.removeFromApple('${row.id}')" class="text-[13px] text-red-600 hover:text-red-700">Ta bort ur flödet</button>
+          <button onclick="router.navigate('apple')" class="text-[13px] font-semibold text-indigo-700 hover:text-indigo-800">Öppna Apple-vyn →</button>
+        </div>
+      </div>`;
+  },
+
+  async setAppleRowTeam(rowId, team) {
+    try {
+      await api.patch(`/api/pipeline/${this._appleState.client}/rows/${rowId}`, { team });
+      await this.reloadAppleBoard();
+    } catch (err) {
+      alert('Kunde inte byta team: ' + (err.message || err));
+    }
+  },
+
+  async addCandidateToApple(candidateId) {
+    try {
+      await api.post('/api/pipeline/apple/candidates', { candidateId });
+      this._appleBoard = null;
+      await this.loadAppleSection(candidateId);
+    } catch (err) {
+      alert('Kunde inte lägga till: ' + (err.message || err));
+    }
   },
 
   // ----- Offer modal -----

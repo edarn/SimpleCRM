@@ -1035,6 +1035,13 @@ router.post('/backfill-profiles', async (req, res) => {
 router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   const userId = req.session.userId;
   const category = req.body.category || 'in_progress';
+  // "Lägg även till i Apple-flödet" on the import modal. Validated against the
+  // known clients so the field can never name an arbitrary flow.
+  const { normalizeClient, CLIENTS } = require('../lib/pipeline');
+  const wantsPipeline = req.body.addToPipeline === 'true' || req.body.addToPipeline === true;
+  const addToPipelineClient = wantsPipeline && CLIENTS[normalizeClient(req.body.pipelineClient)]
+    ? normalizeClient(req.body.pipelineClient)
+    : null;
 
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No files uploaded' });
@@ -1237,7 +1244,21 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
     }
   }
 
-  sendEvent({ type: 'done', created, merged, failed, total, noEmail, ambiguous });
+  // Optional: drop the whole batch straight into a client's screening flow.
+  // createdIds covers merged profiles too, so re-importing a CV for someone
+  // already known still puts them in the flow; adding twice is a no-op.
+  let pipelineAdded = 0;
+  if (addToPipelineClient && createdIds.length > 0) {
+    try {
+      const result = data.addToPipeline(addToPipelineClient, createdIds, req.body.pipelineTeam, userId);
+      pipelineAdded = result.added.length;
+    } catch (e) {
+      // Never let this cost the user their import.
+      console.error('CV import: could not add to pipeline:', e.message);
+    }
+  }
+
+  sendEvent({ type: 'done', created, merged, failed, total, noEmail, ambiguous, pipelineAdded });
   res.end();
 
   // Background: match each imported candidate against open requests, run

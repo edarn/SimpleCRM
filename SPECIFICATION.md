@@ -707,6 +707,60 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    gets a `409` instead of a duplicate multi-minute AI job. A job orphaned by a
    restart is flipped to `failed` on boot, as with inbox jobs.
 
+20. **Client Screening Pipeline (the "Apple" tab)**
+
+   A screening flow for one client, taking candidates from CV to a signed
+   contract. Apple is the first client; `client` is a column on the row, so a
+   second customer is configuration rather than a migration.
+
+   - **Nothing derived is stored.** The outcome, how far someone has come, the
+     next action and the sort order are all computed from the steps by
+     `src/lib/pipeline.js` and shipped with every row, so a row can never
+     disagree with itself and the browser never keeps its own copy of the
+     rules.
+   - **Seven steps in two phases.** *Urval*: Kodprov, Screening, Presenterad,
+     Apple-intervju. *Avtal*: Erbjudande/Pris, Signerat avtal, Till Apple.
+   - **Five statuses per step** — `pending`, `active`, `passed`, `failed`,
+     `skipped` — with step-specific wording ("Kodprov ej skickat → Kodprov
+     skickat → Kodprov ok"). `skipped` is deliberately distinct from
+     `pending`: plenty of people never do the code test, and their row must
+     not look unfinished. `active` covers every "sent / booked, now waiting"
+     state — the ones worth chasing.
+   - **Engagement form** comes from the candidate's existing
+     `is_subcontractor` flag and is shown as a badge on every row. It renames
+     one step: **Erbjudande** for an employment candidate, **Pris** for an
+     underkonsult, with matching verbs throughout ("Skicka erbjudande" vs
+     "Förhandla pris").
+   - **A rejection dims the rest of the row** (those steps are not "to do",
+     they are not applicable) and stays open as **Återkoppla till kandidaten**,
+     with a day counter, until the feedback tick is set — a rejection is not
+     finished until the candidate has been told. Un-rejecting a row clears the
+     tick, so it can never claim someone was told when they were not.
+   - **Nästa åtgärd** is the column that turns the board into a worklist:
+     derived per row, with a day counter on anything that has been sitting.
+     `mine` is your move, `waiting` is somebody else's.
+   - **Sorting**: klara överst, pågående därefter (the further through the
+     process, the higher — ties broken by whoever has waited longest), avslag
+     sist and faintly red. Section headers are inserted where the outcome
+     changes.
+   - **Two sub-views** under one nav tab: *Flödet* (the matrix) and *Klara &
+     startande* (placements grouped by team, with start dates; a missing start
+     date is an action, not a blank).
+   - **Teams**: Java Backend, TypeScript Frontend, iOS, Java/Scala, Machine
+     Learning. Optional — a row without one groups under "Utan team".
+   - **Getting into the flow**: the picker (search + multi-select), a button on
+     the candidate page, or the **"Lägg även till i Apple-flödet"** checkbox on
+     the CV bulk-import, which also takes a team for the whole batch. All three
+     are idempotent — a unique index on `(client, candidate_id)` plus
+     `ON CONFLICT DO NOTHING` means adding someone twice is a no-op. Merged
+     duplicates come along too, so re-importing a known candidate's CV still
+     puts them in the flow.
+   - Candidates in the flow carry an **APPLE** badge wherever they are listed,
+     the same way the Underkonsult badge works: the absence is the signal.
+   - **Permissions** follow candidates exactly — team users see their team's
+     rows, solo users their own — because every query joins `candidates` and
+     filters on that. Removing a row needs creator, solo or team-owner rights.
+
 ### Non-Functional Requirements
 
 - Multi-user support with authentication
@@ -914,6 +968,31 @@ CREATE TABLE candidates (
   FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
   FOREIGN KEY (created_by) REFERENCES users(id)
 )
+```
+
+#### Client Pipeline Table
+```sql
+CREATE TABLE client_pipeline (
+  id TEXT PRIMARY KEY,
+  client TEXT NOT NULL DEFAULT 'apple',   -- which client's flow; a column, not a hard-coded table
+  candidate_id TEXT NOT NULL,
+  team TEXT DEFAULT '',                   -- Java Backend | TypeScript Frontend | iOS | Java/Scala | Machine Learning
+  steps_json TEXT NOT NULL DEFAULT '{}',  -- { "<step>": { status, date, note } } — see src/lib/pipeline.js
+  feedback_status TEXT NOT NULL DEFAULT 'pending' CHECK (feedback_status IN ('pending', 'done')),
+  feedback_date TEXT DEFAULT '',
+  start_date TEXT DEFAULT '',             -- when they start at the client
+  ended_at TEXT,                          -- assignment closed, so the roster does not grow forever
+  note TEXT DEFAULT '',
+  team_id TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
+-- One row per candidate per client: every "add to flow" path relies on this.
+CREATE UNIQUE INDEX idx_client_pipeline_unique ON client_pipeline(client, candidate_id);
 ```
 
 #### Candidate Offers Table
@@ -1137,7 +1216,7 @@ Every view/modal that presents a text input auto-focuses the topmost relevant fi
 
 ### Navigation
 
-Main navigation tabs: **Contacts | Companies | Candidates | ToDos | Inbox | Requests**
+Main navigation tabs: **Contacts | Companies | Candidates | Apple | ToDos | Inbox | Requests**
 
 ### Pages/Views
 
@@ -1243,6 +1322,7 @@ VibeCodingProject/
 │   ├── data.js            # Data layer functions
 │   ├── lib/
 │   │   ├── salary-model.js       # Variable-salary model (port of Rörligtmål)
+│   │   ├── pipeline.js          # Client screening pipeline: steps, derivation, sorting (see §20)
 │   │   ├── contract-template.js  # Fills the contract docx template
 │   │   ├── offer-pdf.js          # Renders the salary attachment PDF (pdfkit)
 │   │   ├── eml-builder.js        # Builds Outlook-draft .eml with attachments
@@ -1270,6 +1350,7 @@ VibeCodingProject/
 │       ├── checklists.js  # Checklist API routes
 │       ├── candidates.js  # Candidate API routes
 │       ├── offers.js      # Employment offer routes
+│       ├── pipeline.js    # Client screening pipeline routes
 │       ├── team.js        # Team management routes
 │       ├── invitations.js # Invitation routes
 │       ├── archive.js     # Archive viewing routes
@@ -1420,6 +1501,18 @@ VibeCodingProject/
 | GET | /api/candidates/:candidateId/offers/:offerId/eml | Download an Outlook-draft .eml with the attachments |
 | DELETE | /api/candidates/:candidateId/offers/:offerId | Delete the offer (creator / team owner only) |
 
+### Client Pipeline (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/pipeline/:client | The whole board: rows (derived + sorted), step labels, teams, summary |
+| GET | /api/pipeline/:client/candidates/:candidateId | One row for the candidate page; `204` when not in the flow |
+| GET | /api/pipeline/:client/candidate-ids | Just the ids, for the list badge |
+| POST | /api/pipeline/:client/candidates | Add one (`candidateId`) or many (`candidateIds`), optional `team`; idempotent |
+| PUT | /api/pipeline/:client/rows/:id/steps/:stepKey | Set a step's `status` / `date` / `note` |
+| PATCH | /api/pipeline/:client/rows/:id | `team`, `startDate`, `endedAt`, `feedbackStatus`, `note` |
+| DELETE | /api/pipeline/:client/rows/:id | Remove from the flow (creator / team owner) |
+
 ### Search (Protected)
 
 | Method | Endpoint | Description |
@@ -1523,5 +1616,5 @@ Resume uploads are stored in the same volume directory (`/data/uploads`).
 - **File Storage:** Local filesystem with volume support for cloud
 - **Candidates:** Separate entity from Contacts (not linked to companies)
 - **Resume Upload:** PDF, DOC, DOCX up to 10MB
-- **Navigation:** Four main tabs - Contacts, Companies, Candidates, ToDos
+- **Navigation:** Contacts, Companies, Candidates, Apple, ToDos, Inbox, Requests
 - **Search:** Client-side filtering for candidates, server-side for contacts/companies

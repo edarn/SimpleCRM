@@ -2328,6 +2328,206 @@ function deleteOffer(candidateId, offerId, userId) {
   };
 }
 
+// ----- Client screening pipeline (the "Apple" tab) -----
+//
+// Scoping matches candidates exactly: team users see their team's rows, solo
+// users see their own. The join is what enforces it — a pipeline row for a
+// candidate you cannot see simply does not come back.
+
+const pipelineLib = require('./lib/pipeline');
+
+function formatPipelineRow(row) {
+  return {
+    id: row.id,
+    client: row.client,
+    candidateId: row.candidate_id,
+    candidateName: row.candidate_name || '',
+    candidateRole: row.candidate_role || '',
+    candidateEmail: row.candidate_email || '',
+    isSubcontractor: row.is_subcontractor ? 1 : 0,
+    team: row.team || '',
+    steps: pipelineLib.normalizeSteps(row.steps_json ? JSON.parse(row.steps_json) : {}),
+    feedbackStatus: row.feedback_status || 'pending',
+    feedbackDate: row.feedback_date || '',
+    startDate: row.start_date || '',
+    endedAt: row.ended_at || null,
+    note: row.note || '',
+    createdBy: row.created_by,
+    createdByUsername: row.created_by_username || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// The candidate columns the views need, joined in so the list is one query.
+const PIPELINE_SELECT = `
+  SELECT p.*, c.name as candidate_name, c.role as candidate_role, c.email as candidate_email,
+         c.is_subcontractor, u.username as created_by_username
+  FROM client_pipeline p
+  JOIN candidates c ON c.id = p.candidate_id
+  LEFT JOIN users u ON u.id = p.created_by
+`;
+
+function pipelineScope(userId) {
+  const teamId = getUserTeamId(userId);
+  return teamId
+    ? { where: 'c.team_id = ?', args: [teamId] }
+    : { where: 'c.created_by = ? AND c.team_id IS NULL', args: [userId] };
+}
+
+function getPipeline(client, userId) {
+  const scope = pipelineScope(userId);
+  const rows = db.prepare(`${PIPELINE_SELECT} WHERE p.client = ? AND ${scope.where}`)
+    .all(client, ...scope.args);
+  return rows.map(formatPipelineRow);
+}
+
+function getPipelineRow(id, userId) {
+  const scope = pipelineScope(userId);
+  const row = db.prepare(`${PIPELINE_SELECT} WHERE p.id = ? AND ${scope.where}`)
+    .get(id, ...scope.args);
+  return row ? formatPipelineRow(row) : null;
+}
+
+/** The row for one candidate, or null — used by the candidate detail view. */
+function getPipelineForCandidate(client, candidateId, userId) {
+  const scope = pipelineScope(userId);
+  const row = db.prepare(`${PIPELINE_SELECT} WHERE p.client = ? AND p.candidate_id = ? AND ${scope.where}`)
+    .get(client, candidateId, ...scope.args);
+  return row ? formatPipelineRow(row) : null;
+}
+
+/**
+ * Add candidates to a client's flow. Idempotent: someone already in it keeps
+ * the row they have (and the steps on it), which is what the bulk paths — the
+ * picker and the CV import checkbox — rely on.
+ *
+ * @returns {{ added: string[], skipped: string[] }} candidate ids
+ */
+function addToPipeline(client, candidateIds, team, userId) {
+  const teamId = getUserTeamId(userId);
+  const now = getTimestamp();
+  const normalizedTeam = pipelineLib.normalizeTeam(team);
+  const emptySteps = JSON.stringify(pipelineLib.normalizeSteps({}));
+
+  const insert = db.prepare(`
+    INSERT INTO client_pipeline (
+      id, client, candidate_id, team, steps_json, feedback_status,
+      team_id, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+    ON CONFLICT(client, candidate_id) DO NOTHING
+  `);
+
+  const added = [];
+  const skipped = [];
+  const run = db.transaction((ids) => {
+    for (const candidateId of ids) {
+      // Only candidates the caller can actually see.
+      if (!getCandidateById(candidateId, userId)) { skipped.push(candidateId); continue; }
+      const result = insert.run(generateId(), client, candidateId, normalizedTeam, emptySteps, teamId, userId, now, now);
+      if (result.changes > 0) added.push(candidateId);
+      else skipped.push(candidateId);
+    }
+  });
+  run(Array.from(new Set(candidateIds || [])));
+  return { added, skipped };
+}
+
+/**
+ * Set one step's status. Clearing a failure also clears the feedback flag —
+ * otherwise a row un-rejected by mistake would keep claiming the candidate had
+ * been told.
+ */
+function updatePipelineStep(id, stepKey, patch, userId) {
+  const existing = getPipelineRow(id, userId);
+  if (!existing) return { error: 'Pipeline row not found' };
+  if (!pipelineLib.STEP_KEYS.includes(stepKey)) return { error: 'Unknown step' };
+  if (patch.status !== undefined && !pipelineLib.STATUSES.includes(patch.status)) {
+    return { error: 'Invalid status' };
+  }
+
+  const steps = { ...existing.steps };
+  const step = { ...steps[stepKey] };
+  if (patch.status !== undefined) step.status = patch.status;
+  if (patch.date !== undefined) step.date = String(patch.date || '').slice(0, 10);
+  if (patch.note !== undefined) step.note = String(patch.note || '').slice(0, 2000);
+  steps[stepKey] = step;
+
+  const stillRejected = pipelineLib.STEP_KEYS.some((k) => steps[k].status === 'failed');
+  const feedbackStatus = stillRejected ? existing.feedbackStatus : 'pending';
+  const feedbackDate = stillRejected ? existing.feedbackDate : '';
+
+  db.prepare(`
+    UPDATE client_pipeline
+    SET steps_json = ?, feedback_status = ?, feedback_date = ?, updated_at = ?
+    WHERE id = ?
+  `).run(JSON.stringify(pipelineLib.normalizeSteps(steps)), feedbackStatus, feedbackDate, getTimestamp(), id);
+
+  return getPipelineRow(id, userId);
+}
+
+/** Team, start date, the feedback tick, an ended assignment, the free note. */
+function updatePipelineRow(id, patch, userId) {
+  const existing = getPipelineRow(id, userId);
+  if (!existing) return { error: 'Pipeline row not found' };
+
+  const fields = [];
+  const args = [];
+  if (patch.team !== undefined) {
+    fields.push('team = ?');
+    args.push(pipelineLib.normalizeTeam(patch.team));
+  }
+  if (patch.startDate !== undefined) {
+    fields.push('start_date = ?');
+    args.push(String(patch.startDate || '').slice(0, 10));
+  }
+  if (patch.note !== undefined) {
+    fields.push('note = ?');
+    args.push(String(patch.note || '').slice(0, 2000));
+  }
+  if (patch.endedAt !== undefined) {
+    fields.push('ended_at = ?');
+    args.push(patch.endedAt ? String(patch.endedAt).slice(0, 10) : null);
+  }
+  if (patch.feedbackStatus !== undefined) {
+    if (!['pending', 'done'].includes(patch.feedbackStatus)) return { error: 'Invalid feedbackStatus' };
+    fields.push('feedback_status = ?', 'feedback_date = ?');
+    args.push(patch.feedbackStatus);
+    args.push(patch.feedbackStatus === 'done'
+      ? String(patch.feedbackDate || getTimestamp()).slice(0, 10)
+      : '');
+  }
+  if (!fields.length) return existing;
+
+  fields.push('updated_at = ?');
+  args.push(getTimestamp(), id);
+  db.prepare(`UPDATE client_pipeline SET ${fields.join(', ')} WHERE id = ?`).run(...args);
+  return getPipelineRow(id, userId);
+}
+
+function removeFromPipeline(id, userId) {
+  const existing = getPipelineRow(id, userId);
+  if (!existing) return { error: 'Pipeline row not found' };
+  // Same rule as offers: solo and creators always; team owner over anything.
+  const role = getUserRole(userId);
+  if (role !== 'solo' && existing.createdBy !== userId && !isTeamOwner(userId)) {
+    return { error: 'Insufficient permissions' };
+  }
+  db.prepare('DELETE FROM client_pipeline WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
+/** Candidate ids already in a client's flow — lets lists render the badge. */
+function getPipelineCandidateIds(client, userId) {
+  const scope = pipelineScope(userId);
+  const rows = db.prepare(`
+    SELECT p.candidate_id FROM client_pipeline p
+    JOIN candidates c ON c.id = p.candidate_id
+    WHERE p.client = ? AND ${scope.where}
+  `).all(client, ...scope.args);
+  return rows.map((r) => r.candidate_id);
+}
+
 // ============ User Emails (Authorized Sender Addresses) ============
 
 function getUserEmails(userId) {
@@ -2994,6 +3194,16 @@ module.exports = {
   addCandidateFile,
   deleteCandidateFile,
   getCandidateFileById,
+
+  // Client pipeline
+  getPipeline,
+  getPipelineRow,
+  getPipelineForCandidate,
+  getPipelineCandidateIds,
+  addToPipeline,
+  updatePipelineStep,
+  updatePipelineRow,
+  removeFromPipeline,
 
   // Candidate Offers
   getOffersForCandidate,
