@@ -707,6 +707,24 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    gets a `409` instead of a duplicate multi-minute AI job. A job orphaned by a
    restart is flipped to `failed` on boot, as with inbox jobs.
 
+21. **Modal dismissal lock**
+   - A CV import keeps running whether or not its modal is on screen: the
+     `fetch` is never aborted and the server loop has no cancellation check.
+     Losing the modal therefore loses only the *view* of it — including the
+     end summary, which is where profiles created without a duplicate check
+     are reported, and the button that refreshes the candidate list.
+   - So while an import is streaming the modal is **locked**: a backdrop click
+     and Escape are ignored. `modal.hide()` itself stays unguarded — the lock
+     is about accidents, not about the programmatic path — so an explicit
+     navigation still closes it.
+   - The way out is the modal's own close button, which asks first and says
+     plainly that the import continues in the background. It relabels itself
+     from "Cancel" to "Stäng" once the files are on their way, because nothing
+     can call the work off at that point.
+   - The lock can never be left behind: `modal.show()` with new content clears
+     it, and so does `closeOverlays()` on a route change.
+   - Covered by `scripts/check-modal-lock.mjs`.
+
 20. **Client Screening Pipeline (the "Apple" tab)**
 
    A screening flow for one client, taking candidates from CV to a signed
@@ -1362,6 +1380,7 @@ VibeCodingProject/
     ├── build-contract-template.js # Build both contract-template*.docx
     ├── build-salary-model-pdf.js  # Build templates/salary-model-explained.pdf
     ├── check-router-history.mjs   # Regression check for the router's history rules
+    ├── check-modal-lock.mjs       # Regression check for the modal dismissal lock
     ├── migrate-json-to-sqlite.js  # Migration script
     └── seed-test-data.js          # Test data seeder
 ```

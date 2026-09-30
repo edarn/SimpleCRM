@@ -559,7 +559,12 @@ const api = {
 // and makes sure the offer modal's body scroll lock is always released.
 function closeOverlays() {
   const m = document.getElementById('modal');
-  if (m && !m.classList.contains('hidden')) modal.hide();
+  if (m && !m.classList.contains('hidden')) {
+    // A route change is deliberate, so it closes even a locked modal — but it
+    // must not leave the lock behind for whatever opens next.
+    modal.unlock();
+    modal.hide();
+  }
   if (document.getElementById('offer-modal-root')) views.hideOfferModal();
 }
 
@@ -792,6 +797,8 @@ const modal = {
   show(content, opts = {}) {
     if (content !== undefined) {
       document.getElementById('modal-content').innerHTML = content;
+      // New content is a new modal: never inherit the previous one's lock.
+      this._locked = false;
     }
     const panel = document.getElementById('modal-panel');
     if (panel) {
@@ -807,18 +814,26 @@ const modal = {
   isOpen() {
     const el = document.getElementById('modal');
     return !!el && !el.classList.contains('hidden');
-  }
+  },
+  // While something is running in the modal (a CV import), a stray backdrop
+  // click or Escape must not make it vanish — the work carries on invisibly
+  // and its summary is lost. hide() itself stays unguarded: the lock is about
+  // accidents, not about the programmatic path.
+  _locked: false,
+  lock() { this._locked = true; },
+  unlock() { this._locked = false; },
+  isLocked() { return this._locked; }
 };
 
 // Close modal on backdrop click
 document.getElementById('modal')?.addEventListener('click', (e) => {
-  if (e.target.id === 'modal') modal.hide();
+  if (e.target.id === 'modal' && !modal.isLocked()) modal.hide();
 });
 
 // ...and on Escape. Without this the only way out of a full-screen overlay is
 // to hit exactly the backdrop, which is fiddly once the panel is large.
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && modal.isOpen()) modal.hide();
+  if (e.key === 'Escape' && modal.isOpen() && !modal.isLocked()) modal.hide();
 });
 
 // Team Manager module
@@ -3339,7 +3354,7 @@ const views = {
         </div>
         <div id="cv-import-results" class="hidden mb-4 max-h-64 overflow-y-auto space-y-1"></div>
         <div class="flex justify-end gap-2">
-          <button type="button" onclick="modal.hide()" id="cv-import-close" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
+          <button type="button" onclick="views.closeCVImport()" id="cv-import-close" class="px-4 py-2 text-slate-600 hover:text-slate-800">Cancel</button>
           <button type="submit" id="cv-import-btn" class="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-sm">
             Import
           </button>
@@ -3368,6 +3383,14 @@ const views = {
     const bar = document.getElementById('cv-import-bar');
     const resultsEl = document.getElementById('cv-import-results');
 
+    // Hold the modal open until the stream ends: the summary at the end names
+    // the profiles created without a duplicate check, which is the one thing
+    // in here worth not missing.
+    modal.lock();
+    // "Cancel" is a lie once the files are on their way — nothing can call the
+    // work off, so the button says what it actually does.
+    const closeBtn = document.getElementById('cv-import-close');
+    if (closeBtn) closeBtn.textContent = 'Stäng';
     btn.disabled = true;
     btn.textContent = 'Uploading...';
     progressDiv.classList.remove('hidden');
@@ -3432,7 +3455,22 @@ const views = {
       btn.disabled = false;
       btn.textContent = 'Import';
       alert('Error: ' + err.message);
+    } finally {
+      // Also covers a stream that ends without a 'done' event.
+      modal.unlock();
     }
+  },
+
+  // The import's own close button. There is no way to call off work already
+  // handed to the server, so this is an honest "leave it running", not a
+  // cancel — and it says so.
+  closeCVImport() {
+    if (modal.isLocked() && !confirm(
+      'Importen är igång och kan inte avbrytas — den körs klart i bakgrunden även om du stänger.\n\n'
+      + 'Stänger du nu missar du sammanfattningen, och kandidatlistan uppdateras inte automatiskt.\n\n'
+      + 'Stäng ändå?')) return;
+    modal.unlock();
+    modal.hide();
   },
 
   _handleImportEvent(evt, statusEl, bar, resultsEl, btn) {
