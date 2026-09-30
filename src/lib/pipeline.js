@@ -129,6 +129,40 @@ function normalizeSteps(raw) {
   return out;
 }
 
+/**
+ * Clearing a step means everything before it was cleared too — typing in a
+ * profile that is already through the whole process should not mean seven
+ * clicks. Marking any step `passed` fills the earlier ones.
+ *
+ * Only `pending` and `active` are filled:
+ *   - `skipped` already counts as cleared, and saying "no test needed" is a
+ *     deliberate statement that should survive;
+ *   - `failed` is a deliberate negative, and silently reversing a nej would be
+ *     worse than leaving the row visibly contradictory.
+ *
+ * @returns {{ steps: Object, filled: string[] }} the new steps and what changed
+ */
+function backfillEarlierSteps(steps, stepKey) {
+  const upto = STEP_KEYS.indexOf(stepKey);
+  if (upto <= 0 || steps[stepKey].status !== 'passed') return { steps, filled: [] };
+
+  const next = { ...steps };
+  const filled = [];
+  for (const key of STEP_KEYS.slice(0, upto)) {
+    if (next[key].status === 'pending' || next[key].status === 'active') {
+      // No date: an invented one reads as fact. The green tick is the claim.
+      next[key] = { ...next[key], status: 'passed' };
+      filled.push(key);
+    }
+  }
+  return { steps: next, filled };
+}
+
+/** Steps before `stepKey` that a `passed` there would fill in. */
+function backfillPreview(steps, stepKey) {
+  return backfillEarlierSteps({ ...steps, [stepKey]: { ...steps[stepKey], status: 'passed' } }, stepKey).filled;
+}
+
 function parseDate(value) {
   if (!value) return null;
   const d = new Date(value.length <= 10 ? value + 'T00:00:00Z' : value);
@@ -186,6 +220,13 @@ function deriveRow(row, candidate, now = new Date()) {
     inactiveFrom: rejected ? failedIndex + 1 : null,
     nextAction: action,
     waitingDays: action.days || 0,
+    // Per step: which earlier ones a green tick here would fill in. Shipped so
+    // the dialog can warn before it happens, rather than the browser working
+    // the rule out for itself.
+    backfillOnPass: STEP_KEYS.reduce((acc, key) => {
+      acc[key] = backfillPreview(steps, key);
+      return acc;
+    }, {}),
   };
 }
 
@@ -317,6 +358,8 @@ module.exports = {
   normalizeClient,
   normalizeTeam,
   normalizeSteps,
+  backfillEarlierSteps,
+  backfillPreview,
   stepsFor,
   deriveRow,
   sortRows,

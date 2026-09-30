@@ -2453,7 +2453,11 @@ function updatePipelineStep(id, stepKey, patch, userId) {
   if (patch.note !== undefined) step.note = String(patch.note || '').slice(0, 2000);
   steps[stepKey] = step;
 
-  const stillRejected = pipelineLib.STEP_KEYS.some((k) => steps[k].status === 'failed');
+  // Marking a step done implies the ones before it are done — see
+  // backfillEarlierSteps for what it will and will not touch.
+  const backfilled = pipelineLib.backfillEarlierSteps(steps, stepKey).steps;
+
+  const stillRejected = pipelineLib.STEP_KEYS.some((k) => backfilled[k].status === 'failed');
   const feedbackStatus = stillRejected ? existing.feedbackStatus : 'pending';
   const feedbackDate = stillRejected ? existing.feedbackDate : '';
 
@@ -2461,7 +2465,7 @@ function updatePipelineStep(id, stepKey, patch, userId) {
     UPDATE client_pipeline
     SET steps_json = ?, feedback_status = ?, feedback_date = ?, updated_at = ?
     WHERE id = ?
-  `).run(JSON.stringify(pipelineLib.normalizeSteps(steps)), feedbackStatus, feedbackDate, getTimestamp(), id);
+  `).run(JSON.stringify(pipelineLib.normalizeSteps(backfilled)), feedbackStatus, feedbackDate, getTimestamp(), id);
 
   return getPipelineRow(id, userId);
 }

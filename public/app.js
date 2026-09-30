@@ -5019,6 +5019,11 @@ const views = {
     const cell = row.steps[stepKey];
     const labels = board.statusLabels[stepKey] || {};
     const form = row.isSubcontractor ? 'sub' : 'no';
+    // Earlier steps a green tick here would fill in — worked out on the server.
+    const backfill = (row.backfillOnPass && row.backfillOnPass[stepKey]) || [];
+    const backfillNames = backfill
+      .map((k) => (row.stepLabels.find((x) => x.key === k) || {}).label)
+      .filter(Boolean);
     const tones = {
       pending: 'border-slate-200', active: 'border-amber-700 bg-amber-50',
       passed: 'border-emerald-700 bg-emerald-50', failed: 'border-red-700 bg-red-50',
@@ -5037,9 +5042,19 @@ const views = {
                    onchange="views.toggleAppleFeedbackBox()" class="w-4 h-4">
             ${this._appleGlyph(st)}
             <span class="text-sm text-slate-800">${this.escapeHtml((labels[st] && labels[st][form]) || st)}</span>
+            ${st === 'passed' && backfill.length
+              ? `<span class="ml-auto text-xs text-emerald-800 text-right">fyller även i ${backfill.length} tidigare steg</span>`
+              : ''}
           </label>
         `).join('')}
       </fieldset>
+
+      ${backfillNames.length ? `
+        <p class="-mt-2 mb-4 text-xs text-slate-500 leading-relaxed">
+          Att klarmarkera det här steget markerar även
+          <strong class="text-slate-700">${this.escapeHtml(backfillNames.join(', '))}</strong> som klara.
+          Överhoppade och nekade steg lämnas som de är.
+        </p>` : ''}
 
       <div class="flex gap-3 mb-4">
         <div class="w-40">

@@ -749,6 +749,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      one step: **Erbjudande** for an employment candidate, **Pris** for an
      underkonsult, with matching verbs throughout ("Skicka erbjudande" vs
      "Förhandla pris").
+   - **Clearing a step clears the ones before it.** Marking any step `passed`
+     fills in the earlier `pending` and `active` ones, so typing in a profile
+     that is already through the whole process is one click rather than seven.
+     `skipped` and `failed` are left alone: the first already counts as
+     cleared and is a deliberate statement, and silently reversing a nej would
+     be worse than a visibly contradictory row. No date is invented for the
+     filled-in steps — the green tick is the whole claim. The step dialog
+     names which steps a tick would fill before you make it
+     (`backfillOnPass`, computed server-side like every other rule).
    - **A rejection dims the rest of the row** (those steps are not "to do",
      they are not applicable) and stays open as **Återkoppla till kandidaten**,
      with a day counter, until the feedback tick is set — a rejection is not
