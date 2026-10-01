@@ -4815,7 +4815,7 @@ const views = {
     const dim = r.outcome === 'rejected' ? 'text-slate-500' : 'text-slate-800';
 
     return `
-      <div class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_GRID}">
+      <div data-row-id="${r.id}" class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_GRID}">
         <div class="pr-3 min-w-0">
           <div class="flex items-center gap-2 min-w-0">
             <a href="#" onclick="router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;"
@@ -4959,7 +4959,7 @@ const views = {
     const signed = r.steps.signed.date || r.steps.confirmed.date;
     const tone = !r.startDate ? 'bg-amber-50/40' : '';
     return `
-      <div class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_ROSTER_GRID}">
+      <div data-row-id="${r.id}" class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_ROSTER_GRID}">
         <div class="flex items-center gap-2 min-w-0 pr-3">
           <a href="#" onclick="router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;"
              class="text-sm font-semibold text-slate-800 hover:text-rose-600 truncate">${this.escapeHtml(r.candidateName)}</a>
@@ -5003,7 +5003,7 @@ const views = {
     try {
       await api.patch(`/api/pipeline/${this._appleState.client}/rows/${rowId}`, { startDate, endedAt: endedAt || null });
       modal.hide();
-      await this.reloadAppleBoard();
+      await this.reloadAppleBoard(rowId);
     } catch (err) {
       alert('Kunde inte spara: ' + (err.message || err));
     }
@@ -5121,7 +5121,7 @@ const views = {
         });
       }
       modal.hide();
-      await this.reloadAppleBoard();
+      await this.reloadAppleBoard(rowId);
     } catch (err) {
       alert('Kunde inte spara steget: ' + (err.message || err));
     }
@@ -5138,12 +5138,67 @@ const views = {
     }
   },
 
-  async reloadAppleBoard() {
+  // Changing a status re-sorts the list under the user's hands. The rows are
+  // rebuilt from scratch by renderAppleBody, so there is no element to animate
+  // — instead we note where every row was, re-render, and replay the move from
+  // the old position to the new one (the FLIP technique).
+  _MOVE_MS: 420,
+  _FLASH_MS: 700,
+  _FLASH_DELAY_MS: 200,
+
+  _captureAppleRowTops() {
+    const tops = new Map();
+    document.querySelectorAll('#apple-body [data-row-id]').forEach((el) => {
+      tops.set(el.dataset.rowId, el.getBoundingClientRect().top);
+    });
+    return tops;
+  },
+
+  _playAppleRowMoves(before, highlightId) {
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // The move and the flash run side by side, so the whole thing is over when
+    // the slower of the two is — not when their durations are added up.
+    const total = Math.max(this._MOVE_MS, this._FLASH_DELAY_MS + this._FLASH_MS);
+
+    document.querySelectorAll('#apple-body [data-row-id]').forEach((el) => {
+      const id = el.dataset.rowId;
+      const previousTop = before.get(id);
+      const moved = previousTop != null && Math.abs(previousTop - el.getBoundingClientRect().top) > 1;
+      const flash = id === highlightId;
+      if ((!moved && !flash) || reduce) return;
+
+      const parts = [];
+      if (moved) {
+        el.style.transform = `translateY(${previousTop - el.getBoundingClientRect().top}px)`;
+        parts.push(`transform ${this._MOVE_MS}ms cubic-bezier(.2,.7,.3,1)`);
+      }
+      if (flash) {
+        // Inline, so clearing it hands the row back to whatever tone its
+        // outcome gives it (red for a rejection, amber for needs-action).
+        el.style.backgroundColor = 'rgba(79, 70, 229, 0.12)';
+        el.style.boxShadow = 'inset 3px 0 0 #4338ca';
+        parts.push(`background-color ${this._FLASH_MS}ms ease ${this._FLASH_DELAY_MS}ms`);
+        parts.push(`box-shadow ${this._FLASH_MS}ms ease ${this._FLASH_DELAY_MS}ms`);
+      }
+      el.style.transition = 'none';
+
+      requestAnimationFrame(() => {
+        el.style.transition = parts.join(', ');
+        if (moved) el.style.transform = '';
+        if (flash) { el.style.backgroundColor = ''; el.style.boxShadow = ''; }
+        setTimeout(() => { el.style.transition = ''; }, total + 40);
+      });
+    });
+  },
+
+  async reloadAppleBoard(highlightId) {
     // The candidate page shows the same data, so refresh whichever is open.
     const container = document.getElementById('app');
     if (this._appleBoard && document.getElementById('apple-body')) {
+      const before = this._captureAppleRowTops();
       this._appleBoard = await api.get(`/api/pipeline/${this._appleState.client}`);
       this.renderAppleBody();
+      this._playAppleRowMoves(before, highlightId);
     } else if (container && this._currentCandidate) {
       await this.loadAppleSection(this._currentCandidate.id);
     }
@@ -5335,7 +5390,7 @@ const views = {
   async setAppleRowTeam(rowId, team) {
     try {
       await api.patch(`/api/pipeline/${this._appleState.client}/rows/${rowId}`, { team });
-      await this.reloadAppleBoard();
+      await this.reloadAppleBoard(rowId);
     } catch (err) {
       alert('Kunde inte byta team: ' + (err.message || err));
     }

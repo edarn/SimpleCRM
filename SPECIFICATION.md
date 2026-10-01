@@ -763,6 +763,14 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      The step dialog names which steps a tick would fill before you make it
      (`backfillOnPass` / `backfillOnFail`, computed server-side like every
      other rule).
+   - **Re-sorting is shown, not just done.** Changing a status moves the row,
+     which is easy to miss. The rows are rebuilt from scratch, so the move is
+     replayed afterwards from the old position to the new one (FLIP): each
+     moved row is offset by its old delta, then released into a 420 ms
+     transition, while the row that changed is flashed and handed back to
+     whatever colour its outcome gives it. Move and flash run side by side and
+     are over in 940 ms. `prefers-reduced-motion` skips the whole thing.
+     Covered by `scripts/check-apple-view.mjs`.
    - **A rejection dims the rest of the row** (those steps are not "to do",
      they are not applicable) and stays open as **Återkoppla till kandidaten**,
      with a day counter, until the feedback tick is set — a rejection is not
@@ -1395,6 +1403,7 @@ VibeCodingProject/
     ├── build-salary-model-pdf.js  # Build templates/salary-model-explained.pdf
     ├── check-router-history.mjs   # Regression check for the router's history rules
     ├── check-modal-lock.mjs       # Regression check for the modal dismissal lock
+    ├── check-apple-view.mjs       # Regression check for the Apple row-move animation
     ├── migrate-json-to-sqlite.js  # Migration script
     └── seed-test-data.js          # Test data seeder
 ```
