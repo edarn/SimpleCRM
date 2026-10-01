@@ -130,27 +130,45 @@ function normalizeSteps(raw) {
 }
 
 /**
- * Clearing a step means everything before it was cleared too — typing in a
- * profile that is already through the whole process should not mean seven
- * clicks. Marking any step `passed` fills the earlier ones.
+ * Recording an outcome on a step says something about the ones before it, so
+ * typing in a profile that is already through the process should not mean
+ * seven clicks.
  *
- * Only `pending` and `active` are filled:
- *   - `skipped` already counts as cleared, and saying "no test needed" is a
- *     deliberate statement that should survive;
- *   - `failed` is a deliberate negative, and silently reversing a nej would be
- *     worse than leaving the row visibly contradictory.
+ * A green tick fills earlier `pending` and `active` steps. `skipped` already
+ * counts as cleared and saying "no test needed" is a deliberate statement;
+ * `failed` is a deliberate negative, and silently reversing a nej would be
+ * worse than leaving the row visibly contradictory.
+ *
+ * A red cross fills them too — someone rejected at the last step plainly got
+ * past the earlier ones — but only on an otherwise untouched row. Once any
+ * other step has been set, the row is a record someone has been keeping, and
+ * a late nej must not rewrite it.
+ *
+ * Filled-in steps get no date: an invented one reads as fact, and the tick is
+ * the whole claim.
  *
  * @returns {{ steps: Object, filled: string[] }} the new steps and what changed
  */
 function backfillEarlierSteps(steps, stepKey) {
   const upto = STEP_KEYS.indexOf(stepKey);
-  if (upto <= 0 || steps[stepKey].status !== 'passed') return { steps, filled: [] };
+  if (upto <= 0) return { steps, filled: [] };
+
+  const status = steps[stepKey].status;
+  let fillable;
+  if (status === 'passed') {
+    fillable = (st) => st === 'pending' || st === 'active';
+  } else if (status === 'failed') {
+    const untouched = STEP_KEYS.every((k) => k === stepKey || steps[k].status === 'pending');
+    if (!untouched) return { steps, filled: [] };
+    fillable = (st) => st === 'pending';
+  } else {
+    return { steps, filled: [] };
+  }
 
   const next = { ...steps };
   const filled = [];
   for (const key of STEP_KEYS.slice(0, upto)) {
-    if (next[key].status === 'pending' || next[key].status === 'active') {
-      // No date: an invented one reads as fact. The green tick is the claim.
+    if (fillable(next[key].status)) {
       next[key] = { ...next[key], status: 'passed' };
       filled.push(key);
     }
@@ -158,9 +176,10 @@ function backfillEarlierSteps(steps, stepKey) {
   return { steps: next, filled };
 }
 
-/** Steps before `stepKey` that a `passed` there would fill in. */
-function backfillPreview(steps, stepKey) {
-  return backfillEarlierSteps({ ...steps, [stepKey]: { ...steps[stepKey], status: 'passed' } }, stepKey).filled;
+/** Steps before `stepKey` that setting it to `status` would fill in. */
+function backfillPreview(steps, stepKey, status) {
+  const hypothetical = { ...steps, [stepKey]: { ...steps[stepKey], status } };
+  return backfillEarlierSteps(hypothetical, stepKey).filled;
 }
 
 function parseDate(value) {
@@ -224,7 +243,11 @@ function deriveRow(row, candidate, now = new Date()) {
     // the dialog can warn before it happens, rather than the browser working
     // the rule out for itself.
     backfillOnPass: STEP_KEYS.reduce((acc, key) => {
-      acc[key] = backfillPreview(steps, key);
+      acc[key] = backfillPreview(steps, key, 'passed');
+      return acc;
+    }, {}),
+    backfillOnFail: STEP_KEYS.reduce((acc, key) => {
+      acc[key] = backfillPreview(steps, key, 'failed');
       return acc;
     }, {}),
   };
