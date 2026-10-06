@@ -4883,11 +4883,36 @@ const views = {
     const days = r.nextAction.days > 0
       ? `<span class="text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full shrink-0">${r.nextAction.days} dgr</span>`
       : '';
+    // The derived status sits on top; underneath, a short free comment saved on
+    // blur, so the user can jot down context without opening a dialog.
     return `<div class="flex items-center gap-2 min-w-0">
         <span class="w-[7px] h-[7px] rounded-full ${dot} shrink-0"></span>
         <span class="text-[13px] ${text} truncate">${this.escapeHtml(r.nextAction.label)}</span>
         ${days}
-      </div>`;
+      </div>
+      <textarea rows="2" maxlength="2000" placeholder="Kommentar…" aria-label="Kommentar för ${this.escapeHtml(r.candidateName)}"
+                onchange="views.saveAppleRowNote('${r.id}', this)"
+                class="mt-1 w-full px-2 py-1 text-xs leading-snug text-slate-700 bg-white/70 border border-slate-200 rounded-md resize-none placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400">${this.escapeHtml(r.note || '')}</textarea>`;
+  },
+
+  // Saved without re-rendering the board: a re-render would steal focus and
+  // could reshuffle rows while the user is moving to the next comment. Saves
+  // for one row are chained so an older one can never land after a newer one.
+  _appleNoteSaves: {},
+  saveAppleRowNote(rowId, el) {
+    const note = el.value;
+    const prev = this._appleNoteSaves[rowId] || Promise.resolve();
+    this._appleNoteSaves[rowId] = prev.then(async () => {
+      try {
+        await api.patch(`/api/pipeline/${this._appleState.client}/rows/${rowId}`, { note });
+        const row = this._appleBoard && this._appleBoard.rows.find((x) => x.id === rowId);
+        if (row) row.note = note;
+        el.classList.remove('border-red-400');
+      } catch (err) {
+        el.classList.add('border-red-400');
+        alert('Kunde inte spara kommentaren: ' + (err.message || err));
+      }
+    });
   },
 
   _appleShortDate(value) {

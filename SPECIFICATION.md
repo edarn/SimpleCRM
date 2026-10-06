@@ -779,6 +779,9 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Nästa åtgärd** is the column that turns the board into a worklist:
      derived per row, with a day counter on anything that has been sitting.
      `mine` is your move, `waiting` is somebody else's.
+     Under the status sits a two-line free-text comment (the row's `note`),
+     edited in place and saved on blur via `PATCH …/rows/:id` without
+     re-rendering the board.
    - **Sorting**: klara överst, pågående därefter (the further through the
      process, the higher — ties broken by whoever has waited longest), avslag
      sist and faintly red. Section headers are inserted where the outcome
