@@ -3343,6 +3343,7 @@ const views = {
               <option value="iOS">iOS</option>
               <option value="Java/Scala">Java/Scala</option>
               <option value="Machine Learning">Machine Learning</option>
+              <option value="Data Engineer">Data Engineer</option>
             </select>
           </div>
         </div>

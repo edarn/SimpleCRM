@@ -40,6 +40,7 @@ const TEAMS = [
   'iOS',
   'Java/Scala',
   'Machine Learning',
+  'Data Engineer',
 ];
 
 // Per-step wording. Generic "not started / in progress" reads badly on a

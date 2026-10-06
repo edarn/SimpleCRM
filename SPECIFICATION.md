@@ -787,7 +787,7 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      startande* (placements grouped by team, with start dates; a missing start
      date is an action, not a blank).
    - **Teams**: Java Backend, TypeScript Frontend, iOS, Java/Scala, Machine
-     Learning. Optional — a row without one groups under "Utan team".
+     Learning, Data Engineer. Optional — a row without one groups under "Utan team".
    - **Getting into the flow**: the picker (search + multi-select), a button on
      the candidate page, or the **"Lägg även till i Apple-flödet"** checkbox on
      the CV bulk-import, which also takes a team for the whole batch. All three
@@ -1016,7 +1016,7 @@ CREATE TABLE client_pipeline (
   id TEXT PRIMARY KEY,
   client TEXT NOT NULL DEFAULT 'apple',   -- which client's flow; a column, not a hard-coded table
   candidate_id TEXT NOT NULL,
-  team TEXT DEFAULT '',                   -- Java Backend | TypeScript Frontend | iOS | Java/Scala | Machine Learning
+  team TEXT DEFAULT '',                   -- Java Backend | TypeScript Frontend | iOS | Java/Scala | Machine Learning | Data Engineer
   steps_json TEXT NOT NULL DEFAULT '{}',  -- { "<step>": { status, date, note } } — see src/lib/pipeline.js
   feedback_status TEXT NOT NULL DEFAULT 'pending' CHECK (feedback_status IN ('pending', 'done')),
   feedback_date TEXT DEFAULT '',
