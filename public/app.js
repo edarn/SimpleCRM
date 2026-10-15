@@ -8096,12 +8096,15 @@ We're looking for a senior Java developer..."></textarea>
           ${request.matchedCandidates.map((m, i) => {
             const status = m.sent ? (m.status || 'sent') : null;
             const sm = status ? this._matchStatusMeta[status] : null;
-            const rowCls = sm ? sm.border : (i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50');
+            const rowCls = sm ? sm.border : m.starred ? 'border-amber-300 bg-amber-50/60' : (i === 0 ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-slate-50/50');
             const avatarCls = sm ? sm.avatar : (i === 0 ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-600');
             return `
           <div class="flex items-start gap-3 p-4 rounded-lg border ${rowCls}">
             <input type="checkbox" class="match-select-cb mt-1 h-5 w-5 text-violet-600 rounded border-slate-300 focus:ring-violet-500 cursor-pointer"
                    data-candidate-id="${m.candidateId}" data-index="${i}">
+            <button onclick="views.toggleCandidateStar('${request.id}', '${m.candidateId}', ${m.starred ? 'false' : 'true'})"
+                    class="flex-shrink-0 mt-0.5 text-xl leading-none ${m.starred ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'}"
+                    title="${m.starred ? 'Ta bort stjärnmarkering' : 'Stjärnmarkera — lägger kandidaten överst i listan'}">${m.starred ? '&#9733;' : '&#9734;'}</button>
             <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${avatarCls}">
               ${m.score}%
             </div>
@@ -8172,6 +8175,15 @@ We're looking for a senior Java developer..."></textarea>
   async setCandidateStatus(requestId, candidateId, status) {
     try {
       await api.put(`/api/requests/${requestId}/candidates/${candidateId}/status`, { status });
+      await this.requestDetail(document.getElementById('app'), requestId);
+    } catch (err) {
+      alert('Error: ' + (err.message || err));
+    }
+  },
+
+  async toggleCandidateStar(requestId, candidateId, starred) {
+    try {
+      await api.put(`/api/requests/${requestId}/candidates/${candidateId}/star`, { starred });
       await this.requestDetail(document.getElementById('app'), requestId);
     } catch (err) {
       alert('Error: ' + (err.message || err));

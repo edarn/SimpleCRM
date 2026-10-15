@@ -392,6 +392,17 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      and persists on the request's `matched_candidates` entry. The status is
      preserved across re-matches (a fresh match updates the score but keeps the
      status). Only candidates that have been sent get the dropdown.
+   - **Starred candidates**: each match row has a star (☆/★) to the left of the
+     score. Starring a candidate moves them to the top of the list (starred
+     first, then by score — several starred are ordered by score among
+     themselves) and tints the row amber. Stored as `starred: true` on the
+     request's `matched_candidates` entry via
+     `PUT /api/requests/:id/candidates/:candidateId/star` `{ starred }`. The
+     order is applied to the stored list, not just in the UI, because
+     send-via-Outlook selects by list index. A star survives re-matches, and a
+     starred candidate is never dropped by one (a re-score that no longer
+     returns them keeps their old entry), nor removed by a candidate-side
+     re-match; merging duplicates carries the star to the survivor.
    - **Matching uses simple numeric IDs** (not UUIDs) for reliable AI
      round-trips. Results cached in DB and sorted by score descending.
    - **Chunked matching (`AI_MATCH_CHUNK_SIZE`, default 40)**: the prompt carries

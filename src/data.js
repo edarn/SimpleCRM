@@ -1796,6 +1796,14 @@ function statusRank(status) {
   return CLIENT_STATUS_RANK[status] || 0;
 }
 
+// Order of a request's match list: candidates the user starred come first,
+// then everyone by AI score. Done on the stored list (not just in the UI)
+// because the send-via-Outlook flow selects candidates by list index.
+function sortRequestMatches(list) {
+  return list.sort((a, b) =>
+    (b.starred ? 1 : 0) - (a.starred ? 1 : 0) || (b.score || 0) - (a.score || 0));
+}
+
 function isBoilerplateImportComment(content) {
   const c = String(content || '').trim();
   return BOILERPLATE_IMPORT_COMMENTS.some(b => c === b);
@@ -1873,6 +1881,11 @@ const mergeCandidatesTx = db.transaction((survivorId, duplicateIds, userId, team
 
       const next = list.filter(m => m.candidateId !== dupId);
 
+      if (dupEntry.starred) {
+        const survivorEntry = next.find(m => m.candidateId === survivorId);
+        if (survivorEntry) survivorEntry.starred = true;
+      }
+
       if (dupEntry.sent) {
         const survivorEntry = next.find(m => m.candidateId === survivorId);
         if (survivorEntry) {
@@ -1887,8 +1900,8 @@ const mergeCandidatesTx = db.transaction((survivorId, duplicateIds, userId, team
         } else {
           next.push({ ...dupEntry, candidateId: survivorId });
         }
-        next.sort((a, b) => (b.score || 0) - (a.score || 0));
       }
+      sortRequestMatches(next);
 
       db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
         .run(JSON.stringify(next), now, req.id);
@@ -2763,7 +2776,7 @@ function updateConsultantRequest(requestId, updates, userId) {
 // open requests so the candidate shows up — correctly sorted — on the request
 // detail page. Synchronous read-modify-write: atomic under Node's single thread,
 // so concurrent candidate matches can't clobber each other's inserts. Preserves
-// any existing strengths/gaps/reasoning and the "sent" flag for this candidate.
+// any existing strengths/gaps/reasoning, the "sent" flag and the star.
 function addCandidateToRequestMatches(requestId, candidateMatch, userId) {
   const request = getConsultantRequestById(requestId, userId);
   if (!request) return false;
@@ -2780,10 +2793,11 @@ function addCandidateToRequestMatches(requestId, candidateMatch, userId) {
   };
   if (existing && existing.sent) merged.sent = true;
   if (existing && existing.status) merged.status = existing.status;
+  if (existing && existing.starred) merged.starred = true;
 
   const next = list.filter(m => m.candidateId !== candidateMatch.candidateId);
   next.push(merged);
-  next.sort((a, b) => (b.score || 0) - (a.score || 0));
+  sortRequestMatches(next);
 
   const now = getTimestamp();
   db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
@@ -2793,14 +2807,15 @@ function addCandidateToRequestMatches(requestId, candidateMatch, userId) {
 
 // Remove a candidate from a request's matched_candidates list (used when a
 // re-match shows the candidate no longer matches a previously-matched request).
-// Candidates already marked "sent" are kept so the Sent history is preserved.
+// Candidates already marked "sent" are kept so the Sent history is preserved,
+// and starred ones because the user picked them by hand.
 function removeCandidateFromRequestMatches(requestId, candidateId, userId) {
   const request = getConsultantRequestById(requestId, userId);
   if (!request) return false;
 
   const list = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
   const target = list.find(m => m.candidateId === candidateId);
-  if (!target || target.sent) return false;
+  if (!target || target.sent || target.starred) return false;
 
   const next = list.filter(m => m.candidateId !== candidateId);
   const now = getTimestamp();
@@ -2839,21 +2854,28 @@ function reconcileRequestMatches(requestId, evaluatedCandidateIds, newMatches, u
 
   // Preserve entries for candidates this run did not evaluate (e.g. added
   // concurrently and self-inserted via addCandidateToRequestMatches).
-  const preserved = existing.filter(m => !evaluated.has(m.candidateId));
+  // Starred candidates were picked by hand, so a re-score that no longer
+  // returns them must not silently drop them — keep their old entry.
+  const freshIds = new Set(newMatches.map(m => m.candidateId));
+  const preserved = existing.filter(m =>
+    !evaluated.has(m.candidateId) || (m.starred && !freshIds.has(m.candidateId)));
 
-  // Carry over the "sent" flag and client status for evaluated candidates from
-  // their old entry (a fresh match must not reset a sent/declined/etc. status).
+  // Carry over the "sent" flag, client status and star for evaluated candidates
+  // from their old entry (a fresh match must not reset what the user set).
   const prevById = new Map(existing.map(m => [m.candidateId, m]));
   const fresh = (newMatches || []).map(m => {
     const prev = prevById.get(m.candidateId);
-    if (prev && prev.sent) {
-      return { ...m, sent: true, ...(prev.status ? { status: prev.status } : {}) };
+    if (!prev) return m;
+    const out = { ...m };
+    if (prev.sent) {
+      out.sent = true;
+      if (prev.status) out.status = prev.status;
     }
-    return m;
+    if (prev.starred) out.starred = true;
+    return out;
   });
 
-  const merged = [...preserved, ...fresh];
-  merged.sort((a, b) => (b.score || 0) - (a.score || 0));
+  const merged = sortRequestMatches([...preserved, ...fresh]);
 
   const now = getTimestamp();
   db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
@@ -2882,6 +2904,28 @@ function setRequestCandidateStatus(requestId, candidateId, status, userId) {
   db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(next), now, requestId);
   return getConsultantRequestById(requestId, userId);
+}
+
+// Star / unstar a candidate in a request's match list. A starred candidate is
+// one the user found interesting regardless of the AI score; it sorts to the
+// top. Atomic read-modify-write. Returns true, or null if the request or the
+// candidate entry isn't found.
+function setRequestCandidateStarred(requestId, candidateId, starred, userId) {
+  const request = getConsultantRequestById(requestId, userId);
+  if (!request) return null;
+
+  const list = Array.isArray(request.matchedCandidates) ? request.matchedCandidates : [];
+  if (!list.some(m => m.candidateId === candidateId)) return null;
+
+  const next = sortRequestMatches(list.map(m => {
+    if (m.candidateId !== candidateId) return m;
+    const { starred: _old, ...rest } = m;
+    return starred ? { ...rest, starred: true } : rest;
+  }));
+  const now = getTimestamp();
+  db.prepare('UPDATE consultant_requests SET matched_candidates = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(next), now, requestId);
+  return true;
 }
 
 function deleteConsultantRequest(requestId, userId) {
@@ -3278,6 +3322,7 @@ module.exports = {
   removeCandidateFromRequestMatches,
   reconcileRequestMatches,
   setRequestCandidateStatus,
+  setRequestCandidateStarred,
   getCandidatesWithResumes,
 
   // Distilled candidate profiles

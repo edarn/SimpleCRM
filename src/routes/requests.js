@@ -432,6 +432,23 @@ router.put('/:id/candidates/:candidateId/status', (req, res) => {
   }
 });
 
+// PUT /api/requests/:id/candidates/:candidateId/star - Star / unstar a
+// candidate in the match list. Starred candidates sort to the top.
+router.put('/:id/candidates/:candidateId/star', (req, res) => {
+  try {
+    const ok = data.setRequestCandidateStarred(
+      req.params.id, req.params.candidateId, req.body.starred === true, req.session.userId
+    );
+    if (!ok) {
+      return res.status(404).json({ error: 'Request or matched candidate not found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error starring candidate:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/requests/:id - Delete a request
 router.delete('/:id', (req, res) => {
   try {
