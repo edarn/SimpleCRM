@@ -1448,6 +1448,14 @@ const views = {
     this._activitySortAsc = false;
   },
 
+  // "Who · when" under a note or comment, so a team can see who wrote it.
+  _authorDateLine(item) {
+    const who = item.createdByUsername
+      ? `<span class="font-medium text-slate-500">${this.escapeHtml(item.createdByUsername)}</span> · `
+      : '';
+    return `<p class="text-xs text-slate-400 mt-1">${who}${formatDateTime(item.createdAt)}</p>`;
+  },
+
   renderNotes(notes, contactId) {
     if (!notes || notes.length === 0) {
       return '<p class="text-slate-500">No notes yet</p>';
@@ -1465,7 +1473,7 @@ const views = {
             <button onclick="views.deleteNote('${contactId}', '${note.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
           </div>
         </div>
-        <p class="text-xs text-slate-400 mt-1">${formatDateTime(note.createdAt)}</p>
+        ${this._authorDateLine(note)}
       </div>
     `).join('');
   },
@@ -1481,6 +1489,7 @@ const views = {
         id: note.id,
         content: note.content,
         createdAt: note.createdAt,
+        createdByUsername: note.createdByUsername,
         completed: false
       });
     });
@@ -1530,7 +1539,7 @@ const views = {
                 <button onclick="views.deleteNote('${entityId}', '${item.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
               </div>
             </div>
-            <p class="text-xs text-slate-400 mt-1">${formatDateTime(item.createdAt)}</p>
+            ${this._authorDateLine(item)}
           </div>
         `;
       } else {
@@ -3176,6 +3185,14 @@ const views = {
     not_qualified: 'Not Qualified',
     contact_later: 'Contact Later',
     hired: 'Hired'
+  },
+
+  // The Candidates tab is a fresh start: empty search, focused (via the input's
+  // autofocus). Back and "← Back to Candidates" go through history instead and
+  // keep the remembered search. Category and owner filters are left as they are.
+  openCandidatesTab() {
+    if (this._candidateListState) this._candidateListState.query = '';
+    router.navigate('candidates');
   },
 
   // Candidate List View
@@ -6188,6 +6205,7 @@ const views = {
         id: c.id,
         content: c.content,
         createdAt: c.createdAt,
+        createdByUsername: c.createdByUsername,
         completed: false
       });
     });
@@ -6319,7 +6337,7 @@ const views = {
             <button onclick="views.deleteCandidateComment('${candidateId}', '${comment.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
           </div>
         </div>
-        <p class="text-xs text-slate-400 mt-1">${formatDateTime(comment.createdAt)}</p>
+        ${this._authorDateLine(comment)}
       </div>
     `).join('');
   },
@@ -6365,7 +6383,7 @@ const views = {
           <button onclick="views.deleteCandidateComment('${candidateId}', '${comment.id}')" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
         </div>
       </div>
-      <p class="text-xs text-slate-400 mt-1">${formatDateTime(comment.createdAt)}</p>
+      ${this._authorDateLine(comment)}
     `;
   },
 

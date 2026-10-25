@@ -79,9 +79,10 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Employment offers** (see section 11)
    - Resume file upload (PDF, DOC, DOCX, max 10MB)
    - Resume download functionality
-   - Comments & ToDos: unified list on the candidate detail page (same pattern as Contacts and Companies), sortable by date or type, showing comments (rose) and linked ToDos (emerald) inline with inline checklist/complete controls
+   - Comments & ToDos: unified list on the candidate detail page (same pattern as Contacts and Companies), sortable by date or type, showing comments (rose) and linked ToDos (emerald) inline with inline checklist/complete controls. Every comment (and every contact note) shows who wrote it next to its timestamp ("anna · 2026-10-25 14:02")
    - "Make this a ToDo" checkbox when adding a comment: if checked, creates a ToDo linked to the candidate (using comment text as title) instead of a comment; the ToDo appears in the candidate's Comments & ToDos list and in the global ToDos list
    - Full-text search across all candidate fields
+   - Search memory: Back (browser Back or "← Back to Candidates") returns to the list with the previous search text still filled in; clicking the **Candidates** tab instead opens the list with an empty, focused search field so you can type straight away (category and owner filters are kept)
      - Search returns matches in two groups: first, candidates that match the currently active owner + category filter (primary results); then, after a subtle separator row, additional matches from across all owners and all categories that don't fit the active filter (secondary results). When the active filter is already "All Candidates (Team) / All Categories" the secondary group is empty.
    - Sort candidates by name, role, or skills
    - **Owner filter (team users)**: On the candidates list, a dropdown lets a team user choose whose candidates to view — their own (default), any other team member's, or all team candidates. An "Added By" column is shown for team users. Solo users see their own candidates with no dropdown.
