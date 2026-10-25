@@ -312,14 +312,23 @@ function formatDate(value) {
 // Klara överst, pågående därefter (längst i processen högst), avslag sist.
 const OUTCOME_RANK = { done: 0, active: 1, rejected: 2 };
 
+function teamRank(team) {
+  const i = TEAMS.indexOf(team || '');
+  return i === -1 ? TEAMS.length : i;
+}
+
 function compareRows(a, b) {
   const ra = OUTCOME_RANK[a.outcome];
   const rb = OUTCOME_RANK[b.outcome];
   if (ra !== rb) return ra - rb;
 
   if (a.outcome === 'done') {
-    // Someone with no start date is waiting on you, so they come first;
-    // otherwise the soonest starter is the most interesting.
+    // Grouped by team (TEAMS order, no team last) so each role reads as a block.
+    const ta = teamRank(a.team);
+    const tb = teamRank(b.team);
+    if (ta !== tb) return ta - tb;
+    // Within a team, someone with no start date is waiting on you, so they
+    // come first; otherwise the soonest starter is the most interesting.
     const aMissing = a.startDate ? 1 : 0;
     const bMissing = b.startDate ? 1 : 0;
     if (aMissing !== bMissing) return aMissing - bMissing;

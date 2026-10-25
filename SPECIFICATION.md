@@ -806,7 +806,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - **Sorting**: klara överst, pågående därefter (the further through the
      process, the higher — ties broken by whoever has waited longest), avslag
      sist and faintly red. Section headers are inserted where the outcome
-     changes.
+     changes. Klara are ordered by team (in the team list's order, no team
+     last), then missing start date first, then soonest start.
+   - **Team tint**: placed consultants (Klara in the flow, every row in Klara &
+     startande) get a very faint background per team — sky for Java Backend,
+     yellow for TypeScript Frontend, violet iOS, teal Java/Scala, rose Machine
+     Learning, orange Data Engineer. Purely grouping; it carries no status.
    - **Two sub-views** under one nav tab: *Flödet* (the matrix) and *Klara &
      startande* (placements grouped by team, with start dates; a missing start
      date is an action, not a blank).

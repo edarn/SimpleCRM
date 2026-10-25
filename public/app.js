@@ -4829,6 +4829,7 @@ const views = {
     // Faintly red once rejected; amber while something is waiting on someone.
     const tone = r.outcome === 'rejected' ? 'bg-red-50/70'
       : r.outcome === 'active' && (r.nextAction.kind === 'mine' || r.waitingDays > 0) ? 'bg-amber-50/40'
+      : r.outcome === 'done' ? this._appleTeamTone(r.team)
       : '';
     const dim = r.outcome === 'rejected' ? 'text-slate-500' : 'text-slate-800';
 
@@ -4849,6 +4850,22 @@ const views = {
         <div class="pl-2">${this._appleActionHtml(r)}</div>
       </div>
     `;
+  },
+
+  // A barely-there background per team on placed consultants, so the roles
+  // read as blocks at a glance. Kept faint: the row tones above (amber, red)
+  // carry meaning, these only group.
+  _APPLE_TEAM_TONES: {
+    'Java Backend': 'bg-sky-50/70',
+    'TypeScript Frontend': 'bg-yellow-50/80',
+    'iOS': 'bg-violet-50/60',
+    'Java/Scala': 'bg-teal-50/60',
+    'Machine Learning': 'bg-rose-50/50',
+    'Data Engineer': 'bg-orange-50/50',
+  },
+
+  _appleTeamTone(team) {
+    return this._APPLE_TEAM_TONES[team] || '';
   },
 
   _appleFormBadge(isSubcontractor) {
@@ -5000,7 +5017,9 @@ const views = {
 
   _appleRosterRowHtml(r) {
     const signed = r.steps.signed.date || r.steps.confirmed.date;
-    const tone = !r.startDate ? 'bg-amber-50/40' : '';
+    // The missing start date already shows as an amber "Sätt datum" button,
+    // so the row background is free to show the team.
+    const tone = this._appleTeamTone(r.team);
     return `
       <div data-row-id="${r.id}" class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_ROSTER_GRID}">
         <div class="flex items-center gap-2 min-w-0 pr-3">
