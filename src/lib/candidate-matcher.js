@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { createMessage } = require('./ai-client');
+const { createMessage, responseText, MODELS, MATCHING_FALLBACK } = require('./ai-client');
 const { scrubPII } = require('./pseudonymize');
 const { prefilterCandidates } = require('./skills');
 
@@ -245,9 +245,12 @@ async function matchChunk(request, items) {
   }).join('\n\n---\n\n');
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
-    temperature: 0,
+    // Sonnet 5.5 rejects `temperature` and thinks by default; low effort keeps
+    // scoring fast, and max_tokens leaves room for thinking plus the reply.
+    model: MODELS.matching,
+    max_tokens: 16000,
+    output_config: { effort: 'low' },
+    ...MATCHING_FALLBACK,
     system: [{ type: 'text', text: RUBRIC }],
     // BLOCK ORDER IS LOAD-BEARING — do not "tidy" it back to request-first.
     //
@@ -267,7 +270,7 @@ async function matchChunk(request, items) {
     }],
   });
 
-  const text = response.content[0].text.trim();
+  const text = responseText(response).trim();
   let matches;
   try {
     matches = JSON.parse(text);

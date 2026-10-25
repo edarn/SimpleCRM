@@ -1,4 +1,4 @@
-const { createMessage } = require('./ai-client');
+const { createMessage, responseText, MODELS } = require('./ai-client');
 
 const FIELD_RULES = `Rules:
 - For the name, use the full name as written on the CV. If the CV is in a language other than English, keep the original name.
@@ -14,7 +14,7 @@ const FIELDS_SHAPE = `  "name": "Full name of the candidate",
   "skills": "Comma-separated list of key technical skills, programming languages, frameworks, and tools mentioned in the CV. Focus on the most important and relevant ones, max 15 items."`;
 
 function parseResponse(response) {
-  const text = response.content[0].text.trim();
+  const text = responseText(response).trim();
   try {
     return JSON.parse(text);
   } catch (err) {
@@ -28,8 +28,10 @@ function parseResponse(response) {
 
 async function parseCV(resumeText) {
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
+    model: MODELS.cvImport,
     max_tokens: 1500,
+    // Plain extraction: thinking adds latency and eats max_tokens for nothing.
+    thinking: { type: 'disabled' },
     system: `You are an AI assistant that extracts structured candidate information from a CV/resume.
 
 Extract the following fields from the resume text. If a field is not found, use an empty string.
@@ -72,9 +74,11 @@ async function parseCVWithProfile(resumeText, known = {}) {
   const { buildProfileResult, profilePromptSection } = require('./profile-distiller');
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
+    model: MODELS.cvImport,
     max_tokens: 2500,
-    temperature: 0,
+    // No `temperature` (Haiku 5.5 rejects it). Thinking off: with it on, the
+    // thinking used up max_tokens and truncated the JSON.
+    thinking: { type: 'disabled' },
     system: `You are an AI assistant that extracts structured candidate information from a CV/resume.
 
 Extract the following from the resume text. If a field is not found, use an empty string.

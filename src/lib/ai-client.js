@@ -64,19 +64,54 @@ function release() {
   }
 }
 
+// Model per job, in one place so an upgrade is a one-line change.
+//
+// NOTE when changing these: Haiku 5.5 and Sonnet 5.5 reject `temperature`, think
+// by default (thinking counts toward max_tokens), and can put thinking/fallback
+// blocks before the answer — read replies with responseText(), never content[0].
+const MODELS = {
+  // Bulk CV import: contact fields + profile in one extraction call. Compared
+  // against Sonnet 4.6 on 13 real CVs: same contact fields on 38/39, ~23x
+  // cheaper, ~3x faster. Recruiters review imported candidates anyway.
+  cvImport: 'claude-haiku-5-5',
+  // Candidate <-> request scoring and standalone profile distillation: these
+  // drive match scores, so they stay on the judgment tier.
+  matching: 'claude-sonnet-5-5',
+};
+
 // Drop-in for `client.messages.create(...)`, but routed through the gate.
+// Requests that carry `betas` (e.g. server-side refusal fallback) go to the
+// beta endpoint, which is where the SDK accepts that field.
 async function createMessage(params) {
   await acquire();
   try {
-    return await getClient().messages.create(params);
+    const c = getClient();
+    return await (params.betas ? c.beta.messages.create(params) : c.messages.create(params));
   } finally {
     release();
   }
 }
+
+// The answer text of a response, read by block TYPE: on current models the
+// first block can be `thinking` (or `fallback`), not the reply. A refusal is
+// thrown so callers' existing error paths handle it instead of parsing nothing.
+function responseText(response) {
+  if (response && response.stop_reason === 'refusal') {
+    const category = response.stop_details && response.stop_details.category;
+    throw new Error(`AI declined the request${category ? ` (${category})` : ''}`);
+  }
+  const block = ((response && response.content) || []).find(b => b.type === 'text');
+  return block ? block.text : '';
+}
+
+// Server-side refusal fallback for Sonnet 5.5 requests (Claude API only): a
+// declined request is retried on another model inside the same call. Haiku 5.5
+// has no server-side fallback, so this is only spread into matching calls.
+const MATCHING_FALLBACK = { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };
 
 // Exposed for diagnostics / tests.
 function stats() {
   return { active, queued: waiters.length, max: MAX_CONCURRENCY };
 }
 
-module.exports = { createMessage, getClient, stats };
+module.exports = { createMessage, getClient, stats, responseText, MODELS, MATCHING_FALLBACK };

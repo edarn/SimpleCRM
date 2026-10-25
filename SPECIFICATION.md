@@ -543,6 +543,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      therefore ~3 min rather than ~8 min — this is an interactive feature, and a
      wedged call holds a gate slot that every other user queues behind. Tune the
      concurrency cap to your Anthropic tier.
+   - **AI models (`MODELS` in `src/lib/ai-client.js`)**: CV parsing (single upload
+     and bulk import) runs on `claude-haiku-5-5` with thinking disabled — plain
+     extraction, ~23x cheaper and ~3x faster than Sonnet with the same contact
+     fields on 38 of 39 in a 13-CV comparison. Candidate↔request matching and
+     standalone profile distillation run on `claude-sonnet-5-5` at effort `low`,
+     with server-side refusal fallback. Email classification is still on
+     `claude-sonnet-4-6`. These models reject `temperature` and may return thinking
+     blocks before the answer, so replies are read with `responseText()` (by block
+     type), never `content[0]`.
    - **Startup recovery of orphaned work**: Background AI processing runs in
      fire-and-forget promises, so a server restart/crash loses any in-flight job
      while its DB row stays mid-flight forever. On boot (`src/database.js`) any

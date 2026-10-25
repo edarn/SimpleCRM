@@ -825,15 +825,18 @@ async function _runCandidateRequestMatching(candidateId, candidate, userId) {
 
   // Route through the shared concurrency gate (src/lib/ai-client.js) so this
   // call counts against the same in-flight cap as email classification/matching.
-  const { createMessage } = require('../lib/ai-client');
+  const { createMessage, responseText, MODELS, MATCHING_FALLBACK } = require('../lib/ai-client');
   const requestSummaries = openRequests.map((r, i) => (
     `[${i + 1}] ${r.title}\nRole: ${r.role || ''}\nSkills: ${(r.requiredSkills || '').replace(/\*\*/g, '')}\nDescription: ${(r.description || '').substring(0, 500)}`
   )).join('\n\n---\n\n');
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
-    temperature: 0,
+    // Sonnet 5.5 rejects `temperature` and thinks by default; low effort keeps
+    // scoring fast, and max_tokens leaves room for thinking plus the reply.
+    model: MODELS.matching,
+    max_tokens: 8000,
+    output_config: { effort: 'low' },
+    ...MATCHING_FALLBACK,
     system: `You receive a candidate profile and a list of open consultant requests. Score how well the candidate matches EACH request (0-100). Only return requests where the score is 50 or higher.
 
 IMPORTANT: Match semantically, not literally. If a request asks for "AWS", the candidate matches if they mention ANY AWS service (S3, EC2, Lambda, DynamoDB, CloudWatch, ECS, EKS, etc.). Same for "Azure" (Azure DevOps, Azure Functions, etc.), "Kubernetes" (EKS, AKS, GKE, Helm), "CI/CD" (Jenkins, GitHub Actions, GitLab CI), "Cloud" (any cloud provider), "SQL" (PostgreSQL, MySQL, MSSQL), etc. Think about what the recruiter actually means, not just the exact keyword.
@@ -850,7 +853,7 @@ Empty array [] if no request matches above 50.`,
     }]
   });
 
-  const text = response.content[0].text.trim();
+  const text = responseText(response).trim();
   let aiMatches;
   try {
     aiMatches = JSON.parse(text);

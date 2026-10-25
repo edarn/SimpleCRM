@@ -25,7 +25,7 @@
 // still personal data. That is why it stays local-scoped and only the
 // skills/experience carrying fields exist at all.
 
-const { createMessage } = require('./ai-client');
+const { createMessage, responseText, MODELS, MATCHING_FALLBACK } = require('./ai-client');
 const { scrubPII } = require('./pseudonymize');
 const { candidateTagsFromFields } = require('./skills');
 const { yieldToEventLoop } = require('./resume-parser');
@@ -33,8 +33,9 @@ const { yieldToEventLoop } = require('./resume-parser');
 // Same truncation as cv-parser.js — enough to reach the experience sections
 // without risking token overflow on a 40-page consultant CV.
 const MAX_INPUT_CHARS = 15000;
-const MODEL = 'claude-sonnet-4-6';
-const MAX_TOKENS = 1200;
+const MODEL = MODELS.matching;
+// Headroom for Sonnet 5.5's thinking, which counts toward max_tokens.
+const MAX_TOKENS = 4000;
 
 // Shared with cv-parser.js so the bulk-import prompt and the standalone
 // distillation prompt describe EXACTLY the same object. Two drifting shapes
@@ -237,7 +238,8 @@ async function distillProfile(resumeText, known = {}) {
   const response = await createMessage({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    temperature: 0,
+    output_config: { effort: 'low' },
+    ...MATCHING_FALLBACK,
     system: SYSTEM_PROMPT,
     messages: [{
       role: 'user',
@@ -245,7 +247,7 @@ async function distillProfile(resumeText, known = {}) {
     }],
   });
 
-  const raw = parseJsonObject(response?.content?.[0]?.text);
+  const raw = parseJsonObject(responseText(response));
   if (!raw) return null;
   // The stored profile is scrubbed with the same known identifiers, so a name
   // the model reintroduced from context still cannot reach the database.
