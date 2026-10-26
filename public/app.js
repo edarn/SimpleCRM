@@ -694,6 +694,15 @@ const router = {
     const app = document.getElementById('app');
     const { route, params } = this.currentRoute || { route: 'contacts', params: {} };
 
+    // The Apple matrix is wide: give it more of the screen than the usual
+    // max-w-7xl column, with slimmer side margins.
+    const main = document.getElementById('main-content');
+    if (main) {
+      const wide = route === 'apple';
+      main.style.maxWidth = wide ? '1680px' : '';
+      main.classList.toggle('lg:px-8', !wide);
+    }
+
     try {
       switch (route) {
         case 'contacts':
@@ -4781,9 +4790,11 @@ const views = {
         </div>
       </div>
 
-      <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-x-auto">
-        <div style="min-width: 1180px">
-          <div class="grid items-end px-5 pt-2.5 pb-2 bg-slate-50 border-b border-slate-200" style="${this._APPLE_GRID}">
+      <!-- From xl up the matrix fits, so the box clips instead of scrolling:
+           a scroll container would trap the sticky header inside it. -->
+      <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-x-auto xl:overflow-x-clip">
+        <div style="min-width: 1220px">
+          <div class="sticky top-0 z-10 grid items-end px-5 pt-2.5 pb-2 bg-slate-50 border-b border-slate-200" style="${this._APPLE_GRID}">
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">KANDIDAT</div>
             ${board.steps.map((st, i) => `
               <div class="text-[11px] font-bold text-slate-500 tracking-wide leading-tight ${i === 4 ? 'pl-1 border-l border-slate-200' : ''}">
@@ -4803,7 +4814,7 @@ const views = {
     `;
   },
 
-  _APPLE_GRID: 'grid-template-columns: 260px repeat(7, 96px) minmax(240px, 1fr)',
+  _APPLE_GRID: 'grid-template-columns: 240px repeat(7, 88px) minmax(320px, 1fr)',
 
   _appleRowsHtml(rows) {
     if (!rows.length) {
@@ -4834,7 +4845,7 @@ const views = {
     const dim = r.outcome === 'rejected' ? 'text-slate-500' : 'text-slate-800';
 
     return `
-      <div data-row-id="${r.id}" class="grid items-center px-5 py-2.5 border-b border-slate-100 ${tone}" style="${this._APPLE_GRID}">
+      <div data-row-id="${r.id}" class="grid items-center px-5 py-1.5 border-b border-slate-100 ${tone}" style="${this._APPLE_GRID}">
         <div class="pr-3 min-w-0">
           <div class="flex items-center gap-2 min-w-0">
             <a href="#" onclick="router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;"
@@ -4847,7 +4858,7 @@ const views = {
           </div>
         </div>
         ${r.stepLabels.map((st, i) => this._appleCellHtml(r, st, i)).join('')}
-        <div class="pl-2">${this._appleActionHtml(r)}</div>
+        <div class="pl-2">${this._appleActionHtml(r, true)}</div>
       </div>
     `;
   },
@@ -4911,7 +4922,9 @@ const views = {
     return `<span class="inline-flex ${box} rounded-full border-2 border-dashed border-slate-300 shrink-0"></span>`;
   },
 
-  _appleActionHtml(r) {
+  // `inline` (the flow matrix) puts the comment beside the status instead of
+  // under it, which keeps the rows low now that the column has the room.
+  _appleActionHtml(r, inline) {
     const dot = { mine: 'bg-indigo-700', waiting: 'bg-amber-600', soon: 'bg-emerald-700', closed: 'bg-slate-300' }[r.nextAction.kind] || 'bg-slate-300';
     const text = { mine: 'text-slate-700 font-semibold', waiting: 'text-slate-700', soon: 'text-emerald-700 font-semibold', closed: 'text-slate-400' }[r.nextAction.kind] || 'text-slate-600';
     const days = r.nextAction.days > 0
@@ -4919,14 +4932,16 @@ const views = {
       : '';
     // The derived status sits on top; underneath, a short free comment saved on
     // blur, so the user can jot down context without opening a dialog.
-    return `<div class="flex items-center gap-2 min-w-0">
+    return `<div class="${inline ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-3 items-center' : ''}">
+      <div class="flex items-center gap-2 min-w-0">
         <span class="w-[7px] h-[7px] rounded-full ${dot} shrink-0"></span>
         <span class="text-[13px] ${text} truncate">${this.escapeHtml(r.nextAction.label)}</span>
         ${days}
       </div>
       <textarea rows="2" maxlength="2000" placeholder="Kommentar…" aria-label="Kommentar för ${this.escapeHtml(r.candidateName)}"
                 onchange="views.saveAppleRowNote('${r.id}', this)"
-                class="mt-1 w-full px-2 py-1 text-xs leading-snug text-slate-700 bg-white/70 border border-slate-200 rounded-md resize-none placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400">${this.escapeHtml(r.note || '')}</textarea>`;
+                class="${inline ? '' : 'mt-1 '}block w-full px-2 py-0.5 text-xs leading-snug text-slate-700 bg-white/70 border border-slate-200 rounded-md resize-none placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400">${this.escapeHtml(r.note || '')}</textarea>
+    </div>`;
   },
 
   // Saved without re-rendering the board: a re-render would steal focus and

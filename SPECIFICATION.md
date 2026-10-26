@@ -808,6 +808,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      sist and faintly red. Section headers are inserted where the outcome
      changes. Klara are ordered by team (in the team list's order, no team
      last), then missing start date first, then soonest start.
+   - **Layout**: the Apple route widens the page (max 1680px, slimmer side
+     margins) so *Nästa åtgärd* gets the room; in the matrix the comment sits
+     beside the status rather than under it, keeping rows low. The column
+     header row is sticky while scrolling from the xl breakpoint up — below
+     that the matrix needs horizontal scrolling, and a scroll container would
+     trap a sticky header, so it scrolls with the rows there.
    - **Team tint**: placed consultants (Klara in the flow, every row in Klara &
      startande) get a very faint background per team — sky for Java Backend,
      yellow for TypeScript Frontend, violet iOS, teal Java/Scala, rose Machine
