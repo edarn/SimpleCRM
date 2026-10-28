@@ -110,6 +110,24 @@
         <div id="team-logo-container" class="hidden flex items-center h-full py-1">
           <img id="team-logo" src="" alt="Team Logo" class="h-full max-w-[180px] object-contain">
         </div>
+        <div id="guest-actions" class="hidden flex items-center gap-2 sm:gap-3">
+          <div class="hidden sm:flex items-center gap-1.5 mr-1">
+            <button onclick="i18n.setLanguage('sv')" class="lang-flag w-7 h-5 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="sv" title="Svenska">
+        <svg viewBox="0 0 16 10" class="w-full h-full"><rect fill="#006AA7" width="16" height="10"/><rect fill="#FECC00" width="16" height="2" y="4"/><rect fill="#FECC00" width="2" height="10" x="5"/></svg>
+      </button>
+            <button onclick="i18n.setLanguage('en')" class="lang-flag w-7 h-5 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="en" title="English">
+        <svg viewBox="0 0 60 30" class="w-full h-full"><clipPath id="t"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath><path d="M0,0 v30 h60 v-30 z" fill="#00247d"/><path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#t)" stroke="#cf142b" stroke-width="4"/><path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/><path d="M30,0 v30 M0,15 h60" stroke="#cf142b" stroke-width="6"/></svg>
+      </button>
+            <button onclick="i18n.setLanguage('de')" class="lang-flag w-7 h-5 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="de" title="Deutsch">
+        <svg viewBox="0 0 5 3" class="w-full h-full"><rect fill="#000" width="5" height="1"/><rect fill="#D00" width="5" height="1" y="1"/><rect fill="#FFCE00" width="5" height="1" y="2"/></svg>
+      </button>
+            <button onclick="i18n.setLanguage('fr')" class="lang-flag w-7 h-5 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="fr" title="Français">
+        <svg viewBox="0 0 3 2" class="w-full h-full"><rect fill="#002395" width="1" height="2"/><rect fill="#fff" width="1" height="2" x="1"/><rect fill="#ED2939" width="1" height="2" x="2"/></svg>
+      </button>
+          </div>
+          <button onclick="auth.showLoginModal()" class="px-3 sm:px-4 py-2 rounded-lg text-sm font-semibold text-white border border-white/40 hover:bg-white/15 transition-colors" data-i18n="nav.login">Logga in</button>
+          <button onclick="auth.showRegisterModal()" class="px-3 sm:px-4 py-2 rounded-lg text-sm font-semibold bg-white text-sky-800 hover:bg-sky-50 shadow-sm transition-colors" data-i18n="nav.signup">Skapa konto</button>
+        </div>
         <div id="user-section" class="flex items-center hidden relative">
           <div class="relative">
             <button id="user-menu-button" onclick="toggleUserMenu()" class="flex items-center text-sm text-blue-100 hover:text-white transition-colors">
@@ -180,163 +198,343 @@
 
   <!-- Landing Page (shown when not logged in) -->
   <div id="landing-page" class="hidden">
-    <!-- Language Selector -->
-    <div class="absolute top-4 right-4 flex gap-2 z-10">
-      <button onclick="i18n.setLanguage('sv')" class="lang-flag w-8 h-6 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="sv" title="Svenska">
-        <svg viewBox="0 0 16 10" class="w-full h-full"><rect fill="#006AA7" width="16" height="10"/><rect fill="#FECC00" width="16" height="2" y="4"/><rect fill="#FECC00" width="2" height="10" x="5"/></svg>
-      </button>
-      <button onclick="i18n.setLanguage('en')" class="lang-flag w-8 h-6 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="en" title="English">
-        <svg viewBox="0 0 60 30" class="w-full h-full"><clipPath id="t"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath><path d="M0,0 v30 h60 v-30 z" fill="#00247d"/><path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#t)" stroke="#cf142b" stroke-width="4"/><path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/><path d="M30,0 v30 M0,15 h60" stroke="#cf142b" stroke-width="6"/></svg>
-      </button>
-      <button onclick="i18n.setLanguage('de')" class="lang-flag w-8 h-6 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="de" title="Deutsch">
-        <svg viewBox="0 0 5 3" class="w-full h-full"><rect fill="#000" width="5" height="1"/><rect fill="#D00" width="5" height="1" y="1"/><rect fill="#FFCE00" width="5" height="1" y="2"/></svg>
-      </button>
-      <button onclick="i18n.setLanguage('fr')" class="lang-flag w-8 h-6 rounded overflow-hidden border-2 border-transparent hover:border-sky-400 transition-all" data-lang="fr" title="Français">
-        <svg viewBox="0 0 3 2" class="w-full h-full"><rect fill="#002395" width="1" height="2"/><rect fill="#fff" width="1" height="2" x="1"/><rect fill="#ED2939" width="1" height="2" x="2"/></svg>
-      </button>
-    </div>
-
-    <!-- Hero Section -->
-    <div class="bg-gradient-to-br from-slate-50 to-sky-50 border-b border-slate-200">
-      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
-        <h1 class="text-4xl md:text-5xl font-bold text-slate-800 mb-4">
-          Simple CRM
-        </h1>
-        <p class="text-xl text-slate-600 mb-8 max-w-2xl mx-auto" data-i18n="hero.subtitle">
-          Ett enkelt CRM för privatpersoner och små team som behöver ett smidigt sätt att hantera affärsrelationer utan krångel.
-        </p>
-        <button onclick="auth.showLoginModal()" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-8 py-3 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-semibold shadow-lg text-lg" data-i18n="hero.cta">
-          Kom igång
-        </button>
-      </div>
-    </div>
-
-    <!-- Why Section -->
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <h2 class="text-2xl font-bold text-slate-800 text-center mb-12" data-i18n="why.title">Varför Simple CRM?</h2>
-      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <div class="w-12 h-12 bg-sky-100 rounded-lg flex items-center justify-center mb-4">
-            <svg class="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
-            </svg>
-          </div>
-          <h3 class="font-semibold text-slate-800 mb-2" data-i18n="why.people.title">Håll koll på personer</h3>
-          <p class="text-slate-600 text-sm" data-i18n="why.people.desc">Vet vem du pratat med, vad ni diskuterade och vad som behöver hända härnäst.</p>
-        </div>
-        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <div class="w-12 h-12 bg-violet-100 rounded-lg flex items-center justify-center mb-4">
-            <svg class="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-            </svg>
-          </div>
-          <h3 class="font-semibold text-slate-800 mb-2" data-i18n="why.organized.title">Håll ordning</h3>
-          <p class="text-slate-600 text-sm" data-i18n="why.organized.desc">Gruppera kontakter per företag, lägg till anteckningar och sätt påminnelser.</p>
-        </div>
-        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <div class="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center mb-4">
-            <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-            </svg>
-          </div>
-          <h3 class="font-semibold text-slate-800 mb-2" data-i18n="why.team.title">Arbeta tillsammans</h3>
-          <p class="text-slate-600 text-sm" data-i18n="why.team.desc">Bjud in ditt team och dela allt direkt. Alla håller sig synkade.</p>
-        </div>
-        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center mb-4">
-            <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-            </svg>
-          </div>
-          <h3 class="font-semibold text-slate-800 mb-2" data-i18n="why.data.title">Förlora aldrig data</h3>
-          <p class="text-slate-600 text-sm" data-i18n="why.data.desc">Arkivera istället för att radera, återställ när som helst, och säkerhetskopiera med ett klick.</p>
+    <!-- Hero -->
+    <section class="bg-gradient-to-br from-slate-50 via-sky-50 to-indigo-50 border-b border-slate-200">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24 text-center">
+        <h1 class="text-4xl sm:text-5xl font-bold text-slate-800 mb-3">Simple CRM</h1>
+        <p class="text-xl sm:text-2xl font-semibold text-sky-800 mb-5" data-i18n="hero.tagline">Kandidater, kunder och förfrågningar – på ett ställe</p>
+        <p class="text-lg text-slate-600 mb-9 max-w-3xl mx-auto leading-relaxed" data-i18n="hero.subtitle">Ett lättviktigt CRM för konsult- och rekryteringsteam. Låt AI läsa CV:n och kundmail, matcha rätt person mot rätt uppdrag och följ varje steg fram till signerat avtal.</p>
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+          <button onclick="auth.showRegisterModal()" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-8 py-3 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-semibold shadow-lg text-lg" data-i18n="hero.cta">Skapa konto</button>
+          <a href="#landing-features" onclick="document.getElementById('landing-features').scrollIntoView({behavior: 'smooth'}); return false;" class="px-8 py-3 rounded-lg border border-slate-300 bg-white/70 text-slate-700 hover:bg-white transition-all font-semibold text-lg" data-i18n="hero.secondary">Se hur det fungerar</a>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Features Section -->
-    <div class="bg-white border-y border-slate-200">
-      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <h2 class="text-2xl font-bold text-slate-800 text-center mb-12" data-i18n="features.title">Funktioner</h2>
-        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-          <div class="flex gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-              </svg>
+    <div id="landing-features">
+    <section class="">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-16">
+        <div class="max-w-2xl mb-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-slate-800" data-i18n="sec.candidates">Kandidater &amp; rekrytering</h2>
+          <p class="text-slate-500 mt-2" data-i18n="sec.candidates.intro">Från inkommande CV till konsult på plats hos kunden.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-6">
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-violet-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.cvimport.title">AI-import av CV</h3>
             </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-1" data-i18n="features.contacts.title">Kontakter & Företag</h3>
-              <p class="text-slate-600 text-sm" data-i18n="features.contacts.desc">Hantera affärsrelationer med detaljerade profiler, anteckningar vid varje interaktion och komplett kontakthistorik.</p>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.cvimport.desc">Ladda upp upp till 50 CV:n åt gången – eller vidarebefordra ett mail med CV:t – så skapas kandidatprofilerna automatiskt.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.cvimport.s1">Ladda upp PDF- eller Word-filer, eller vidarebefordra mailet.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.cvimport.s2">AI:n läser ut namn, kontaktuppgifter, roll, kompetenser och en sammanfattad profil.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.cvimport.s3">Finns personen redan uppdateras profilen i stället för att en dubblett skapas.</span>
+              </li>
+              </ol>
             </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-rose-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-              </svg>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-rose-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.candidates.title">Kandidatlistan</h3>
             </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-1" data-i18n="features.candidates.title">Kandidathantering</h3>
-              <p class="text-slate-600 text-sm" data-i18n="features.candidates.desc">Separat hantering av kandidater för rekrytering. Ladda upp CV, lägg till intervjuanteckningar och följ din pipeline.</p>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.candidates.desc">Allt om varje kandidat samlat: CV-filer, kommentarer, ToDos och vem som skrivit vad.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-rose-100 text-rose-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.candidates.s1">Sök i allt – även i CV-texten – direkt från sökfältet.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-rose-100 text-rose-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.candidates.s2">Dina nya CV:n från de senaste dagarna ligger överst så att de inte glöms bort.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-rose-100 text-rose-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.candidates.s3">Kategorier, underkonsult-markering och sortering på namn, roll eller datum.</span>
+              </li>
+              </ol>
             </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
-              </svg>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-sky-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.pipeline.title">Kundflöde steg för steg</h3>
             </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-1" data-i18n="features.tasks.title">Uppgifter & Att-göra</h3>
-              <p class="text-slate-600 text-sm" data-i18n="features.tasks.desc">Skapa uppgifter kopplade till kontakter, företag eller kandidater. Sätt förfallodatum och följ upp varje steg.</p>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.pipeline.desc">Följ kandidater genom kodprov, screening, intervju och avtal i en tydlig matris.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-sky-100 text-sky-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.pipeline.s1">Varje steg har en status: ej påbörjat, pågår, ok, nej eller hoppas över.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-sky-100 text-sky-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.pipeline.s2">Kolumnen Nästa åtgärd visar vad som väntar på dig och hur länge det har legat.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-sky-100 text-sky-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.pipeline.s3">Klara konsulter samlas per team med startdatum.</span>
+              </li>
+              </ol>
             </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M12 18v-6m-3 3h6"></path>
-              </svg>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.offers.title">Erbjudanden &amp; avtal</h3>
             </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-1" data-i18n="features.checklists.title">Checklistor & Steg-för-steg</h3>
-              <p class="text-slate-600 text-sm" data-i18n="features.checklists.desc">Skapa återanvändbara checklistmallar för upprepade processer. Bocka av steg direkt i uppgiften, lägg till egna steg och redigera inline.</p>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.offers.desc">Skapa anställningserbjudanden med lönemodell och färdigt avtalsutkast.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.offers.s1">Fyll i lön och villkor – lönemodellen räknar ut fast och rörlig del.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.offers.s2">Avtalet skapas som PDF, på svenska eller engelska.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.offers.s3">Ett Outlook-utkast med bilagorna är klart att skicka.</span>
+              </li>
+              </ol>
             </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-              </svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-1" data-i18n="features.search.title">Sök & Filtrera</h3>
-              <p class="text-slate-600 text-sm" data-i18n="features.search.desc">Hitta kontakter, företag och kandidater snabbt med sökning och filtrering. Sortera listor efter namn, datum eller status.</p>
-            </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
-              </svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-slate-800 mb-1" data-i18n="features.backup.title">Säkerhetskopiering</h3>
-              <p class="text-slate-600 text-sm" data-i18n="features.backup.desc">Exportera hela databasen som ZIP med alla filer. Importera säkerhetskopior när som helst. Din data är alltid säker och portabel.</p>
-            </div>
-          </div>
+          </article>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- CTA Section -->
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
-      <h2 class="text-2xl font-bold text-slate-800 mb-4" data-i18n="cta.title">Redo att komma igång?</h2>
-      <p class="text-slate-600 mb-8" data-i18n="cta.subtitle">Skapa ditt kostnadsfria konto och börja organisera dina kontakter idag.</p>
-      <button onclick="auth.showLoginModal()" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-8 py-3 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-semibold shadow-lg" data-i18n="cta.button">
-        Skapa konto
-      </button>
-    </div>
+    <section class="bg-white border-y border-slate-200">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-16">
+        <div class="max-w-2xl mb-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-slate-800" data-i18n="sec.clients">Kunder &amp; förfrågningar</h2>
+          <p class="text-slate-500 mt-2" data-i18n="sec.clients.intro">Från kundmail till rätt kandidat – utan att skriva av något.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-6">
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.inbox.title">AI-inkorg</h3>
+            </div>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.inbox.desc">Klistra in eller vidarebefordra ett kundmail – AI:n förstår vad det handlar om och gör resten.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.inbox.s1">En förfrågan om en konsult blir en uppdragsförfrågan.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.inbox.s2">Nya personer i mailet blir kontakter, uppgifter blir ToDos.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.inbox.s3">Allt som skapats visas med länkar direkt i inkorgen.</span>
+              </li>
+              </ol>
+            </div>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.matching.title">AI-matchning</h3>
+            </div>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.matching.desc">Se direkt vilka kandidater som passar ett uppdrag – och vilka uppdrag som passar en kandidat.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-amber-100 text-amber-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.matching.s1">Varje förfrågan matchas mot alla kandidater med CV.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-amber-100 text-amber-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.matching.s2">Kandidaterna rangordnas med poäng och en kort motivering.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-amber-100 text-amber-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.matching.s3">Stjärnmärk favoriterna så ligger de kvar överst.</span>
+              </li>
+              </ol>
+            </div>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-sky-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.contacts.title">Kontakter &amp; företag</h3>
+            </div>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.contacts.desc">Håll ordning på kundrelationerna med anteckningar och historik.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-sky-100 text-sky-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.contacts.s1">Kontakter grupperas per företag.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-sky-100 text-sky-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.contacts.s2">Varje anteckning visar vem som skrev den och när.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-sky-100 text-sky-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.contacts.s3">Koppla ToDos till kontakter, företag eller kandidater.</span>
+              </li>
+              </ol>
+            </div>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-teal-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.todos.title">ToDos &amp; checklistor</h3>
+            </div>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.todos.desc">Påminnelser med förfallodatum och återanvändbara checklistor för återkommande processer.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-teal-100 text-teal-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.todos.s1">Skapa en ToDo från valfri kontakt, kandidat eller företag.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-teal-100 text-teal-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.todos.s2">Lägg på en checklistmall och bocka av stegen direkt.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-teal-100 text-teal-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.todos.s3">Följ upp alla öppna ToDos i en samlad lista.</span>
+              </li>
+              </ol>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-16">
+        <div class="max-w-2xl mb-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-slate-800" data-i18n="sec.team">Team &amp; trygghet</h2>
+          <p class="text-slate-500 mt-2" data-i18n="sec.team.intro">Arbeta tillsammans utan att något försvinner.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-6">
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-violet-100 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.team.title">Arbeta i team</h3>
+            </div>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.team.desc">Bjud in kollegor – alla ser och arbetar i samma data.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.team.s1">Skicka en inbjudan – den som accepterar går med i teamet.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.team.s2">Filtrera listor på dina egna eller en kollegas kandidater.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.team.s3">Överlåt en kandidat till en kollega med ett klick.</span>
+              </li>
+              </ol>
+            </div>
+          </article>
+          <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-11 h-11 bg-slate-200 rounded-xl flex items-center justify-center shrink-0">
+                <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                </svg>
+              </div>
+              <h3 class="text-lg font-semibold text-slate-800" data-i18n="f.data.title">Arkiv &amp; säkerhetskopiering</h3>
+            </div>
+            <p class="text-slate-600 text-sm leading-relaxed mb-4" data-i18n="f.data.desc">Inget försvinner av misstag – och du kan alltid ta med dig din data.</p>
+            <div class="mt-auto pt-4 border-t border-slate-100">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3" data-i18n="how">Så fungerar det</p>
+              <ol class="space-y-2.5">
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-xs font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.data.s1">Arkivera i stället för att radera – återställ när som helst.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-xs font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.data.s2">Exportera allt som en ZIP-fil med alla dokument.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-xs font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-slate-600 leading-relaxed" data-i18n="f.data.s3">Importera en säkerhetskopia för att återskapa eller flytta data.</span>
+              </li>
+              </ol>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+</div>
+
+    <!-- CTA -->
+    <section class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+      <h2 class="text-2xl sm:text-3xl font-bold text-slate-800 mb-3" data-i18n="cta.title">Redo att komma igång?</h2>
+      <p class="text-slate-600 mb-8" data-i18n="cta.subtitle">Skapa ett konto på under en minut och bjud in teamet när du vill.</p>
+      <button onclick="auth.showRegisterModal()" class="bg-gradient-to-r from-sky-600 to-blue-600 text-white px-8 py-3 rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all font-semibold shadow-lg" data-i18n="cta.button">Skapa konto</button>
+      <div class="mt-4">
+        <a href="#" onclick="auth.showLoginModal(); return false;" class="text-sm text-sky-700 hover:text-sky-800 font-medium" data-i18n="cta.login">Har du redan ett konto? Logga in</a>
+      </div>
+    </section>
   </div>
 
   <!-- Main Content (shown when logged in) -->

@@ -1365,12 +1365,24 @@ Main navigation tabs: **Contacts | Companies | Candidates | Apple | ToDos | Inbo
 
 ### Pages/Views
 
-1. **Login/Register**
+1. **Landing page (logged out) and Login/Register**
+   - The nav bar's right side shows language flags (sv/en/de/fr) and two
+     buttons, **Logga in** and **Skapa konto** (`#guest-actions`, hidden once
+     logged in). Both open the auth modal, on the login or register form.
+   - Below: a hero (tagline, "Skapa konto", "Se hur det fungerar" scrolling to
+     the features), then three sections — *Kandidater & rekrytering*, *Kunder &
+     förfrågningar*, *Team & trygghet* — of feature cards, each with a short
+     description and a numbered "Så fungerar det" list, and a closing CTA.
+     The page names no client (the Apple flow is described as a client
+     pipeline).
+   - All landing text is translated: Swedish in the HTML, the four languages in
+     `i18n.translations` in app.js (keys `nav.*`, `hero.*`, `sec.*`, `f.*`,
+     `cta.*`, `how`).
    - Login form: username, password
    - Register form: username, email, password
    - Toggle between login and register
 
-2. **Contact List (Default after login)**
+2. **Contact List**
    - Table: Contact Name, Company Name, Last Note Date
    - Sortable columns
    - Search box for filtering
