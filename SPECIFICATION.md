@@ -218,6 +218,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
        would fail the whole import). An inbox row caught mid-processing comes
        back as `failed`.
    - The import result lists every kind of row that was added.
+   - **File completeness**: every file the exported data refers to (candidate
+     files — legacy single-resume candidates are folded into candidate_files on
+     every boot — offer documents, team logo) goes into the ZIP. A file the DB
+     knows but the disk lacks is listed in `data.json` → `files.missing`, and
+     the counts travel in `X-Backup-Files` / `X-Backup-Missing-Files`, so the
+     UI warns that the backup is incomplete instead of reporting success.
    - **Download Full Database (disaster recovery)**: a one-click, consistent
      snapshot of the *entire* SQLite database (every table — users, teams,
      sessions, all of the above) via better-sqlite3's online backup. Restoring it

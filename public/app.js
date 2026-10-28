@@ -7573,7 +7573,15 @@ const views = {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
 
-      this.showBackupMessage('Data exported successfully!', 'success');
+      // The server reports files the database refers to but the disk lacks,
+      // so an incomplete backup is never mistaken for a complete one.
+      const included = response.headers.get('X-Backup-Files');
+      const missing = Number(response.headers.get('X-Backup-Missing-Files') || 0);
+      if (missing > 0) {
+        this.showBackupMessage(`Backup downloaded with ${included} files — but ${missing} file(s) are missing on the server and could not be included. The list is in data.json under "files.missing".`, 'error');
+      } else {
+        this.showBackupMessage(`Data exported successfully! ${included !== null ? included + ' files included.' : ''}`, 'success');
+      }
     } catch (err) {
       console.error('Export error:', err);
       this.showBackupMessage('Export failed: ' + err.message, 'error');

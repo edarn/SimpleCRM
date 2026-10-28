@@ -352,9 +352,30 @@ router.get('/export', (req, res) => {
       }
     };
 
+    // Every uploaded file the data refers to: CVs, offer documents, team logo.
+    // A file the DB knows but the disk does not is reported, not silently
+    // skipped — otherwise a backup could be incomplete without anyone knowing.
+    const fileNames = new Set();
+    for (const file of candidateFiles) fileNames.add(file.filename);
+    for (const offer of candidateOffers) {
+      if (offer.contract_filename) fileNames.add(offer.contract_filename);
+      if (offer.attachment_filename) fileNames.add(offer.attachment_filename);
+    }
+    if (teamLogo) fileNames.add(teamLogo);
+    const presentFiles = [];
+    const missingFiles = [];
+    for (const filename of fileNames) {
+      if (uploadsDir && fs.existsSync(path.join(uploadsDir, filename))) presentFiles.push(filename);
+      else missingFiles.push(filename);
+    }
+    exportData.files = { included: presentFiles.length, missing: missingFiles };
+    if (missingFiles.length) console.warn(`Backup export: ${missingFiles.length} file(s) missing on disk:`, missingFiles.join(', '));
+
     const dateStr = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="simple-crm-backup-${dateStr}.zip"`);
+    res.setHeader('X-Backup-Files', String(presentFiles.length));
+    res.setHeader('X-Backup-Missing-Files', String(missingFiles.length));
 
     const archive = archiver('zip', { zlib: { level: 9 } });
     archive.on('error', (err) => {
@@ -368,21 +389,8 @@ router.get('/export', (req, res) => {
     // Add the JSON data
     archive.append(JSON.stringify(exportData, null, 2), { name: 'data.json' });
 
-    // Add candidate files + employment-offer files (contract .docx / attachment .pdf)
-    if (uploadsDir) {
-      const fileNames = new Set();
-      for (const file of candidateFiles) fileNames.add(file.filename);
-      for (const offer of candidateOffers) {
-        if (offer.contract_filename) fileNames.add(offer.contract_filename);
-        if (offer.attachment_filename) fileNames.add(offer.attachment_filename);
-      }
-      if (teamLogo) fileNames.add(teamLogo);
-      for (const filename of fileNames) {
-        const filePath = path.join(uploadsDir, filename);
-        if (fs.existsSync(filePath)) {
-          archive.file(filePath, { name: `files/${filename}` });
-        }
-      }
+    for (const filename of presentFiles) {
+      archive.file(path.join(uploadsDir, filename), { name: `files/${filename}` });
     }
 
     archive.finalize();
