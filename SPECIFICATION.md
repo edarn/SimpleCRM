@@ -178,28 +178,46 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Permissions: owner can archive any, member only own creations
 
 9. **Data Backup** (owner/solo users only; in Team Settings)
-   - **Download Backup (ZIP, portable export, version 3)**: exports the team's
+   - **Download Backup (ZIP, portable export, version 4)**: exports the team's
      (or solo user's) business data and re-homes it to the importing account on
-     restore. Includes: companies, contacts, notes, todos, checklists,
-     candidates, candidate comments, candidate files, **consultant requests +
-     their candidate matchings**, **AI inbox emails**, **authorized sender
-     addresses (user_emails)**, **employment offers** — plus all uploaded files
-     (resumes, contract .docx, salary .pdf) inside the ZIP.
+     restore. Includes: companies, contacts, notes, todos (incl. unlinked
+     "general" ones), checklists, candidates (incl. subcontractor company /
+     contact), candidate comments, candidate files, **consultant requests +
+     their candidate matchings** (stars included), **AI inbox emails**,
+     **authorized sender addresses (user_emails)**, **employment offers**
+     (incl. contract language and the salary-model flag), **the client
+     pipeline / Apple flow** (steps, team, note, start/end dates, feedback) and
+     **the team logo** — plus all uploaded files (resumes, contract .docx,
+     salary .pdf, logo) inside the ZIP.
    - **Import** (JSON or ZIP) adds to existing data (doesn't replace) inside a
-     single transaction. Cross-entity references are remapped to the new ids:
-     `matched_candidates` candidate ids, offer/comment/file candidate ids,
-     todo/note links, checklist links, and request→inbox links. Backup versions
-     1, 2 and 3 are all accepted (older versions simply lack the newer sections).
+     single transaction. Both paths call one function, `importBackupData` in
+     src/routes/backup.js, so they cannot drift apart. Cross-entity references
+     are remapped to the new ids: `matched_candidates` candidate ids,
+     offer/comment/file/pipeline candidate ids, todo/note links, checklist
+     links, request→inbox links, and the inbox's per-action links
+     (`action_id` is a comma list parallel to `action_type`: contacts,
+     candidates, requests and ToDos are remapped entry by entry; anything
+     unmappable becomes an empty entry so the lists stay aligned). Backup
+     versions 1–4 are accepted (older versions simply lack the newer sections).
+     - **Authorship**: `created_by` (and a file's `uploaded_by`, an inbox
+       row's `user_id`) is kept when that user is the importer or a member of
+       the importing team, so restoring your own team's backup keeps who wrote
+       each comment and who owns each candidate. Anyone else becomes the
+       importer — a backup can never attribute rows to users outside the team.
+     - **Team logo** is restored only into a team that has no logo yet, only as
+       an image file that came inside the ZIP.
      - **Derived CV artefacts are restored**: `resume_text`,
        `resume_text_status`, `profile_json`, `profile_status` and `skill_tags`
        come back verbatim. They carry no foreign ids, and rebuilding them is
-       expensive — CPU-bound text extraction plus one AI call per candidate — so
-       dropping them (as the import used to) made every restore silently cost a
-       full re-extraction and re-distillation of the library.
-     - **`request_matches` and `match_status` are deliberately NOT restored**:
-       they reference consultant-request ids that the import remaps, so
-       restoring them would point at the wrong requests. They rebuild on the
-       next match.
+       expensive — CPU-bound text extraction plus one AI call per candidate.
+     - **Deliberately NOT restored** (all rebuild on their own): candidates'
+       `request_matches` / `match_status` and requests' `match_status` /
+       `match_stage` / `match_summary` (they reference remapped ids), the
+       `request_match_cache`, the inbox `stage`, and the inbox
+       `external_message_id` (unique — restoring it next to the original row
+       would fail the whole import). An inbox row caught mid-processing comes
+       back as `failed`.
+   - The import result lists every kind of row that was added.
    - **Download Full Database (disaster recovery)**: a one-click, consistent
      snapshot of the *entire* SQLite database (every table — users, teams,
      sessions, all of the above) via better-sqlite3's online backup. Restoring it

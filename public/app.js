@@ -7631,10 +7631,7 @@ const views = {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Import failed');
 
-        this.showBackupMessage(
-          `Import successful! Added ${result.imported.companies} companies, ${result.imported.contacts} contacts, ${result.imported.candidates} candidates.`,
-          'success'
-        );
+        this.showBackupMessage(this._backupImportSummary(result.imported), 'success');
       } else {
         // Legacy JSON import
         const text = await file.text();
@@ -7664,10 +7661,7 @@ const views = {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Import failed');
 
-        this.showBackupMessage(
-          `Import successful! Added ${result.imported.companies} companies, ${result.imported.contacts} contacts, ${result.imported.candidates} candidates.`,
-          'success'
-        );
+        this.showBackupMessage(this._backupImportSummary(result.imported), 'success');
       }
     } catch (err) {
       console.error('Import error:', err);
@@ -7675,6 +7669,19 @@ const views = {
     }
 
     event.target.value = '';
+  },
+
+  _backupImportSummary(imported) {
+    const labels = {
+      companies: 'companies', contacts: 'contacts', notes: 'notes', candidates: 'candidates',
+      candidateComments: 'comments', candidateFiles: 'files', todos: 'ToDos', checklists: 'checklists',
+      consultantRequests: 'requests', emailInbox: 'inbox emails', candidateOffers: 'offers',
+      clientPipeline: 'Apple-flow rows', userEmails: 'sender addresses', teamLogo: 'team logo',
+    };
+    const parts = Object.entries(labels)
+      .filter(([k]) => imported && imported[k])
+      .map(([k, label]) => `${imported[k]} ${label}`);
+    return `Import successful! Added ${parts.join(', ') || 'nothing'}.`;
   },
 
   showBackupMessage(message, type) {
