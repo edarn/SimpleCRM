@@ -432,7 +432,7 @@ const auth = {
       // Honour the hash the user arrived with, and replace the landing-page
       // entry rather than stacking a view they cannot go back to anyway.
       const target = router._fromHash(location.hash);
-      router.navigate(target.route || 'contacts', target.params, { replace: true });
+      router.navigate(target.route || 'candidates', target.params, { replace: true });
     } catch (err) {
       console.error('Login error:', err);
       this.showAuthError('Connection error. Please try again.');
@@ -466,7 +466,7 @@ const auth = {
       // Honour the hash the user arrived with, and replace the landing-page
       // entry rather than stacking a view they cannot go back to anyway.
       const target = router._fromHash(location.hash);
-      router.navigate(target.route || 'contacts', target.params, { replace: true });
+      router.navigate(target.route || 'candidates', target.params, { replace: true });
     } catch (err) {
       console.error('Register error:', err);
       this.showAuthError('Connection error. Please try again.');
@@ -601,7 +601,9 @@ const router = {
 
   // Parse hash URL back to route + params
   _fromHash(hash) {
-    if (!hash || hash === '#') return { route: 'contacts', params: {} };
+    // No hash = the start page. Candidates is the view used most, so it opens
+    // first; the tab order is unchanged.
+    if (!hash || hash === '#') return { route: 'candidates', params: {} };
     const [pathPart, queryPart] = hash.replace(/^#/, '').split('?');
     const parts = pathPart.split('/');
     const params = {};
@@ -692,7 +694,7 @@ const router = {
 
   async render() {
     const app = document.getElementById('app');
-    const { route, params } = this.currentRoute || { route: 'contacts', params: {} };
+    const { route, params } = this.currentRoute || { route: 'candidates', params: {} };
 
     // The Apple matrix is wide: give it more of the screen than the usual
     // max-w-7xl column, with slimmer side margins.
@@ -934,7 +936,7 @@ const teamManager = {
       this.hideInvitationBanner();
       // Refresh user data
       await auth.checkAuth();
-      router.navigate('contacts');
+      router.navigate('candidates');
     } catch (err) {
       console.error('Error accepting invitation:', err);
       alert('Failed to accept invitation. Please try again.');
@@ -963,7 +965,7 @@ const teamManager = {
     try {
       await api.post('/api/team/leave', {});
       await auth.checkAuth();
-      router.navigate('contacts');
+      router.navigate('candidates');
     } catch (err) {
       console.error('Error leaving team:', err);
       alert('Failed to leave team. Please try again.');
@@ -7177,7 +7179,7 @@ const views = {
     const result = await teamManager.transferOwnership(newOwnerId);
     if (result.success) {
       await auth.checkAuth();
-      router.navigate('contacts');
+      router.navigate('candidates');
     } else {
       alert(result.error || 'Failed to transfer ownership');
     }
@@ -8728,7 +8730,7 @@ window.addEventListener('popstate', (e) => {
   router._restoreScroll = state ? state.scrollY : null;
   router._skipAutofocus = true;
   router._skipPush = true;
-  router.navigate(route || 'contacts', params || {});
+  router.navigate(route || 'candidates', params || {});
   router._skipPush = false;
 });
 
@@ -8756,7 +8758,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const isAuthenticated = await auth.checkAuth();
   if (isAuthenticated) {
-    // Restore route from URL hash if present, otherwise default to contacts.
+    // Restore route from URL hash if present, otherwise the start page (candidates).
     // Replace, don't push: pushing leaves the page-load entry underneath with
     // the same hash, and the first Back press just re-renders the same view.
     const { route, params } = router._fromHash(location.hash);

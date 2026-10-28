@@ -609,6 +609,9 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      string (`#contact-form?companyId=…`) so a reload keeps them.
    - Deep-linking and bookmarking works — reload restores the view, and
      logging in lands on the hash the user arrived with.
+   - **Start page is Candidates**: with no hash (a fresh visit / login) the app
+     opens on the Candidates view, as it does after joining or leaving a team.
+     The nav tab order is unchanged — Contacts is still first.
    - **What pushes and what replaces** (`router.navigate(route, params, opts)`):
      - Navigating to the route + params you are *already* on replaces the
        entry. Many actions re-render by navigating to their own route (every
