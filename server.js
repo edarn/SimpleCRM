@@ -172,16 +172,19 @@ const apiLimiter = rateLimit({
 });
 
 // Limit request body size
-// Forwarded-CV import (Postmark inbound webhook). Mounted before the global
+// Forwarded-mail import (Postmark inbound webhook): CVs become candidates,
+// anything else goes to the AI inbox. Mounted before the global
 // 1 MB JSON parser and the session: Postmark posts attachments base64-encoded
 // in the JSON body, and it is authenticated by a shared secret, not a login.
 // See src/routes/inbound.js.
 const candidatesRouter = require('./src/routes/candidates')(upload, uploadsDir);
+const inboxRouter = require('./src/routes/inbox')(uploadsDir);
 const inboundLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 app.post('/api/inbound/postmark', inboundLimiter, express.json({ limit: '50mb' }),
   require('./src/routes/inbound')({
     importCvFile: candidatesRouter.importCvFile,
     matchCandidatesInBackground: candidatesRouter.matchCandidatesInBackground,
+    startInboxProcessing: inboxRouter.startProcessing,
     uploadsDir,
   }));
 
@@ -235,7 +238,7 @@ app.use('/uploads', (req, res, next) => {
 app.use('/api/user-emails', requireAuth, require('./src/routes/user-emails'));
 
 // AI Email Inbox
-app.use('/api/inbox', requireAuth, require('./src/routes/inbox')(uploadsDir));
+app.use('/api/inbox', requireAuth, inboxRouter);
 
 // Consultant Requests
 app.use('/api/requests', requireAuth, require('./src/routes/requests')(uploadsDir));

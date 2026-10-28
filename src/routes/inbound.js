@@ -5,8 +5,10 @@ const data = require('../data');
 const inbound = require('../lib/inbound-cv');
 const { logSecurity } = require('../lib/security-logger');
 
-// POST /api/inbound/postmark — forward a mail with a CV attached to the
-// Postmark inbound address and the CV is imported as a candidate.
+// POST /api/inbound/postmark — forward any mail to the Postmark inbound
+// address. Attachments the AI recognises as CVs are imported as candidates;
+// a mail with no CV (typically a client's request) goes to the AI inbox, the
+// same pipeline as a pasted email (consultant request, contacts, ToDos).
 //
 // No session here: the caller is Postmark. Three gates, all required:
 //   1. the shared secret (INBOUND_WEBHOOK_SECRET) — only Postmark can call us;
@@ -15,11 +17,12 @@ const { logSecurity } = require('../lib/security-logger');
 //      senderAuthenticated in src/lib/inbound-cv.js).
 // Rejections answer 403, which also tells Postmark not to retry.
 //
-// The import itself runs after the 200 (it is several AI calls). Mails are
-// processed one at a time: two forwards of the same CV arriving together must
-// not both pass the dedup check and create the person twice.
+// The work runs after the 200 (it is several AI calls). Mails are sorted and
+// CVs imported one mail at a time: two forwards of the same CV arriving
+// together must not both pass the dedup check and create the person twice.
 
-module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsDir }) {
+module.exports = function ({ importCvFile, matchCandidatesInBackground, startInboxProcessing, uploadsDir }) {
+  const { extractTextFromFile } = require('../lib/resume-parser');
   let queue = Promise.resolve();
 
   return async function postmarkInbound(req, res, next) {
@@ -69,7 +72,7 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsD
       if (/UNIQUE/i.test(err.message)) return res.status(200).json({ status: 'duplicate' });
       throw err;
     }
-    data.updateInboxEmail(row.id, { status: 'processing', stage: 'extracting_resumes', classification: 'cv_import' });
+    data.updateInboxEmail(row.id, { status: 'processing', stage: 'classifying' });
     res.status(200).json({ status: 'accepted' });
 
     queue = queue.then(() => processMail(row.id, payload, user.userId)).catch((err) => {
@@ -79,8 +82,29 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsD
   }
 
   async function processMail(inboxId, payload, userId) {
-    const hint = inbound.appleHint(payload.Subject, payload.TextBody);
     const { picked, skipped } = inbound.pickCvAttachments(payload);
+
+    // Save each document and read its text, so the AI can tell a CV from a
+    // role description and the inbox can read a non-CV attachment.
+    const docs = [];
+    for (const att of picked) {
+      const filename = `candidate-${Date.now()}-${crypto.randomInt(1e9)}${att.ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      const buf = Buffer.from(att.content, 'base64');
+      fs.writeFileSync(filePath, buf);
+      let text = '';
+      try { text = await extractTextFromFile(filePath); } catch (_) { /* scanned PDF etc. — the name still helps */ }
+      docs.push({ ...att, filename, filePath, size: buf.length, text: text || '' });
+    }
+    const isCv = await inbound.classifyAttachments({ subject: payload.Subject, textBody: payload.TextBody, docs });
+    const cvs = docs.filter((_, i) => isCv[i]);
+    const others = docs.filter((_, i) => !isCv[i]);
+    for (const d of others) { try { fs.unlinkSync(d.filePath); } catch (_) {} }
+
+    if (!cvs.length) return toInbox(inboxId, payload, others, userId);
+
+    data.updateInboxEmail(inboxId, { classification: 'cv_import', stage: 'extracting_resumes' });
+    const hint = inbound.appleHint(payload.Subject, payload.TextBody);
     const types = [];
     const ids = [];
     const summaries = [];
@@ -89,15 +113,14 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsD
     for (const s of skipped) {
       types.push('skipped'); ids.push(''); summaries.push(`Hoppade över ${s.name}: ${s.error}`);
     }
+    for (const d of others) {
+      types.push('skipped'); ids.push(''); summaries.push(`Inte ett CV, ignorerades: ${d.name}`);
+    }
 
-    for (const att of picked) {
-      const filename = `candidate-${Date.now()}-${crypto.randomInt(1e9)}${att.ext}`;
-      const filePath = path.join(uploadsDir, filename);
+    for (const att of cvs) {
       try {
-        const buf = Buffer.from(att.content, 'base64');
-        fs.writeFileSync(filePath, buf);
         const result = await importCvFile(
-          { path: filePath, filename, size: buf.length, mimetype: att.contentType },
+          { path: att.filePath, filename: att.filename, size: att.size, mimetype: att.contentType },
           att.name,
           { createdComment: 'Automatiskt skapad via vidarebefordrat mail' },
           userId
@@ -131,17 +154,39 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsD
       status: 'completed',
       stage: null,
       extractedData: {
-        bilagor: picked.map((p) => p.name).join(', ') || 'inga',
+        cv: cvs.map((p) => p.name).join(', '),
         apple_flöde: hint.apple ? (hint.team || 'ja, utan team') : 'nej',
       },
       actionType: types.join(', '),
       actionId: ids.join(', '),
       // ' | ' separates the entries in the inbox view, so it must not occur inside one.
       actionSummary: summaries.map((s) => s.replace(/\s*\|\s*/g, ' / ')).join(' | '),
-      errorMessage: picked.length ? '' : 'Mailet hade ingen CV-bilaga (PDF, DOC eller DOCX).',
       processedAt: new Date().toISOString(),
     });
 
     if (candidateIds.length) matchCandidatesInBackground(candidateIds, userId);
+  }
+
+  // Not a CV mail: hand it to the AI inbox exactly as if it had been pasted.
+  // The forwarded thread is the body ('pasted' lets the classifier fill in the
+  // original sender and subject), with the text of any non-CV attachment
+  // appended so a role description in a PDF still reaches the request.
+  function toInbox(inboxId, payload, others, userId) {
+    let body = String(payload.TextBody || payload.StrippedTextReply || '');
+    for (const d of others) {
+      if (d.text) body += `\n\n--- Bilaga: ${d.name} ---\n${d.text.slice(0, 8000)}`;
+    }
+    data.updateInboxEmail(inboxId, {
+      fromEmail: 'pasted',
+      fromName: '',
+      subject: inbound.cleanSubject(payload.Subject) || '(pasted email)',
+      body: body.slice(0, 40000) || '(tomt)',
+      classification: 'pending',
+      status: 'pending',
+      stage: null,
+    });
+    if (!startInboxProcessing(inboxId, userId)) {
+      console.error(`Inbound mail ${inboxId}: could not start inbox processing`);
+    }
   }
 };

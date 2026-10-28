@@ -312,8 +312,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      (headers, body, conversation threads). The AI parses sender, subject, and
      content automatically. Will be replaced by a webhook endpoint once an
      inbound email provider is configured.
-   - **Forwarded-CV import (Postmark inbound)**: forward a mail with a CV
-     attached to the Postmark inbound address and each PDF/DOC/DOCX attachment
+   - **Forwarded mail (Postmark inbound)**: one address for everything. A mail
+     with no PDF/DOC/DOCX attachment (typically a client's request) goes to the
+     AI inbox exactly as if pasted — the forwarded thread is the body, the
+     classifier fills in the original sender, and request/contact/ToDo actions
+     run as usual. If it has attachments, one Haiku call decides per
+     attachment whether it is a CV (`classifyAttachments`; falls back to the
+     file name if the AI call fails). No CV among them → AI inbox, with the
+     attachments' text appended to the body (so a role description in a PDF
+     reaches the request). Otherwise each CV attachment
      (max 10 per mail, 10 MB each) is imported exactly like the bulk import —
      same `importCvFile` and dedup ladder, comment "Automatiskt skapad via
      vidarebefordrat mail", background request matching. Webhook:
@@ -340,7 +347,8 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      forwarded part) mentions "Apple", the candidates go into the Apple flow;
      a team keyword in that text (java, scala, frontend/typescript/react,
      ios/swift, ml/ai, data) picks the team, otherwise it is left blank.
-     The result shows in the AI inbox as a **CV-import** row: one line per CV
+     A CV mail shows in the AI inbox as a **CV-import** row (non-CV
+     attachments listed as ignored): one line per CV
      with a link to the candidate, skipped files with the reason, and the Apple
      outcome. Such rows cannot be reprocessed (the attachments are not kept).
      No reply mail is sent.

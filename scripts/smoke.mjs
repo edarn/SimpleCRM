@@ -45,7 +45,16 @@ async function api(method, path, body, opts = {}) {
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
-  const res = await fetch(`${BASE}${path}`, { method, headers, body: payload, redirect: 'manual' });
+  // One retry on ECONNRESET: when the server's event loop was busy (a cold
+  // require, a CPU-bound PDF parse) it can close an idle keep-alive socket just
+  // as the next request is written on it. Not a server bug, a client race.
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, { method, headers, body: payload, redirect: 'manual' });
+  } catch (err) {
+    if (!(err.cause && err.cause.code === 'ECONNRESET')) throw err;
+    res = await fetch(`${BASE}${path}`, { method, headers, body: payload, redirect: 'manual' });
+  }
   const setCookie = res.headers.get('set-cookie');
   if (setCookie) cookie = setCookie.split(';')[0];
   if (opts.raw) {
@@ -95,6 +104,10 @@ try {
 } catch (err) {
   fail++;
   console.error('\nSMOKE ERROR:', err.message);
+  // A dropped connection usually means the server died: show why.
+  if (server.exitCode !== null || /fetch failed/.test(err.message)) {
+    console.error(`--- server log (tail; exit=${server.exitCode} signal=${server.signalCode}) ---\n` + serverLog.split('\n').slice(-25).join('\n'));
+  }
 } finally {
   server.kill('SIGKILL');
   try { rmSync(dbDir, { recursive: true, force: true }); } catch { /* ignore */ }

@@ -491,5 +491,9 @@ module.exports = function(uploadsDir) {
     return { type: 'todo', id: todo.id, summary: `Created ToDo "${todo.title}".${linkedSummary}` };
   }
 
+  // For the forwarded-mail webhook (src/routes/inbound.js), which hands mails
+  // that are not CVs to the same AI pipeline as a pasted email.
+  router.startProcessing = startProcessing;
+
   return router;
 };
