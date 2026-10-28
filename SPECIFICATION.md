@@ -324,9 +324,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
        1. shared secret `INBOUND_WEBHOOK_SECRET`, as the Basic-auth password in
           the webhook URL or `?token=` (feature is off — 404 — when unset);
        2. the From address is an account's login email or a Settings address;
-       3. the From is genuine: Postmark's `X-Spam-Tests` must contain
-          `DKIM_VALID_AU` (valid DKIM from the sender's own domain). SPF alone is
-          not accepted — it checks the envelope sender, not the visible From.
+       3. the From is genuine: a valid DKIM signature aligned with the From
+          domain. Either Postmark's `X-Spam-Tests` contains `DKIM_VALID_AU`
+          (not added on every account), or — the normal path — we verify the
+          raw message ourselves with `mailauth` (pinned 4.13.3, Node ≥20.18)
+          against the sender's DNS; this needs Postmark's "Include raw email
+          content in JSON payload" setting. The signed From must equal the
+          payload From. SPF alone is not accepted — it checks the envelope
+          sender, not the visible From. The rejection log names the signing
+          domains seen, so a non-aligned setup is easy to diagnose.
      Postmark's `MessageID` is stored in `email_inbox.external_message_id`
      (unique), so a webhook retry cannot import twice. Mails are processed one
      at a time so two forwards of the same CV cannot both pass dedup.

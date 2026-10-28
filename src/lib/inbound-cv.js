@@ -32,18 +32,42 @@ function header(payload, name) {
 }
 
 // Is the From address genuine? Anyone can type any From, so a registered
-// address alone proves nothing. Postmark runs SpamAssassin on inbound mail and
-// lists the tests that fired in X-Spam-Tests; DKIM_VALID_AU means a valid DKIM
-// signature from the From address's own domain (Gmail, Outlook and Google
-// Workspace all sign). SPF_PASS alone is NOT enough: SPF checks the envelope
+// address alone proves nothing. We require a valid DKIM signature from the
+// From address's own domain (relaxed alignment, as DMARC does): Gmail, Outlook
+// and Google Workspace all sign. SPF is not used: it checks the envelope
 // sender, which an attacker controls independently of the visible From.
-// Missing header = reject (fail closed).
-function senderAuthenticated(payload) {
+//
+// Two sources, either is enough:
+//  1. Postmark's SpamAssassin result (X-Spam-Tests contains DKIM_VALID_AU),
+//     when Postmark adds it — it does not on every account;
+//  2. our own check of the raw message (Postmark: "Include raw email content
+//     in JSON payload"), verified with mailauth against the sender's DNS.
+// Neither available, or neither passes = reject (fail closed).
+async function senderAuthenticated(payload, fromEmail, { verify } = {}) {
   const tests = header(payload, 'X-Spam-Tests');
-  if (!tests) return { ok: false, reason: 'no X-Spam-Tests header' };
-  const list = tests.split(/[\s,]+/).filter(Boolean);
-  if (list.includes('DKIM_VALID_AU')) return { ok: true };
-  return { ok: false, reason: `no DKIM_VALID_AU (tests: ${list.join(',').slice(0, 200)})` };
+  if (tests && tests.split(/[\s,]+/).includes('DKIM_VALID_AU')) return { ok: true, via: 'spamassassin' };
+
+  if (!payload.RawEmail) {
+    return { ok: false, reason: 'no RawEmail in payload (enable "Include raw email content in JSON payload" in Postmark)' };
+  }
+  const dkimVerify = verify || require('mailauth/lib/dkim/verify').dkimVerify;
+  let result;
+  try {
+    result = await dkimVerify(Buffer.from(String(payload.RawEmail), 'utf8'));
+  } catch (err) {
+    return { ok: false, reason: `DKIM check failed: ${err.message}` };
+  }
+  // The From the signature covers must be the From we are trusting.
+  const headerFrom = String((result.headerFrom || [])[0] || '').toLowerCase();
+  if (headerFrom !== fromEmail) {
+    return { ok: false, reason: `raw From (${headerFrom || 'none'}) differs from payload From` };
+  }
+  const results = result.results || [];
+  if (results.some((r) => r.status && r.status.result === 'pass' && r.status.aligned)) {
+    return { ok: true, via: 'dkim' };
+  }
+  const seen = results.map((r) => `${r.signingDomain || '?'}=${(r.status && r.status.result) || '?'}${r.status && r.status.aligned ? '' : ' (not aligned)'}`);
+  return { ok: false, reason: `no aligned passing DKIM signature (${seen.join(', ') || 'unsigned'})` };
 }
 
 // The text the forwarder typed themselves: the body above the forwarded part.

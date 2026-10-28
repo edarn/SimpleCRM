@@ -11,7 +11,8 @@ const { logSecurity } = require('../lib/security-logger');
 // No session here: the caller is Postmark. Three gates, all required:
 //   1. the shared secret (INBOUND_WEBHOOK_SECRET) — only Postmark can call us;
 //   2. the From address belongs to an account (Settings address or login email);
-//   3. that From is genuine (DKIM from the sender's own domain).
+//   3. that From is genuine (DKIM from the sender's own domain — see
+//      senderAuthenticated in src/lib/inbound-cv.js).
 // Rejections answer 403, which also tells Postmark not to retry.
 //
 // The import itself runs after the 200 (it is several AI calls). Mails are
@@ -21,7 +22,15 @@ const { logSecurity } = require('../lib/security-logger');
 module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsDir }) {
   let queue = Promise.resolve();
 
-  return function postmarkInbound(req, res) {
+  return async function postmarkInbound(req, res, next) {
+    try {
+      await handle(req, res);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  async function handle(req, res) {
     const secret = process.env.INBOUND_WEBHOOK_SECRET;
     if (!secret) return res.status(404).json({ error: 'Inbound email is not configured' });
     if (!inbound.webhookAuthorized(req, secret)) {
@@ -37,7 +46,7 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsD
       logSecurity('inbound_unknown_sender', { from: fromEmail });
       return res.status(403).json({ error: 'Sender not allowed' });
     }
-    const auth = inbound.senderAuthenticated(payload);
+    const auth = await inbound.senderAuthenticated(payload, fromEmail);
     if (!auth.ok) {
       logSecurity('inbound_unauthenticated_sender', { from: fromEmail, reason: auth.reason });
       return res.status(403).json({ error: 'Sender not authenticated' });
@@ -67,7 +76,7 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, uploadsD
       console.error('Inbound CV import failed:', err);
       data.updateInboxEmail(row.id, { status: 'completed', stage: null, errorMessage: err.message, processedAt: new Date().toISOString() });
     });
-  };
+  }
 
   async function processMail(inboxId, payload, userId) {
     const hint = inbound.appleHint(payload.Subject, payload.TextBody);
