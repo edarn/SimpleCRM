@@ -93,6 +93,11 @@ module.exports = function(uploadsDir) {
       if (email.status === 'processing') {
         return res.status(409).json({ error: 'This email is already being processed.' });
       }
+      // A forwarded CV is not a mail for the AI classifier; its attachments
+      // are not stored, so it cannot be re-run — forward it again instead.
+      if (email.classification === 'cv_import') {
+        return res.status(400).json({ error: 'A forwarded CV cannot be reprocessed. Forward the mail again.' });
+      }
 
       if (!startProcessing(req.params.id, email.userId)) {
         return res.status(409).json({ error: 'This email is already being processed.' });

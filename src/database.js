@@ -739,6 +739,17 @@ function migrateExistingData() {
   // multi-minute span with no feedback, which reads as a hung page.
   addColumnIfNotExists('email_inbox', 'stage', 'TEXT DEFAULT NULL');
 
+  // Forwarded-CV import (Postmark inbound): the provider's MessageID. Unique so
+  // a webhook retry of the same mail can never import it twice — the insert is
+  // the claim.
+  addColumnIfNotExists('email_inbox', 'external_message_id', 'TEXT DEFAULT NULL');
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_email_inbox_external_message_id
+             ON email_inbox(external_message_id) WHERE external_message_id IS NOT NULL`);
+  } catch (err) {
+    console.log('email_inbox external_message_id index error:', err.message);
+  }
+
   // Employment offers: which language page 1 of the contract is written in
   // ('sv' | 'en'; the terms-of-employment appendix is always English), and
   // whether the salary-model explainer PDF rides along in the Outlook draft.

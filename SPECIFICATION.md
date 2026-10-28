@@ -312,6 +312,32 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      (headers, body, conversation threads). The AI parses sender, subject, and
      content automatically. Will be replaced by a webhook endpoint once an
      inbound email provider is configured.
+   - **Forwarded-CV import (Postmark inbound)**: forward a mail with a CV
+     attached to the Postmark inbound address and each PDF/DOC/DOCX attachment
+     (max 10 per mail, 10 MB each) is imported exactly like the bulk import —
+     same `importCvFile` and dedup ladder, comment "Automatiskt skapad via
+     vidarebefordrat mail", background request matching. Webhook:
+     `POST /api/inbound/postmark` (src/routes/inbound.js), mounted before the
+     session and the 1 MB JSON parser (own 50 MB parser, 30 req/min limiter).
+     Three gates, all required, each rejection answering 403 (which also stops
+     Postmark's retries) and logged to security.log:
+       1. shared secret `INBOUND_WEBHOOK_SECRET`, as the Basic-auth password in
+          the webhook URL or `?token=` (feature is off — 404 — when unset);
+       2. the From address is an account's login email or a Settings address;
+       3. the From is genuine: Postmark's `X-Spam-Tests` must contain
+          `DKIM_VALID_AU` (valid DKIM from the sender's own domain). SPF alone is
+          not accepted — it checks the envelope sender, not the visible From.
+     Postmark's `MessageID` is stored in `email_inbox.external_message_id`
+     (unique), so a webhook retry cannot import twice. Mails are processed one
+     at a time so two forwards of the same CV cannot both pass dedup.
+     **Apple**: if the forwarder's own text (subject, or the body above the
+     forwarded part) mentions "Apple", the candidates go into the Apple flow;
+     a team keyword in that text (java, scala, frontend/typescript/react,
+     ios/swift, ml/ai, data) picks the team, otherwise it is left blank.
+     The result shows in the AI inbox as a **CV-import** row: one line per CV
+     with a link to the candidate, skipped files with the reason, and the Apple
+     outcome. Such rows cannot be reprocessed (the attachments are not kept).
+     No reply mail is sent.
    - **Confidence threshold**: classifications with confidence < 70% are marked
      for manual review instead of auto-executing.
    - **Inbox detail**: Shows original email, extracted data, and all actions taken.

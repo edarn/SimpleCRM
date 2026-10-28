@@ -172,6 +172,19 @@ const apiLimiter = rateLimit({
 });
 
 // Limit request body size
+// Forwarded-CV import (Postmark inbound webhook). Mounted before the global
+// 1 MB JSON parser and the session: Postmark posts attachments base64-encoded
+// in the JSON body, and it is authenticated by a shared secret, not a login.
+// See src/routes/inbound.js.
+const candidatesRouter = require('./src/routes/candidates')(upload, uploadsDir);
+const inboundLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+app.post('/api/inbound/postmark', inboundLimiter, express.json({ limit: '50mb' }),
+  require('./src/routes/inbound')({
+    importCvFile: candidatesRouter.importCvFile,
+    matchCandidatesInBackground: candidatesRouter.matchCandidatesInBackground,
+    uploadsDir,
+  }));
+
 app.use(express.json({ limit: '1mb' }));
 app.use(session(sessionConfig));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -197,7 +210,7 @@ app.use('/api/todos', requireAuth, require('./src/routes/todos'));
 app.use('/api/checklists', requireAuth, require('./src/routes/checklists'));
 
 // Candidates routes with file upload middleware
-app.use('/api/candidates', requireAuth, require('./src/routes/candidates')(upload, uploadsDir));
+app.use('/api/candidates', requireAuth, candidatesRouter);
 
 // Candidate employment offer routes (mounted under candidates)
 app.use('/api/candidates/:candidateId/offers', requireAuth, require('./src/routes/offers')(uploadsDir));

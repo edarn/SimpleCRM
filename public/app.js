@@ -7612,6 +7612,7 @@ const views = {
         new_contact: 'bg-sky-100 text-sky-800',
         consultant_request: 'bg-violet-100 text-violet-800',
         todo: 'bg-emerald-100 text-emerald-800',
+        cv_import: 'bg-rose-100 text-rose-800',
         pending: 'bg-slate-100 text-slate-500'
       }[e.classification] || 'bg-slate-100 text-slate-800';
 
@@ -7619,6 +7620,7 @@ const views = {
         new_contact: 'New Contact',
         consultant_request: 'Consultant Request',
         todo: 'ToDo',
+        cv_import: 'CV-import',
         pending: 'Pending'
       }[e.classification] || e.classification;
 
@@ -7659,8 +7661,8 @@ const views = {
     // route into this view resumes progress instead of showing a frozen badge.
     const isRunning = email.status === 'pending' || email.status === 'processing';
 
-    const classMap = { new_contact: 'New Contact', consultant_request: 'Consultant Request', todo: 'ToDo', pending: 'Pending' };
-    const classColorMap = { new_contact: 'bg-sky-100 text-sky-800', consultant_request: 'bg-violet-100 text-violet-800', todo: 'bg-emerald-100 text-emerald-800' };
+    const classMap = { new_contact: 'New Contact', consultant_request: 'Consultant Request', todo: 'ToDo', cv_import: 'CV-import', pending: 'Pending' };
+    const classColorMap = { new_contact: 'bg-sky-100 text-sky-800', consultant_request: 'bg-violet-100 text-violet-800', todo: 'bg-emerald-100 text-emerald-800', cv_import: 'bg-rose-100 text-rose-800' };
     const classTypes = (email.classification || 'pending').split(', ').map(c => c.trim());
     const classLabelsHtml = classTypes.map(c => {
       const label = classMap[c] || c;
@@ -7765,7 +7767,7 @@ const views = {
         ` : ''}
 
         <div class="flex gap-2 mt-4">
-          ${email.status === 'failed' || email.status === 'review' ? `
+          ${(email.status === 'failed' || email.status === 'review') && email.classification !== 'cv_import' ? `
           <button id="reprocess-btn" onclick="views.reprocessEmail('${email.id}')"
                   class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-medium shadow-sm text-sm disabled:opacity-50">
             Reprocess
@@ -7972,14 +7974,17 @@ We're looking for a senior Java developer..."></textarea>
       const isContact = t === 'new_contact' || t === 'existing_contact';
       const isRequest = t === 'consultant_request';
       const isTodo = t === 'todo';
+      const isCandidate = t === 'candidate';
 
-      const typeLabel = { new_contact: 'Contact', existing_contact: 'Contact', consultant_request: 'Request', todo: 'ToDo' }[t] || t;
-      const typeColor = { new_contact: 'bg-sky-100 text-sky-700', existing_contact: 'bg-sky-100 text-sky-700', consultant_request: 'bg-violet-100 text-violet-700', todo: 'bg-emerald-100 text-emerald-700' }[t] || 'bg-slate-100 text-slate-600';
+      const typeLabel = { new_contact: 'Contact', existing_contact: 'Contact', consultant_request: 'Request', todo: 'ToDo', candidate: 'Kandidat', apple: 'Apple', skipped: 'Hoppades över' }[t] || t;
+      const typeColor = { new_contact: 'bg-sky-100 text-sky-700', existing_contact: 'bg-sky-100 text-sky-700', consultant_request: 'bg-violet-100 text-violet-700', todo: 'bg-emerald-100 text-emerald-700', candidate: 'bg-rose-100 text-rose-700', apple: 'bg-slate-200 text-slate-700', skipped: 'bg-amber-100 text-amber-800' }[t] || 'bg-slate-100 text-slate-600';
 
       let viewLink = '';
       if (isContact && id) viewLink = `<a href="#" onclick="router.navigate('contact-detail', {id: '${id}'}); return false;" class="text-sky-600 hover:text-sky-700 text-xs font-medium">View</a>`;
       else if (isRequest && id) viewLink = `<a href="#" onclick="router.navigate('request-detail', {id: '${id}'}); return false;" class="text-violet-600 hover:text-violet-700 text-xs font-medium">View</a>`;
       else if (isTodo) viewLink = `<a href="#" onclick="router.navigate('todos'); return false;" class="text-emerald-600 hover:text-emerald-700 text-xs font-medium">View</a>`;
+      else if (isCandidate && id) viewLink = `<a href="#" onclick="router.navigate('candidate-detail', {id: '${this.escapeHtml(id)}'}); return false;" class="text-rose-600 hover:text-rose-700 text-xs font-medium">View</a>`;
+      else if (t === 'apple') viewLink = `<a href="#" onclick="router.navigate('apple'); return false;" class="text-slate-600 hover:text-slate-800 text-xs font-medium">View</a>`;
 
       const deleteBtn = (isContact && id && t === 'new_contact')
         ? `<button onclick="views.undoInboxAction('${email.id}', '${id}', 'contact', ${i})" class="text-red-400 hover:text-red-600 text-xs font-medium ml-auto">Delete</button>`

@@ -2595,6 +2595,17 @@ function findUserByAuthorizedEmail(email) {
   return row ? toCamelCase(row) : null;
 }
 
+// Who a forwarded mail is from: an address registered under Settings, or the
+// account's own login email. Returns { userId, username, teamId } or null.
+function findUserBySenderEmail(email) {
+  const addr = String(email || '').toLowerCase().trim();
+  if (!addr) return null;
+  const viaSettings = findUserByAuthorizedEmail(addr);
+  if (viaSettings) return viaSettings;
+  const row = db.prepare('SELECT id as user_id, username, team_id FROM users WHERE lower(email) = ?').get(addr);
+  return row ? toCamelCase(row) : null;
+}
+
 // ============ Email Inbox ============
 
 function getAllInboxEmails(userId) {
@@ -2626,13 +2637,13 @@ function getInboxEmailById(emailId, userId) {
   return obj;
 }
 
-function createInboxEmail({ fromEmail, fromName, subject, body, userId, teamId }) {
+function createInboxEmail({ fromEmail, fromName, subject, body, userId, teamId, externalMessageId }) {
   const id = generateId();
   const now = getTimestamp();
   db.prepare(`
-    INSERT INTO email_inbox (id, from_email, from_name, subject, body, user_id, team_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, fromEmail, fromName || '', subject || '', body, userId, teamId || null, now);
+    INSERT INTO email_inbox (id, from_email, from_name, subject, body, user_id, team_id, created_at, external_message_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, fromEmail, fromName || '', subject || '', body, userId, teamId || null, now, externalMessageId || null);
   return { id, fromEmail, fromName: fromName || '', subject: subject || '', body, status: 'pending', classification: 'pending', userId, teamId, createdAt: now };
 }
 
@@ -3298,6 +3309,7 @@ module.exports = {
   addUserEmail,
   removeUserEmail,
   findUserByAuthorizedEmail,
+  findUserBySenderEmail,
 
   // Email Inbox
   getAllInboxEmails,

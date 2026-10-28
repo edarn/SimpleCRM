@@ -1049,6 +1049,165 @@ router.post('/backfill-profiles', async (req, res) => {
   }
 });
 
+// One CV file -> a new or merged candidate. Shared by the bulk import below
+// and the forwarded-email import (src/routes/inbound.js), so both follow the
+// same dedup ladder. `file` is { path, filename, size, mimetype } of a file
+// already in uploadsDir; it is removed if rejected. Returns
+// { status: 'created' | 'duplicate' | 'skipped', ... }; throws on AI/DB errors.
+async function importCvFile(file, originalName, { category = 'in_progress', createdComment, onStage = () => {} }, userId) {
+  const { extractTextFromFile } = require('../lib/resume-parser');
+  // parseCVWithProfile, not parseCV: the same single AI call returns the
+  // contact fields AND the distilled profile, so importing 50 CVs still costs
+  // 50 AI calls rather than 100.
+  const { parseCVWithProfile } = require('../lib/cv-parser');
+
+  // Validate magic bytes per file (skip bad ones, don't abort all)
+  const ext = path.extname(originalName).toLowerCase();
+  if (!validateFileMagic(file.path, ext)) {
+    try { fs.unlinkSync(file.path); } catch (_) {}
+    return { status: 'skipped', error: 'File content does not match its extension' };
+  }
+
+  onStage('extracting');
+
+  const resumeText = await extractTextFromFile(file.path);
+  if (!resumeText) {
+    return { status: 'skipped', error: 'Could not extract text from file' };
+  }
+
+  onStage('parsing');
+
+  const parsed = await parseCVWithProfile(resumeText);
+  const profileResult = parsed.profile
+    ? { profile: parsed.profile, skillsCsv: parsed.skillsCsv }
+    : null;
+  if (!parsed.name) {
+    return { status: 'skipped', error: 'Could not extract candidate name from CV' };
+  }
+
+  // ---- Dedup ladder ---------------------------------------------------
+  //
+  // A bulk import once produced 42 duplicates out of 288 because this was a
+  // single email lookup: 51% of CVs carry no email at all, so for half the
+  // batch the check silently did not run and every upload created a new
+  // profile. The ladder below falls back to the name, but only where the
+  // name can be trusted:
+  //
+  //   email hit                  -> merge (matchedBy 'email')
+  //   exactly one name hit       -> merge (matchedBy 'name'), unless both
+  //                                 sides have an email and they DIFFER
+  //   several name hits          -> create ('ambiguous-name')
+  //   no hit                     -> create ('no-email' when the CV had none)
+  //
+  // A name match is only trusted when it is UNIQUE and nothing contradicts
+  // it. Merging two different people who happen to share a name is worse
+  // than leaving a duplicate behind — a duplicate can still be merged
+  // later, a wrong merge has already destroyed a profile. So every
+  // ambiguous case creates, and says why.
+  let dup = parsed.email ? data.findCandidateByEmail(parsed.email, userId) : null;
+  let matchedBy = dup ? 'email' : null;
+  let dedupNote = null;
+
+  if (!dup) {
+    const nameMatches = data.findCandidatesByName(parsed.name, userId);
+    if (nameMatches.length === 1) {
+      // Two known addresses that disagree are a contradiction; a missing
+      // address on either side is not (that is the exact shape of the
+      // duplicates this fixes: one copy with an email, one without).
+      const existingEmail = data.normalizeEmail(nameMatches[0].email);
+      const parsedEmail = data.normalizeEmail(parsed.email);
+      if (!existingEmail || !parsedEmail || existingEmail === parsedEmail) {
+        dup = nameMatches[0];
+        matchedBy = 'name';
+      } else {
+        dedupNote = 'name-differs-email';
+      }
+    } else if (nameMatches.length > 1) {
+      dedupNote = 'ambiguous-name';
+    } else {
+      dedupNote = parsed.email ? null : 'no-email';
+    }
+  }
+
+  if (dup) {
+    data.addCandidateFile(dup.id, {
+      filename: file.filename,
+      originalName,
+      fileSize: file.size,
+      mimeType: file.mimetype
+    }, userId);
+    data.updateCandidateResumeText(dup.id, resumeText);
+    // Fill in only fields that were empty — never overwrite existing data.
+    const fill = {};
+    if (!dup.role && parsed.role) fill.role = parsed.role;
+    if (!dup.skills && parsed.skills) fill.skills = parsed.skills;
+    if (!dup.phone && parsed.phone) fill.phone = parsed.phone;
+    // Filling an empty email matters beyond completeness: it upgrades this
+    // profile to the cheap, unambiguous email path, so the NEXT import of
+    // this person matches on the address instead of relying on the name
+    // heuristic again.
+    if (!dup.email && parsed.email) fill.email = parsed.email;
+    if (Object.keys(fill).length > 0) data.updateCandidate(dup.id, fill, userId);
+
+    // The merged profile describes the NEW CV, so it replaces the old one.
+    // Tags are built from the post-merge skills/role, not the parsed ones.
+    storeDistilledProfile(dup.id, profileResult, {
+      skills: dup.skills || parsed.skills,
+      role: dup.role || parsed.role,
+    });
+
+    // Say WHICH rule merged this. A name merge is the fallible one, so the
+    // comment has to be spottable afterwards by a human auditing the batch
+    // (it is also deliberately not in data.js's boilerplate-comment list,
+    // so a later merge carries it over instead of dropping it).
+    data.createCandidateComment(
+      dup.id,
+      matchedBy === 'name'
+        ? 'CV uppdaterat via import (matchade på namn, ingen e-post i CV:t)'
+        : 'CV uppdaterat via import (matchade befintlig e-postadress)',
+      userId
+    );
+
+    return { status: 'duplicate', matchedBy, candidateId: dup.id, name: dup.name, role: dup.role || parsed.role || '' };
+  }
+
+  const candidate = data.createCandidate({
+    name: parsed.name,
+    email: parsed.email || '',
+    phone: parsed.phone || '',
+    role: parsed.role || '',
+    skills: parsed.skills || '',
+    category,
+    resumeFilename: file.filename,
+    resumeOriginalName: originalName
+  }, userId);
+
+  data.addCandidateFile(candidate.id, {
+    filename: file.filename,
+    originalName,
+    fileSize: file.size,
+    mimeType: file.mimetype
+  }, userId);
+
+  data.updateCandidateResumeText(candidate.id, resumeText);
+  storeDistilledProfile(candidate.id, profileResult, {
+    skills: parsed.skills || '',
+    role: parsed.role || '',
+  });
+  data.createCandidateComment(candidate.id, createdComment || 'Automatiskt skapad via CV import', userId);
+
+  // dedupNote is what makes a silently-undeduped profile visible in the
+  // progress list — reporting these as a plain 'created' is why a whole bad
+  // batch went unnoticed. noEmail is counted off the actual address, not
+  // off dedupNote: a CV with no email that ALSO hit a name collision is
+  // reported as 'ambiguous-name', but is still one more profile that no
+  // email check will ever catch.
+  return {
+    status: 'created', dedupNote, candidateId: candidate.id, name: parsed.name, role: parsed.role || '',
+    noEmail: !data.normalizeEmail(parsed.email),
+  };
+}
+
 // POST /api/candidates/import-cvs - Bulk import with SSE progress streaming
 router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   const userId = req.session.userId;
@@ -1080,11 +1239,6 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   const total = req.files.length;
   sendEvent({ type: 'start', total });
 
-  const { extractTextFromFile } = require('../lib/resume-parser');
-  // parseCVWithProfile, not parseCV: the same single AI call returns the
-  // contact fields AND the distilled profile, so importing 50 CVs still costs
-  // 50 AI calls rather than 100.
-  const { parseCVWithProfile } = require('../lib/cv-parser');
   let created = 0;
   let failed = 0;
   let merged = 0;
@@ -1100,161 +1254,25 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
     const progress = { type: 'progress', index: i, total, file: originalName };
 
     try {
-      // Validate magic bytes per file (skip bad ones, don't abort all)
-      const ext = path.extname(file.originalname).toLowerCase();
-      if (!validateFileMagic(file.path, ext)) {
-        try { fs.unlinkSync(file.path); } catch (_) {}
-        failed++;
-        sendEvent({ ...progress, status: 'skipped', error: 'File content does not match its extension' });
-        continue;
-      }
-
-      sendEvent({ ...progress, status: 'extracting' });
-
-      const resumeText = await extractTextFromFile(file.path);
-      if (!resumeText) {
-        failed++;
-        sendEvent({ ...progress, status: 'skipped', error: 'Could not extract text from file' });
-        continue;
-      }
-
-      sendEvent({ ...progress, status: 'parsing' });
-
-      const parsed = await parseCVWithProfile(resumeText);
-      const profileResult = parsed.profile
-        ? { profile: parsed.profile, skillsCsv: parsed.skillsCsv }
-        : null;
-      if (!parsed.name) {
-        failed++;
-        sendEvent({ ...progress, status: 'skipped', error: 'Could not extract candidate name from CV' });
-        continue;
-      }
-
-      // ---- Dedup ladder ---------------------------------------------------
-      //
-      // A bulk import once produced 42 duplicates out of 288 because this was a
-      // single email lookup: 51% of CVs carry no email at all, so for half the
-      // batch the check silently did not run and every upload created a new
-      // profile. The ladder below falls back to the name, but only where the
-      // name can be trusted:
-      //
-      //   email hit                  -> merge (matchedBy 'email')
-      //   exactly one name hit       -> merge (matchedBy 'name'), unless both
-      //                                 sides have an email and they DIFFER
-      //   several name hits          -> create ('ambiguous-name')
-      //   no hit                     -> create ('no-email' when the CV had none)
-      //
-      // A name match is only trusted when it is UNIQUE and nothing contradicts
-      // it. Merging two different people who happen to share a name is worse
-      // than leaving a duplicate behind — a duplicate can still be merged
-      // later, a wrong merge has already destroyed a profile. So every
-      // ambiguous case creates, and says why.
-      let dup = parsed.email ? data.findCandidateByEmail(parsed.email, userId) : null;
-      let matchedBy = dup ? 'email' : null;
-      let dedupNote = null;
-
-      if (!dup) {
-        const nameMatches = data.findCandidatesByName(parsed.name, userId);
-        if (nameMatches.length === 1) {
-          // Two known addresses that disagree are a contradiction; a missing
-          // address on either side is not (that is the exact shape of the
-          // duplicates this fixes: one copy with an email, one without).
-          const existingEmail = data.normalizeEmail(nameMatches[0].email);
-          const parsedEmail = data.normalizeEmail(parsed.email);
-          if (!existingEmail || !parsedEmail || existingEmail === parsedEmail) {
-            dup = nameMatches[0];
-            matchedBy = 'name';
-          } else {
-            dedupNote = 'name-differs-email';
-          }
-        } else if (nameMatches.length > 1) {
-          dedupNote = 'ambiguous-name';
-        } else {
-          dedupNote = parsed.email ? null : 'no-email';
-        }
-      }
-
-      if (dup) {
-        data.addCandidateFile(dup.id, {
-          filename: file.filename,
-          originalName,
-          fileSize: file.size,
-          mimeType: file.mimetype
-        }, userId);
-        data.updateCandidateResumeText(dup.id, resumeText);
-        // Fill in only fields that were empty — never overwrite existing data.
-        const fill = {};
-        if (!dup.role && parsed.role) fill.role = parsed.role;
-        if (!dup.skills && parsed.skills) fill.skills = parsed.skills;
-        if (!dup.phone && parsed.phone) fill.phone = parsed.phone;
-        // Filling an empty email matters beyond completeness: it upgrades this
-        // profile to the cheap, unambiguous email path, so the NEXT import of
-        // this person matches on the address instead of relying on the name
-        // heuristic again.
-        if (!dup.email && parsed.email) fill.email = parsed.email;
-        if (Object.keys(fill).length > 0) data.updateCandidate(dup.id, fill, userId);
-
-        // The merged profile describes the NEW CV, so it replaces the old one.
-        // Tags are built from the post-merge skills/role, not the parsed ones.
-        storeDistilledProfile(dup.id, profileResult, {
-          skills: dup.skills || parsed.skills,
-          role: dup.role || parsed.role,
-        });
-
-        // Say WHICH rule merged this. A name merge is the fallible one, so the
-        // comment has to be spottable afterwards by a human auditing the batch
-        // (it is also deliberately not in data.js's boilerplate-comment list,
-        // so a later merge carries it over instead of dropping it).
-        data.createCandidateComment(
-          dup.id,
-          matchedBy === 'name'
-            ? 'CV uppdaterat via import (matchade på namn, ingen e-post i CV:t)'
-            : 'CV uppdaterat via import (matchade befintlig e-postadress)',
-          userId
-        );
-
-        merged++;
-        createdIds.push(dup.id); // re-match the updated profile against open requests
-        sendEvent({ ...progress, status: 'duplicate', matchedBy, candidateId: dup.id, name: dup.name, role: dup.role || parsed.role || '' });
-        continue;
-      }
-
-      const candidate = data.createCandidate({
-        name: parsed.name,
-        email: parsed.email || '',
-        phone: parsed.phone || '',
-        role: parsed.role || '',
-        skills: parsed.skills || '',
+      const result = await importCvFile(file, originalName, {
         category,
-        resumeFilename: file.filename,
-        resumeOriginalName: originalName
+        onStage: (status) => sendEvent({ ...progress, status }),
       }, userId);
-
-      data.addCandidateFile(candidate.id, {
-        filename: file.filename,
-        originalName,
-        fileSize: file.size,
-        mimeType: file.mimetype
-      }, userId);
-
-      data.updateCandidateResumeText(candidate.id, resumeText);
-      storeDistilledProfile(candidate.id, profileResult, {
-        skills: parsed.skills || '',
-        role: parsed.role || '',
-      });
-      data.createCandidateComment(candidate.id, 'Automatiskt skapad via CV import', userId);
-
+      if (result.status === 'skipped') {
+        failed++;
+        sendEvent({ ...progress, status: 'skipped', error: result.error });
+        continue;
+      }
+      createdIds.push(result.candidateId); // merged ones are re-matched too
+      if (result.status === 'duplicate') {
+        merged++;
+        sendEvent({ ...progress, status: 'duplicate', matchedBy: result.matchedBy, candidateId: result.candidateId, name: result.name, role: result.role });
+        continue;
+      }
       created++;
-      // Counted off the actual address, not off dedupNote: a CV with no email
-      // that ALSO hit a name collision is reported as 'ambiguous-name', but it
-      // is still one more profile that no email check will ever catch.
-      if (!data.normalizeEmail(parsed.email)) noEmail++;
-      if (dedupNote === 'ambiguous-name') ambiguous++;
-      createdIds.push(candidate.id);
-      // dedupNote is what makes a silently-undeduped profile visible in the
-      // progress list — reporting these as a plain 'created' is why a whole bad
-      // batch went unnoticed.
-      sendEvent({ ...progress, status: 'created', dedupNote, candidateId: candidate.id, name: parsed.name, role: parsed.role || '' });
+      if (result.noEmail) noEmail++;
+      if (result.dedupNote === 'ambiguous-name') ambiguous++;
+      sendEvent({ ...progress, status: 'created', dedupNote: result.dedupNote, candidateId: result.candidateId, name: result.name, role: result.role });
     } catch (err) {
       console.error(`Error processing CV ${originalName}:`, err.message);
       failed++;
@@ -1279,22 +1297,30 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   sendEvent({ type: 'done', created, merged, failed, total, noEmail, ambiguous, pipelineAdded });
   res.end();
 
-  // Background: match each imported candidate against open requests, run
-  // sequentially to avoid a burst of concurrent AI calls. This updates both the
-  // candidate-side cache and each open request's matched_candidates list.
-  if (createdIds.length > 0) {
-    setImmediate(async () => {
-      for (const cid of createdIds) {
-        try {
-          const candidate = data.getCandidateById(cid, userId);
-          if (candidate) await runCandidateRequestMatching(cid, candidate, userId);
-        } catch (e) {
-          console.error('Background CV-import matching error:', e.message);
-        }
-      }
-    });
-  }
+  matchCandidatesInBackground(createdIds, userId);
 });
+
+// Background: match each imported candidate against open requests, run
+// sequentially to avoid a burst of concurrent AI calls. This updates both the
+// candidate-side cache and each open request's matched_candidates list.
+function matchCandidatesInBackground(candidateIds, userId) {
+  if (!candidateIds.length) return;
+  setImmediate(async () => {
+    for (const cid of candidateIds) {
+      try {
+        const candidate = data.getCandidateById(cid, userId);
+        if (candidate) await runCandidateRequestMatching(cid, candidate, userId);
+      } catch (e) {
+        console.error('Background CV-import matching error:', e.message);
+      }
+    }
+  });
+}
+
+// For the forwarded-email import, which is mounted outside this router (it
+// has no session) but must import exactly the way the bulk import does.
+router.importCvFile = importCvFile;
+router.matchCandidatesInBackground = matchCandidatesInBackground;
 
   return router;
 };
