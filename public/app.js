@@ -4000,6 +4000,7 @@ const views = {
       (c.phone || '').toLowerCase().includes(query) ||
       (c.role || '').toLowerCase().includes(query) ||
       (c.skills || '').toLowerCase().includes(query) ||
+      (c.subcontractorCompany || '').toLowerCase().includes(query) ||
       (c.resumeText || '').toLowerCase().includes(query);
   },
 
@@ -4193,6 +4194,8 @@ const views = {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${candidate.email ? `<div><span class="text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(candidate.email)}" class="text-rose-600 hover:text-rose-700">${this.escapeHtml(candidate.email)}</a></div>` : ''}
           ${candidate.phone ? `<div><span class="text-slate-500">Phone:</span> <span class="text-slate-700">${this.escapeHtml(candidate.phone)}</span></div>` : ''}
+          ${candidate.isSubcontractor && candidate.subcontractorCompany ? `<div><span class="text-slate-500">Konsultbolag:</span> <span class="text-slate-700">${this.escapeHtml(candidate.subcontractorCompany)}</span></div>` : ''}
+          ${candidate.isSubcontractor && candidate.subcontractorContact ? `<div><span class="text-slate-500">Kontaktperson:</span> <span class="text-slate-700">${this.escapeHtml(candidate.subcontractorContact)}</span></div>` : ''}
         </div>
 
         ${candidate.skills ? `
@@ -4716,7 +4719,7 @@ const views = {
       if (s.team && r.team !== s.team) return false;
       if (s.form === 'employment' && r.isSubcontractor) return false;
       if (s.form === 'subcontractor' && !r.isSubcontractor) return false;
-      if (q && !(`${r.candidateName} ${r.candidateRole} ${r.team}`.toLowerCase().includes(q))) return false;
+      if (q && !(`${r.candidateName} ${r.subcontractorCompany} ${r.team}`.toLowerCase().includes(q))) return false;
       return true;
     });
   },
@@ -4856,7 +4859,7 @@ const views = {
           </div>
           <div class="text-xs mt-0.5 truncate">
             <span class="text-slate-600 font-medium">${this.escapeHtml(r.team || 'Utan team')}</span>
-            ${r.candidateRole ? `<span class="text-slate-400"> · ${this.escapeHtml(r.candidateRole)}</span>` : ''}
+            ${r.isSubcontractor && r.subcontractorCompany ? `<span class="text-slate-400"> · ${this.escapeHtml(r.subcontractorCompany)}</span>` : ''}
           </div>
         </div>
         ${r.stepLabels.map((st, i) => this._appleCellHtml(r, st, i)).join('')}
@@ -4934,8 +4937,10 @@ const views = {
       : '';
     // The derived status sits on top; underneath, a short free comment saved on
     // blur, so the user can jot down context without opening a dialog.
+    // An empty label (placed, start date not set yet) shows no status line;
+    // `invisible` keeps the comment in its column in the matrix.
     return `<div class="${inline ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-3 items-center' : ''}">
-      <div class="flex items-center gap-2 min-w-0">
+      <div class="flex items-center gap-2 min-w-0 ${r.nextAction.label ? '' : (inline ? 'invisible' : 'hidden')}">
         <span class="w-[7px] h-[7px] rounded-full ${dot} shrink-0"></span>
         <span class="text-[13px] ${text} truncate">${this.escapeHtml(r.nextAction.label)}</span>
         ${days}
@@ -5009,7 +5014,7 @@ const views = {
         <div style="min-width: 900px">
           <div class="grid items-center px-5 py-2.5 bg-slate-50 border-b border-slate-200" style="${this._APPLE_ROSTER_GRID}">
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">NAMN</div>
-            <div class="text-[11px] font-bold text-slate-500 tracking-wide">ROLL</div>
+            <div class="text-[11px] font-bold text-slate-500 tracking-wide">KONSULTBOLAG</div>
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">AVTAL</div>
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">STARTDATUM</div>
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">STATUS</div>
@@ -5044,7 +5049,7 @@ const views = {
              class="text-sm font-semibold text-slate-800 hover:text-rose-600 truncate">${this.escapeHtml(r.candidateName)}</a>
           ${this._appleFormBadge(r.isSubcontractor)}
         </div>
-        <div class="text-[13px] text-slate-500 truncate pr-3">${this.escapeHtml(r.candidateRole || '—')}</div>
+        <div class="text-[13px] text-slate-500 truncate pr-3">${this.escapeHtml((r.isSubcontractor && r.subcontractorCompany) || '—')}</div>
         <div class="text-[13px] text-slate-500">${this.escapeHtml(signed ? this._appleShortDate(signed) : '—')}</div>
         <div>
           ${r.startDate
@@ -6525,23 +6530,24 @@ const views = {
       <div class="bg-white shadow-sm rounded-xl p-6 border border-slate-200">
         <h2 class="text-2xl font-bold text-slate-800 mb-6">${id ? 'Edit Candidate' : 'New Candidate'}</h2>
 
-        <form id="candidate-form" onsubmit="views.saveCandidate(event, '${id || ''}')" class="space-y-4">
+        <form id="candidate-form" data-candidate-id="${id || ''}" onsubmit="views.saveCandidate(event, '${id || ''}')" class="space-y-4"
+              ${id ? `oninput="views.candidateFieldEdited(event)" onchange="views.candidateFieldEdited(event)" onfocusout="views.flushCandidateAutosave()"` : ''}>
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Name *</label>
-            <input type="text" id="candidate-name" value="${this.escapeHtml(candidate.name)}" required autofocus
+            <input type="text" id="candidate-name" data-field="name" value="${this.escapeHtml(candidate.name)}" required autofocus
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
-              <input type="email" id="candidate-email" value="${this.escapeHtml(candidate.email || '')}"
+              <input type="email" id="candidate-email" data-field="email" value="${this.escapeHtml(candidate.email || '')}"
                      oninput="views.maybeGuessCandidateName(this.value)"
                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
             </div>
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Phone</label>
-              <input type="tel" id="candidate-phone" value="${this.escapeHtml(candidate.phone || '')}"
+              <input type="tel" id="candidate-phone" data-field="phone" value="${this.escapeHtml(candidate.phone || '')}"
                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
             </div>
           </div>
@@ -6549,13 +6555,13 @@ const views = {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
-              <input type="text" id="candidate-role" value="${this.escapeHtml(candidate.role || '')}"
+              <input type="text" id="candidate-role" data-field="role" value="${this.escapeHtml(candidate.role || '')}"
                      placeholder="e.g., Senior Developer, Product Manager"
                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
             </div>
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Category</label>
-              <select id="candidate-category"
+              <select id="candidate-category" data-field="category"
                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white">
                 ${Object.entries(this._candidateCategories).map(([key, label]) =>
                   `<option value="${key}" ${(candidate.category || 'in_progress') === key ? 'selected' : ''}>${label}</option>`
@@ -6566,7 +6572,8 @@ const views = {
 
           <div class="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
             <label class="flex items-start gap-3 cursor-pointer">
-              <input type="checkbox" id="candidate-subcontractor" ${candidate.isSubcontractor ? 'checked' : ''}
+              <input type="checkbox" id="candidate-subcontractor" data-field="isSubcontractor" ${candidate.isSubcontractor ? 'checked' : ''}
+                     onclick="document.getElementById('candidate-sub-fields').classList.toggle('hidden', !this.checked)"
                      class="mt-0.5 h-5 w-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
               <span>
                 <span class="block text-sm font-medium text-slate-700">Underkonsult</span>
@@ -6576,11 +6583,25 @@ const views = {
                 </span>
               </span>
             </label>
+            <div id="candidate-sub-fields" class="${candidate.isSubcontractor ? '' : 'hidden'} grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3 pl-8">
+              <div>
+                <label for="candidate-sub-company" class="block text-sm font-medium text-slate-700 mb-1.5">Konsultbolag</label>
+                <input type="text" id="candidate-sub-company" data-field="subcontractorCompany" maxlength="300"
+                       value="${this.escapeHtml(candidate.subcontractorCompany || '')}" placeholder="t.ex. Acme Consulting AB"
+                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+              </div>
+              <div>
+                <label for="candidate-sub-contact" class="block text-sm font-medium text-slate-700 mb-1.5">Kontaktperson på bolaget</label>
+                <input type="text" id="candidate-sub-contact" data-field="subcontractorContact" maxlength="300"
+                       value="${this.escapeHtml(candidate.subcontractorContact || '')}" placeholder="Namn, e-post eller telefon"
+                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+              </div>
+            </div>
           </div>
 
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">Skills</label>
-            <input type="text" id="candidate-skills" value="${this.escapeHtml(candidate.skills || '')}"
+            <input type="text" id="candidate-skills" data-field="skills" value="${this.escapeHtml(candidate.skills || '')}"
                    placeholder="e.g., JavaScript, React, Node.js, PostgreSQL"
                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors">
           </div>
@@ -6588,7 +6609,7 @@ const views = {
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">File (PDF, DOC, DOCX - max 10MB)</label>
             ${files.length > 0 ? `
-              <div class="mb-2 space-y-1">
+              <div id="candidate-form-files" class="mb-2 space-y-1">
                 ${files.map(f => `
                   <div class="text-sm text-slate-500 flex items-center gap-2">
                     <span>${this.escapeHtml(f.originalName)}</span>
@@ -6597,17 +6618,23 @@ const views = {
               </div>
             ` : ''}
             ${files.length < 5 ? `
-              <input type="file" id="candidate-resume" accept=".pdf,.doc,.docx"
+              <input type="file" id="candidate-resume" accept=".pdf,.doc,.docx" ${id ? `onchange="views.uploadCandidateFormFile('${id}', this)"` : ''}
                      class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100">
             ` : '<p class="text-sm text-amber-600">Maximum 5 files reached. Remove files from the detail view to upload more.</p>'}
           </div>
 
+          ${id ? `
+          <div class="flex justify-end items-center gap-4 pt-4">
+            <span id="candidate-autosave-status" class="text-sm text-slate-400" aria-live="polite">Ändringar sparas automatiskt</span>
+            <button type="button" onclick="views.finishCandidateEdit('${id}')"
+                    class="bg-slate-100 text-slate-700 px-6 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium">Klar</button>
+          </div>` : `
           <div class="flex justify-end gap-4 pt-4">
             <button type="button" onclick="router.back('candidates')"
                     class="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium">Cancel</button>
             <button type="submit"
                     class="bg-gradient-to-r from-rose-500 to-pink-600 text-white px-6 py-2 rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all font-medium shadow-sm">Save</button>
-          </div>
+          </div>`}
         </form>
       </div>
     `;
@@ -6689,8 +6716,127 @@ const views = {
     return key.length >= 3 ? key : '';
   },
 
+  // ----- Edit Candidate autosave -----
+  //
+  // Only the fields actually touched are sent, so two people editing different
+  // fields of one candidate do not overwrite each other. Values are captured
+  // when typed (not read at send time) so a save still goes out after the form
+  // has been navigated away from. Saves run one after another: an older value
+  // can never land after a newer one.
+  _candAutosave: { candidateId: null, pending: {}, timer: null, chain: Promise.resolve() },
+
+  candidateFieldEdited(event) {
+    const el = event.target;
+    const key = el && el.dataset && el.dataset.field;
+    const form = el && el.closest && el.closest('form');
+    const candidateId = form && form.dataset.candidateId;
+    if (!key || !candidateId) return;
+    const st = this._candAutosave;
+    if (st.candidateId && st.candidateId !== candidateId) this.flushCandidateAutosave();
+    st.candidateId = candidateId;
+    st.pending[key] = el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value;
+    clearTimeout(st.timer);
+    // Text waits for a pause in typing; checkbox and select save at once.
+    const immediate = el.type === 'checkbox' || el.tagName === 'SELECT';
+    if (!immediate) this._setAutosaveStatus('Ändrat…', 'text-slate-400');
+    st.timer = setTimeout(() => this.flushCandidateAutosave(), immediate ? 0 : 800);
+  },
+
+  flushCandidateAutosave() {
+    const st = this._candAutosave;
+    clearTimeout(st.timer);
+    st.timer = null;
+    const fields = st.pending;
+    const candidateId = st.candidateId;
+    if (!candidateId || !Object.keys(fields).length) return st.chain;
+    st.pending = {};
+    if ('name' in fields && !fields.name.trim()) {
+      delete fields.name;
+      this._setAutosaveStatus('Namnet kan inte vara tomt — det sparades inte', 'text-red-600');
+      if (!Object.keys(fields).length) return st.chain;
+    }
+    st.chain = st.chain.then(() => this._sendCandidatePatch(candidateId, fields));
+    return st.chain;
+  },
+
+  async _sendCandidatePatch(candidateId, fields) {
+    this._setAutosaveStatus('Sparar…', 'text-slate-400');
+    const formData = new FormData();
+    for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+    try {
+      const response = await fetch(`/api/candidates/${candidateId}`, { method: 'PUT', body: formData });
+      if (response.status === 401) { auth.showLoginModal(); throw new Error('Authentication required'); }
+      if (response.status === 409) {
+        const data = await response.json();
+        this._setAutosaveStatus(`${data.error} — e-posten sparades inte`, 'text-red-600');
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Kunde inte spara');
+      }
+      this._setAutosaveStatus('Sparat ✓', 'text-emerald-600');
+    } catch (err) {
+      this._setAutosaveStatus('Kunde inte spara: ' + (err.message || err), 'text-red-600');
+    }
+  },
+
+  _setAutosaveStatus(text, cls) {
+    const el = document.getElementById('candidate-autosave-status');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'text-sm ' + cls;
+  },
+
+  async finishCandidateEdit(candidateId) {
+    await this.flushCandidateAutosave();
+    // Replace: Back from the detail page should not return to the form.
+    router.navigate('candidate-detail', { id: candidateId }, { replace: true });
+  },
+
+  // A file picked while editing is uploaded straight away (same endpoint as
+  // the old Save, so the CV is re-extracted in the background).
+  uploadCandidateFormFile(candidateId, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const st = this._candAutosave;
+    st.chain = st.chain.then(async () => {
+      this._setAutosaveStatus('Laddar upp fil…', 'text-slate-400');
+      const formData = new FormData();
+      formData.append('resume', file);
+      try {
+        const response = await fetch(`/api/candidates/${candidateId}`, { method: 'PUT', body: formData });
+        if (response.status === 401) { auth.showLoginModal(); throw new Error('Authentication required'); }
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || 'Uppladdningen misslyckades');
+        }
+        input.value = '';
+        let list = document.getElementById('candidate-form-files');
+        if (!list && input.parentElement) {
+          list = document.createElement('div');
+          list.id = 'candidate-form-files';
+          list.className = 'mb-2 space-y-1';
+          input.parentElement.insertBefore(list, input);
+        }
+        if (list) {
+          const row = document.createElement('div');
+          row.className = 'text-sm text-slate-500 flex items-center gap-2';
+          row.textContent = file.name;
+          list.appendChild(row);
+          if (list.children.length >= 5) input.remove();
+        }
+        this._setAutosaveStatus('Fil uppladdad ✓', 'text-emerald-600');
+      } catch (err) {
+        this._setAutosaveStatus('Kunde inte ladda upp: ' + (err.message || err), 'text-red-600');
+      }
+    });
+  },
+
   async saveCandidate(event, id) {
     event.preventDefault();
+    // Editing autosaves; Enter in a field should not do a second, full save.
+    if (id) { this.flushCandidateAutosave(); return; }
 
     const formData = new FormData();
     formData.append('name', document.getElementById('candidate-name').value);
@@ -6703,6 +6849,8 @@ const views = {
     // otherwise clearing the flag on an edit would look like "field omitted"
     // and the old value would stick.
     formData.append('isSubcontractor', document.getElementById('candidate-subcontractor').checked ? 'true' : 'false');
+    formData.append('subcontractorCompany', document.getElementById('candidate-sub-company').value);
+    formData.append('subcontractorContact', document.getElementById('candidate-sub-contact').value);
 
     const resumeInput = document.getElementById('candidate-resume');
     if (resumeInput && resumeInput.files[0]) {

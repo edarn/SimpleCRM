@@ -36,6 +36,13 @@ function fixOriginalName(file) {
 // Checkbox values arrive as strings through multipart/form-data, where the
 // string "false" is truthy. Returns undefined when the field was not sent at
 // all, so an update that omits it leaves the stored value alone.
+// Optional one-line text field: undefined stays undefined (field not sent, so
+// an update leaves it alone); anything else is trimmed and capped.
+function cleanShortText(v) {
+  if (v === undefined || v === null) return undefined;
+  return String(v).trim().slice(0, 300);
+}
+
 function toBool(v) {
   if (v === undefined || v === null || v === '') return undefined;
   if (typeof v === 'boolean') return v;
@@ -174,6 +181,8 @@ router.post('/', upload.single('resume'), (req, res) => {
     const { name, email, phone, role, skills, category } = req.body;
     // Multipart bodies arrive as strings, so "false" would be truthy.
     const isSubcontractor = toBool(req.body.isSubcontractor);
+    const subcontractorCompany = cleanShortText(req.body.subcontractorCompany);
+    const subcontractorContact = cleanShortText(req.body.subcontractorContact);
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Candidate name is required' });
@@ -211,6 +220,8 @@ router.post('/', upload.single('resume'), (req, res) => {
         skills,
         category,
         isSubcontractor,
+        subcontractorCompany,
+        subcontractorContact,
         resumeFilename,
         resumeOriginalName
       }, userId);
@@ -259,6 +270,8 @@ router.put('/:id', upload.single('resume'), (req, res) => {
     const { name, email, phone, role, skills, category } = req.body;
     // Multipart bodies arrive as strings, so "false" would be truthy.
     const isSubcontractor = toBool(req.body.isSubcontractor);
+    const subcontractorCompany = cleanShortText(req.body.subcontractorCompany);
+    const subcontractorContact = cleanShortText(req.body.subcontractorContact);
 
     if (name !== undefined && !name.trim()) {
       return res.status(400).json({ error: 'Candidate name cannot be empty' });
@@ -306,6 +319,8 @@ router.put('/:id', upload.single('resume'), (req, res) => {
       skills,
       category,
       isSubcontractor,
+      subcontractorCompany,
+      subcontractorContact,
       resumeFilename,
       resumeOriginalName
     }, userId);

@@ -651,6 +651,11 @@ function migrateExistingData() {
   // vary independently (a subcontractor can be in_progress, employed, or
   // anything else). 0 = ordinary employment candidate, 1 = subcontractor.
   addColumnIfNotExists('candidates', 'is_subcontractor', 'INTEGER DEFAULT 0');
+  // For a subcontractor: the consultancy they come through and our contact
+  // there. Free text — kept even if the flag is cleared, so toggling it back
+  // does not lose what was typed.
+  addColumnIfNotExists('candidates', 'subcontractor_company', "TEXT DEFAULT ''");
+  addColumnIfNotExists('candidates', 'subcontractor_contact', "TEXT DEFAULT ''");
 
   // ---- Request-side matching job state -------------------------------------
   // Matching a request is a multi-minute AI job. It used to run inline on the

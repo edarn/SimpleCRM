@@ -274,9 +274,9 @@ function nextAction({ steps, rejected, failedIndex, done, row, label, isSub, now
 
   if (done) {
     if (row.endedAt) return { kind: 'closed', label: `Uppdraget avslutat ${formatDate(row.endedAt)}`, days: 0 };
-    if (!row.startDate) {
-      return { kind: 'waiting', label: `Väntar på startdatum från ${label}`, days: since(steps.confirmed.date) || 0 };
-    }
+    // Placed but no start date yet: nothing to show. The roster's "Sätt datum"
+    // button already flags the missing date.
+    if (!row.startDate) return { kind: 'closed', label: '', days: 0 };
     const start = parseDate(row.startDate);
     const diff = daysBetween(now, start);
     if (diff != null && diff > 0) return { kind: 'soon', label: `Startar ${formatDate(row.startDate)}`, days: 0 };

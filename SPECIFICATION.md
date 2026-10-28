@@ -70,6 +70,18 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      candidates. An ordinary employment candidate renders **nothing at all**:
      the absence is the signal, so the lists stay quiet and the badge only
      appears where it means something.
+     Ticking it reveals two free-text fields, **Konsultbolag** and
+     **Kontaktperson på bolaget** (`subcontractor_company` /
+     `subcontractor_contact`, max 300 chars). They are kept if the box is
+     unticked, shown on the detail page for subcontractors, searchable from the
+     candidates list, and the company replaces the profile role in the Apple view.
+   - **Edit Candidate autosaves** — there is no Save button when editing. Text
+     fields save after a pause in typing (and on leaving the field), checkbox,
+     category and file save at once; a status line says Sparar… / Sparat ✓ or
+     what failed (empty name, duplicate email). Only the touched fields are
+     sent, so two people editing different fields don't overwrite each other,
+     and saves are chained so an older value never lands after a newer one.
+     "Klar" returns to the detail page. Creating a new candidate still uses Save.
    - **Duplicate prevention (email)**: Creating a candidate whose email already
      belongs to another candidate in scope (the whole team for team users, the
      user's own candidates for solo users; case-insensitive) is blocked with a
@@ -795,6 +807,10 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      whatever colour its outcome gives it. Move and flash run side by side and
      are over in 940 ms. `prefers-reduced-motion` skips the whole thing.
      Covered by `scripts/check-apple-view.mjs`.
+   - **Placed with no start date shows no next action** — the roster's amber
+     "Sätt datum" button already flags it. Rows show the team plus, for a
+     subcontractor, the consultancy (*Klara & startande* has a KONSULTBOLAG
+     column); the candidate's profile role is not shown here.
    - **A rejection dims the rest of the row** (those steps are not "to do",
      they are not applicable) and stays open as **Återkoppla till kandidaten**,
      with a day counter, until the feedback tick is set — a rejection is not
@@ -1034,6 +1050,8 @@ CREATE TABLE candidates (
   resume_text TEXT DEFAULT '',
   resume_text_status TEXT,   -- 'ok' | 'empty' | NULL (never attempted); see section 16
   is_subcontractor INTEGER DEFAULT 0,  -- 1 = underkonsult; independent of category
+  subcontractor_company TEXT DEFAULT '',  -- underkonsult: consultancy name
+  subcontractor_contact TEXT DEFAULT '',  -- underkonsult: our contact there
   profile_json TEXT,         -- distilled ~400-token structured profile; see section 19
   profile_status TEXT,       -- 'ok' | 'empty' | NULL (never attempted)
   skill_tags TEXT,           -- canonical skill tags used by the local prefilter
