@@ -94,6 +94,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Comments & ToDos: unified list on the candidate detail page (same pattern as Contacts and Companies), sortable by date or type, showing comments (rose) and linked ToDos (emerald) inline with inline checklist/complete controls. Every comment (and every contact note) shows who wrote it next to its timestamp ("anna · 2026-10-25 14:02")
    - "Make this a ToDo" checkbox when adding a comment: if checked, creates a ToDo linked to the candidate (using comment text as title) instead of a comment; the ToDo appears in the candidate's Comments & ToDos list and in the global ToDos list
    - Full-text search across all candidate fields
+   - **New CVs first**: before searching, the candidates *you* added in the
+     last 3 days (bulk import, forwarded mail or manual) sit in a "Nya CV:n"
+     section at the top with a NY badge, regardless of the category filter, so
+     an imported CV is not forgotten. Each user sees only their own there;
+     others' new candidates appear in the normal list. Not shown while
+     searching or when viewing another member's candidates. After 3 days they
+     drop back into the normal order.
+   - **Skapad column**: the creation date, sortable — first click newest first,
+     second click oldest first. The chosen sort survives Back and owner switches.
    - Search memory: Back (browser Back or "← Back to Candidates") returns to the list with the previous search text still filled in; clicking the **Candidates** tab instead opens the list with an empty, focused search field so you can type straight away (category and owner filters are kept)
      - Search returns matches in two groups: first, candidates that match the currently active owner + category filter (primary results); then, after a subtle separator row, additional matches from across all owners and all categories that don't fit the active filter (secondary results). When the active filter is already "All Candidates (Team) / All Categories" the secondary group is empty.
    - Sort candidates by name, role, or skills

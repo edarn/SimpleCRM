@@ -3291,6 +3291,7 @@ const views = {
           <span class="text-xs text-slate-500 self-center">Sort:</span>
           <button onclick="views.sortCandidates('name')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Name <span id="sort-candidate-name-m" class="text-rose-600"></span></button>
           <button onclick="views.sortCandidates('role')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Role <span id="sort-candidate-role-m"></span></button>
+          <button onclick="views.sortCandidates('created')" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-700">Skapad <span id="sort-candidate-created-m"></span></button>
         </div>
         <table class="min-w-full divide-y divide-slate-200 responsive-table">
           <thead class="bg-gradient-to-r from-slate-50 to-slate-100">
@@ -3307,6 +3308,10 @@ const views = {
                 Category
               </th>
               ${hasTeam ? `<th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Added By</th>` : ''}
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  onclick="views.sortCandidates('created')" title="Klicka: nyaste först / äldsta först">
+                Skapad <span id="sort-candidate-created"></span>
+              </th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                 Status
               </th>
@@ -3320,9 +3325,9 @@ const views = {
     `;
 
     this._candidates = candidates;
-    this._candidateSort = 'name';
-    this._candidateSortAsc = true;
-    document.getElementById('sort-candidate-name').textContent = '↑';
+    // The chosen sort survives a re-render (Back, switching owner).
+    const sort = this._candidateSortState || { field: 'name', asc: true };
+    this._applyCandidateSort(sort.field, sort.asc);
     // Apply default filter
     this.filterCandidates();
     this.loadAppleBadges();
@@ -3957,10 +3962,10 @@ const views = {
     if (tbody && this._candidates) this.filterCandidates();
   },
 
-  renderCandidateRows(candidates) {
+  renderCandidateRows(candidates, { isNew = false } = {}) {
     const categoryLabels = this._candidateCategories;
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
-    const colspan = hasTeam ? 5 : 4;
+    const colspan = hasTeam ? 6 : 5;
     if (candidates.length === 0) {
       return `<tr><td colspan="${colspan}" class="px-6 py-8 text-center text-slate-500">No candidates found</td></tr>`;
     }
@@ -3975,6 +3980,7 @@ const views = {
         <td class="px-6 py-3">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-medium text-slate-800">${this.escapeHtml(c.name)}</span>
+            ${isNew ? '<span class="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full tracking-wide">NY</span>' : ''}
             ${this._subcontractorBadge(c)}
             ${this._appleBadge(c)}
           </div>
@@ -3985,6 +3991,7 @@ const views = {
           ${c.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(c.category)}">${this.escapeHtml(categoryLabels[c.category] || c.category)}</span>` : '<span class="text-slate-400">-</span>'}
         </td>
         ${hasTeam ? `<td class="px-6 py-3 whitespace-nowrap text-slate-600" data-label="Added By">${this.escapeHtml(c.createdByUsername || '-')}</td>` : ''}
+        <td class="px-6 py-3 whitespace-nowrap text-slate-500 text-sm" data-label="Skapad">${c.createdAt ? this.escapeHtml(formatDate(c.createdAt)) : '-'}</td>
         <td class="px-6 py-3 whitespace-nowrap" data-label="Status">
           <div class="text-xs text-slate-700 leading-tight">${this.escapeHtml(ownerLabel)}</div>
           <div class="text-xs text-slate-500 leading-tight">${this.escapeHtml(categoryLabel)}</div>
@@ -4004,9 +4011,17 @@ const views = {
       (c.resumeText || '').toLowerCase().includes(query);
   },
 
+  renderCandidateSectionRow(label, cls = 'text-slate-500') {
+    const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
+    const colspan = hasTeam ? 6 : 5;
+    return `<tr class="bg-slate-50" data-section-row>
+      <td colspan="${colspan}" class="px-6 py-2 text-xs border-t border-slate-200 ${cls}">${this.escapeHtml(label)}</td>
+    </tr>`;
+  },
+
   renderCandidateSeparatorRow(count) {
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
-    const colspan = hasTeam ? 5 : 4;
+    const colspan = hasTeam ? 6 : 5;
     return `<tr class="bg-slate-50">
       <td colspan="${colspan}" class="px-6 py-2 text-xs text-slate-500 italic border-t border-slate-200">
         Other matches across all candidates and categories (${count})
@@ -4051,8 +4066,25 @@ const views = {
       }
     }
 
+    // Before searching: my CVs from the last 3 days go first, whatever the
+    // category filter says (a new CV must not hide behind a filter). Not when
+    // looking at another member's candidates.
+    let recent = [];
+    if (!query && (!ownerFilter || ownerFilter === 'all' || ownerFilter === auth.currentUser?.id)) {
+      const now = Date.now();
+      recent = all.filter(c => this._isNewForMe(c, now));
+    }
+    const recentIds = new Set(recent.map(c => c.id));
+    const rest = recent.length ? primary.filter(c => !recentIds.has(c.id)) : primary;
+
     const tbody = document.getElementById('candidates-table');
-    tbody.innerHTML = this.renderCandidateRows(primary) +
+    tbody.innerHTML =
+      (recent.length
+        ? this.renderCandidateSectionRow(`Nya CV:n — tillagda av dig de senaste ${this._NEW_CANDIDATE_DAYS} dagarna (${recent.length})`, 'bg-rose-50 text-rose-700 font-semibold not-italic')
+          + this.renderCandidateRows(recent, { isNew: true })
+          + (rest.length ? this.renderCandidateSectionRow(`Övriga kandidater (${rest.length})`) : '')
+        : '') +
+      (rest.length || !recent.length ? this.renderCandidateRows(rest) : '') +
       (secondary.length
         ? this.renderCandidateSeparatorRow(secondary.length) + this.renderCandidateRows(secondary)
         : '');
@@ -4102,40 +4134,57 @@ const views = {
   },
 
   sortCandidates(field) {
-    if (this._candidateSort === field) {
-      this._candidateSortAsc = !this._candidateSortAsc;
-    } else {
-      this._candidateSort = field;
-      this._candidateSortAsc = true;
-    }
+    const cur = this._candidateSortState || { field: 'name', asc: true };
+    // Same column toggles direction. "Skapad" starts with the newest first.
+    const asc = cur.field === field ? !cur.asc : field !== 'created';
+    this._applyCandidateSort(field, asc);
+    this.filterCandidates();
+  },
+
+  // `asc` for 'created' means oldest first.
+  _applyCandidateSort(field, asc) {
+    this._candidateSortState = { field, asc };
+    this._candidateSort = field;
+    this._candidateSortAsc = asc;
 
     // Clear sort indicators (desktop + mobile)
-    ['name', 'role', 'skills'].forEach(f => {
-      document.getElementById(`sort-candidate-${f}`).textContent = '';
+    ['name', 'role', 'created'].forEach(f => {
+      const el = document.getElementById(`sort-candidate-${f}`);
+      if (el) el.textContent = '';
       const mEl = document.getElementById(`sort-candidate-${f}-m`);
       if (mEl) mEl.textContent = '';
     });
 
-    this._candidates.sort((a, b) => {
+    (this._candidates || []).sort((a, b) => {
       let result;
       switch (field) {
         case 'role':
           result = (a.role || '').localeCompare(b.role || '');
           break;
-        case 'skills':
-          result = (a.skills || '').localeCompare(b.skills || '');
+        case 'created':
+          result = String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
           break;
         default:
           result = (a.name || '').localeCompare(b.name || '');
       }
-      return this._candidateSortAsc ? result : -result;
+      return asc ? result : -result;
     });
 
-    const arrow = this._candidateSortAsc ? '↑' : '↓';
-    document.getElementById(`sort-candidate-${field}`).textContent = arrow;
+    const arrow = asc ? '↑' : '↓';
+    const el = document.getElementById(`sort-candidate-${field}`);
+    if (el) el.textContent = arrow;
     const mEl = document.getElementById(`sort-candidate-${field}-m`);
     if (mEl) mEl.textContent = arrow;
-    this.filterCandidates();
+  },
+
+  // A CV this user added in the last 3 days. Shown at the top of the list
+  // (before searching) so forwarded/imported CVs are not forgotten. Only the
+  // creator gets this — everyone sees their own new ones, not each other's.
+  _NEW_CANDIDATE_DAYS: 3,
+  _isNewForMe(c, now = Date.now()) {
+    if (!c || c.createdBy !== auth.currentUser?.id) return false;
+    const t = Date.parse(c.createdAt);
+    return Number.isFinite(t) && now - t < this._NEW_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
   },
 
   // Candidate Detail View
