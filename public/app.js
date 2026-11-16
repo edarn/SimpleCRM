@@ -4150,7 +4150,7 @@ const views = {
   _starButton(c, size = 'w-5 h-5') {
     const on = !!c.isStarred;
     return `<button type="button" data-star-for="${c.id}" data-star-size="${size}"
-        onclick="event.stopPropagation(); views.toggleCandidateStar('${c.id}')"
+        onclick="event.stopPropagation(); views.toggleInterestStar('${c.id}')"
         title="${on ? 'Ta bort stjärna' : 'Stjärnmärk — hög prioritet'}" aria-pressed="${on}"
         class="flex-shrink-0 ${on ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'} transition-colors">
       ${this._starSvg(on, size)}
@@ -4173,7 +4173,7 @@ const views = {
     return out;
   },
 
-  async toggleCandidateStar(id) {
+  async toggleInterestStar(id) {
     const copies = this._candidateCopies(id);
     const next = !(copies[0]?.isStarred);
     try {
