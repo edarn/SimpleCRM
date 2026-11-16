@@ -106,6 +106,23 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
    - Search memory: Back (browser Back or "← Back to Candidates") returns to the list with the previous search text still filled in; clicking the **Candidates** tab instead opens the list with an empty, focused search field so you can type straight away (category and owner filters are kept)
      - Search returns matches in two groups: first, candidates that match the currently active owner + category filter (primary results); then, after a subtle separator row, additional matches from across all owners and all categories that don't fit the active filter (secondary results). When the active filter is already "All Candidates (Team) / All Categories" the secondary group is empty.
    - Sort candidates by name, role, or skills
+   - **Star (high interest)**: a star next to the name in the candidates list
+     and in the candidate detail header. Click to toggle — yellow (filled) when
+     starred, grey outline otherwise. Clicking the star in the list does not
+     open the row. The star is a team-shared flag on the candidate
+     (`candidates.is_starred`, `PUT /api/candidates/:id/star { starred }`), not a
+     per-user favourite, and does not bump `updated_at`. A **Starred** toggle
+     button next to the category filter limits the list to starred candidates
+     (combined with the owner and category filters; the "new CVs" section is
+     hidden while it is on). Merging duplicates keeps the star if any merged
+     profile had it; backups export and restore it.
+   - **Quick search on the candidate detail page**: a "Sök annan kandidat..."
+     box at the top of the detail page, next to "← Back to Candidates". Typing
+     shows a dropdown of up to 10 matches from all team candidates (same fields
+     as the list search; name matches first, then starred), driven by ↓/↑/Enter,
+     Esc to close. Opening a result *replaces* the current history entry, so
+     "← Back to Candidates" still returns to the list in one step after hopping
+     between profiles.
    - **Owner filter (team users)**: On the candidates list, a dropdown lets a team user choose whose candidates to view — their own (default), any other team member's, or all team candidates. An "Added By" column is shown for team users. Solo users see their own candidates with no dropdown.
    - **Status column**: A two-line "Status" column on the candidates list shows the row's owner label on top ("My Candidates" if owned by the current user, otherwise the owner's username) and the category label below (e.g. "In Progress"). This makes it obvious which rows came from the active filter vs. the secondary "all candidates" search results.
    - **Transfer between team members**: On the candidate detail page, team users see a "Transfer" button that opens a modal with a dropdown of other team members. Transferring reassigns the candidate's owner (`created_by`) so it appears in the new owner's list. Only the current candidate owner or the team owner can transfer; the target must be a member of the same team.

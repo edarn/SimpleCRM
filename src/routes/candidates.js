@@ -341,6 +341,22 @@ router.put('/:id', upload.single('resume'), (req, res) => {
   }
 });
 
+// PUT /api/candidates/:id/star - Star or unstar a candidate. Body: { starred: bool }
+router.put('/:id/star', (req, res) => {
+  try {
+    const starred = toBool(req.body && req.body.starred);
+    if (starred === undefined) {
+      return res.status(400).json({ error: 'starred is required' });
+    }
+    const result = data.setCandidateStarred(req.params.id, starred, req.session.userId);
+    if (result.error) return res.status(404).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    console.error('Error starring candidate:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/candidates/:id/transfer - Transfer candidate ownership to another team member
 router.post('/:id/transfer', (req, res) => {
   try {

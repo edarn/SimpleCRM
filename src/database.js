@@ -657,6 +657,11 @@ function migrateExistingData() {
   addColumnIfNotExists('candidates', 'subcontractor_company', "TEXT DEFAULT ''");
   addColumnIfNotExists('candidates', 'subcontractor_contact', "TEXT DEFAULT ''");
 
+  // Star: "this candidate is of high interest". A plain team-shared flag on the
+  // candidate (like category), not a per-user favourite — the whole team sees
+  // the same stars. 0 = not starred, 1 = starred.
+  addColumnIfNotExists('candidates', 'is_starred', 'INTEGER DEFAULT 0');
+
   // ---- Request-side matching job state -------------------------------------
   // Matching a request is a multi-minute AI job. It used to run inline on the
   // HTTP request, which meant the browser held an open POST for the duration —

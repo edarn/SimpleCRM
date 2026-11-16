@@ -1563,6 +1563,7 @@ function formatCandidateRow(row) {
     isSubcontractor: !!row.is_subcontractor,
     subcontractorCompany: row.subcontractor_company || '',
     subcontractorContact: row.subcontractor_contact || '',
+    isStarred: !!row.is_starred,
     resumeFilename: row.resume_filename,
     resumeOriginalName: row.resume_original_name,
     resumeText: row.resume_text || '',
@@ -1941,7 +1942,13 @@ function mergeCandidates(survivorId, duplicateIds, userId) {
   }
   if (ids.length === 0) return { error: 'Nothing to merge' };
 
+  // A star on any of the duplicates must not vanish with it.
+  const anyStarred = ids.some(id => getCandidateById(id, userId)?.isStarred);
+
   const moved = mergeCandidatesTx(survivorId, ids, userId, teamId);
+  if (anyStarred) {
+    db.prepare('UPDATE candidates SET is_starred = 1 WHERE id = ?').run(survivorId);
+  }
 
   createCandidateComment(
     survivorId,
@@ -2016,6 +2023,16 @@ function updateCandidate(candidateId, { name, email, phone, role, skills, catego
   );
 
   return getCandidateById(candidateId, userId);
+}
+
+// Star / unstar a candidate. Team-shared flag; anyone who can see the
+// candidate can toggle it. Deliberately leaves updated_at alone — starring is
+// a marker, not an edit of the profile.
+function setCandidateStarred(candidateId, starred, userId) {
+  const candidate = getCandidateById(candidateId, userId);
+  if (!candidate) return { error: 'Candidate not found' };
+  db.prepare('UPDATE candidates SET is_starred = ? WHERE id = ?').run(starred ? 1 : 0, candidateId);
+  return { success: true, isStarred: !!starred };
 }
 
 function transferCandidate(candidateId, newOwnerId, userId) {
@@ -3251,6 +3268,7 @@ module.exports = {
   createCandidate,
   updateCandidate,
   transferCandidate,
+  setCandidateStarred,
   deleteCandidate,
   createCandidateComment,
   updateCandidateComment,

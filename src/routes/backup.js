@@ -104,12 +104,12 @@ function importBackupData(importData, userId, teamId) {
     const newId = data.generateId();
     candidateIdMap.set(c.id, newId);
     db.prepare(`
-      INSERT INTO candidates (id, name, email, phone, role, skills, category, is_subcontractor, subcontractor_company, subcontractor_contact,
+      INSERT INTO candidates (id, name, email, phone, role, skills, category, is_subcontractor, subcontractor_company, subcontractor_contact, is_starred,
                               resume_filename, resume_original_name, resume_text, resume_text_status, profile_json, profile_status, skill_tags,
                               team_id, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(newId, c.name, c.email || '', c.phone || '', c.role || '', c.skills || '', c.category || 'in_progress',
-      c.is_subcontractor ? 1 : 0, c.subcontractor_company || '', c.subcontractor_contact || '',
+      c.is_subcontractor ? 1 : 0, c.subcontractor_company || '', c.subcontractor_contact || '', c.is_starred ? 1 : 0,
       c.resume_filename || '', c.resume_original_name || '', c.resume_text || '', c.resume_text_status || null,
       c.profile_json || null, c.profile_status || null, c.skill_tags || null,
       teamId, author(c.created_by), c.created_at || now, now);

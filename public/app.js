@@ -3384,7 +3384,7 @@ const views = {
     // markup is rebuilt from scratch on every render, so coming back from a
     // candidate (or switching owner) would otherwise clear both.
     if (this._candidateListState === undefined) {
-      this._candidateListState = { query: '', category: 'in_progress' };
+      this._candidateListState = { query: '', category: 'in_progress', starredOnly: false };
     }
     const listState = this._candidateListState;
 
@@ -3451,6 +3451,12 @@ const views = {
             `<option value="${key}" ${key === listState.category ? 'selected' : ''}>${label}</option>`
           ).join('')}
         </select>
+        <button type="button" id="candidate-starred-filter" onclick="views.toggleStarredFilter()"
+                aria-pressed="${listState.starredOnly ? 'true' : 'false'}" title="Visa bara stjärnmärkta kandidater"
+                class="${this._starredFilterClass(listState.starredOnly)}">
+          ${this._starSvg(listState.starredOnly, 'w-4 h-4')}
+          <span>Starred</span>
+        </button>
       </div>
 
       <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
@@ -3493,6 +3499,7 @@ const views = {
     `;
 
     this._candidates = candidates;
+    this._candidateQuickPool = null; // the detail page's quick search uses this fresh list
     // The chosen sort survives a re-render (Back, switching owner).
     const sort = this._candidateSortState || { field: 'name', asc: true };
     this._applyCandidateSort(sort.field, sort.asc);
@@ -4130,6 +4137,75 @@ const views = {
     if (tbody && this._candidates) this.filterCandidates();
   },
 
+  // ---- Star ("high interest") ------------------------------------------------
+  // A team-shared flag on the candidate. Clickable in the list (without opening
+  // the row) and in the detail header; every rendered star for the same
+  // candidate carries data-star-for so a toggle can repaint them all.
+  _starSvg(filled, cls = 'w-5 h-5') {
+    return `<svg class="${cls}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+      <path stroke-linejoin="round" d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z"/>
+    </svg>`;
+  },
+
+  _starButton(c, size = 'w-5 h-5') {
+    const on = !!c.isStarred;
+    return `<button type="button" data-star-for="${c.id}" data-star-size="${size}"
+        onclick="event.stopPropagation(); views.toggleCandidateStar('${c.id}')"
+        title="${on ? 'Ta bort stjärna' : 'Stjärnmärk — hög prioritet'}" aria-pressed="${on}"
+        class="flex-shrink-0 ${on ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'} transition-colors">
+      ${this._starSvg(on, size)}
+    </button>`;
+  },
+
+  _starredFilterClass(on) {
+    return 'inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border rounded-lg transition-colors whitespace-nowrap font-medium text-sm '
+      + (on ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50');
+  },
+
+  // Every candidate object the client holds for this id (list, quick-search
+  // pool, open detail page) so they all agree after a toggle.
+  _candidateCopies(id) {
+    const out = [];
+    for (const arr of [this._candidates, this._candidateQuickPool]) {
+      for (const c of arr || []) if (c.id === id) out.push(c);
+    }
+    if (this._currentCandidate?.id === id) out.push(this._currentCandidate);
+    return out;
+  },
+
+  async toggleCandidateStar(id) {
+    const copies = this._candidateCopies(id);
+    const next = !(copies[0]?.isStarred);
+    try {
+      await api.put(`/api/candidates/${id}/star`, { starred: next });
+    } catch (err) {
+      alert('Kunde inte uppdatera stjärnan: ' + err.message);
+      return;
+    }
+    copies.forEach(c => { c.isStarred = next; });
+    // With the Starred filter on, an unstarred row has to leave the list.
+    if (this._candidateListState?.starredOnly && document.getElementById('candidates-table')) {
+      this.filterCandidates();
+      return;
+    }
+    document.querySelectorAll(`[data-star-for="${id}"]`).forEach(btn => {
+      btn.outerHTML = this._starButton({ id, isStarred: next }, btn.dataset.starSize);
+    });
+  },
+
+  toggleStarredFilter() {
+    const st = this._candidateListState || {};
+    st.starredOnly = !st.starredOnly;
+    this._candidateListState = st;
+    const btn = document.getElementById('candidate-starred-filter');
+    if (btn) {
+      btn.className = this._starredFilterClass(st.starredOnly);
+      btn.setAttribute('aria-pressed', String(st.starredOnly));
+      btn.querySelector('svg').outerHTML = this._starSvg(st.starredOnly, 'w-4 h-4');
+    }
+    this.filterCandidates();
+  },
+
   renderCandidateRows(candidates, { isNew = false } = {}) {
     const categoryLabels = this._candidateCategories;
     const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
@@ -4147,6 +4223,7 @@ const views = {
       <tr class="hover:bg-rose-50/50 cursor-pointer transition-colors" data-candidate-id="${c.id}" onclick="router.navigate('candidate-detail', {id: '${c.id}'})">
         <td class="px-6 py-3">
           <div class="flex items-center gap-2 flex-wrap">
+            ${this._starButton(c)}
             <span class="font-medium text-slate-800">${this.escapeHtml(c.name)}</span>
             ${isNew ? '<span class="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full tracking-wide">NY</span>' : ''}
             ${this._subcontractorBadge(c)}
@@ -4207,7 +4284,8 @@ const views = {
     const rawQuery = document.getElementById('candidate-search-input').value;
     const categoryFilter = document.getElementById('candidate-category-filter').value;
     // Remember the choice so the next render of this list can restore it.
-    this._candidateListState = { query: rawQuery, category: categoryFilter };
+    const starredOnly = !!this._candidateListState?.starredOnly;
+    this._candidateListState = { query: rawQuery, category: categoryFilter, starredOnly };
     const query = rawQuery.toLowerCase();
     const ownerFilter = this._candidateOwnerFilter; // user id, 'all', or ''
     const all = this._candidates || [];
@@ -4216,16 +4294,18 @@ const views = {
       !ownerFilter || ownerFilter === 'all' || c.createdBy === ownerFilter;
     const matchesCategory = c =>
       !categoryFilter || c.category === categoryFilter;
+    const matchesStar = c => !starredOnly || c.isStarred;
 
     const primary = all.filter(c =>
       matchesOwner(c) &&
       matchesCategory(c) &&
+      matchesStar(c) &&
       (!query || this._candidateMatchesQuery(c, query))
     );
 
     let secondary = [];
     if (query) {
-      const filterIsAll = (!ownerFilter || ownerFilter === 'all') && !categoryFilter;
+      const filterIsAll = (!ownerFilter || ownerFilter === 'all') && !categoryFilter && !starredOnly;
       if (!filterIsAll) {
         const primaryIds = new Set(primary.map(c => c.id));
         secondary = all.filter(c =>
@@ -4238,7 +4318,8 @@ const views = {
     // category filter says (a new CV must not hide behind a filter). Not when
     // looking at another member's candidates.
     let recent = [];
-    if (!query && (!ownerFilter || ownerFilter === 'all' || ownerFilter === auth.currentUser?.id)) {
+    // The "Starred" filter is an explicit ask for starred only, so no new-CV section then.
+    if (!query && !starredOnly && (!ownerFilter || ownerFilter === 'all' || ownerFilter === auth.currentUser?.id)) {
       const now = Date.now();
       recent = all.filter(c => this._isNewForMe(c, now));
     }
@@ -4355,6 +4436,108 @@ const views = {
     return Number.isFinite(t) && now - t < this._NEW_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
   },
 
+  // ---- Quick search on the candidate detail page ----------------------------
+  // Jump straight to another candidate without going back to the list. The
+  // jump REPLACES the current history entry, so "← Back to Candidates" still
+  // takes you to the list in one step however many profiles you hop through.
+  // Searches the same broad pool as the list (all team candidates).
+  async _loadCandidateQuickPool() {
+    if (this._candidateQuickPool) return this._candidateQuickPool;
+    if (this._candidates?.length) return (this._candidateQuickPool = this._candidates);
+    if (!this._candidateQuickPoolPromise) {
+      const hasTeam = auth.currentUser?.role === 'owner' || auth.currentUser?.role === 'member';
+      this._candidateQuickPoolPromise = api.get(`/api/candidates${hasTeam ? '?createdBy=all' : ''}`)
+        .then(list => (this._candidateQuickPool = list))
+        .finally(() => { this._candidateQuickPoolPromise = null; });
+    }
+    return this._candidateQuickPoolPromise;
+  },
+
+  async candidateQuickSearch() {
+    const input = document.getElementById('candidate-quick-search');
+    const box = document.getElementById('candidate-quick-results');
+    if (!input || !box) return;
+    const query = input.value.trim().toLowerCase();
+    if (!query) { this._hideCandidateQuickResults(); return; }
+
+    let pool;
+    try { pool = await this._loadCandidateQuickPool(); } catch (_) { return; }
+    // The user may have typed on while the pool was loading.
+    if (input.value.trim().toLowerCase() !== query) return;
+
+    const currentId = this._currentCandidate?.id;
+    const rank = c => {
+      const n = (c.name || '').toLowerCase();
+      if (n.startsWith(query)) return 0;
+      if (n.split(/\s+/).some(w => w.startsWith(query))) return 1;
+      if (n.includes(query)) return 2;
+      return 3; // matched on role / skills / email / CV text
+    };
+    const hits = pool
+      .filter(c => c.id !== currentId && this._candidateMatchesQuery(c, query))
+      .map(c => ({ c, r: rank(c) }))
+      .sort((a, b) => a.r - b.r || (b.c.isStarred - a.c.isStarred) || (a.c.name || '').localeCompare(b.c.name || ''))
+      .slice(0, 10)
+      .map(x => x.c);
+
+    this._quickResults = hits;
+    if (!hits.length) {
+      box.innerHTML = '<div class="px-4 py-3 text-sm text-slate-500">Inga träffar</div>';
+    } else {
+      box.innerHTML = hits.map((c, i) => `
+        <div data-quick-idx="${i}" onmousedown="event.preventDefault(); views._openQuickResult(${i})"
+             class="px-3 py-2 cursor-pointer hover:bg-rose-50 border-b border-slate-100 last:border-0">
+          <div class="flex items-center gap-1.5">
+            ${c.isStarred ? `<span class="text-amber-400">${this._starSvg(true, 'w-3.5 h-3.5')}</span>` : ''}
+            <span class="text-sm font-medium text-slate-800 truncate">${this.escapeHtml(c.name)}</span>
+            ${c.category ? `<span class="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${this._categoryBadgeClass(c.category)}">${this.escapeHtml(this._candidateCategories[c.category] || c.category)}</span>` : ''}
+          </div>
+          ${c.role ? `<div class="text-xs text-slate-500 truncate">${this.escapeHtml(c.role)}</div>` : ''}
+        </div>`).join('');
+    }
+    box.classList.remove('hidden');
+    this._highlightQuickResult(0);
+  },
+
+  _highlightQuickResult(index) {
+    const rows = Array.from(document.querySelectorAll('#candidate-quick-results [data-quick-idx]'));
+    rows.forEach(r => r.classList.remove('bg-rose-100'));
+    if (!rows.length) { this._quickActiveIndex = -1; return; }
+    const i = Math.max(0, Math.min(index, rows.length - 1));
+    rows[i].classList.add('bg-rose-100');
+    rows[i].scrollIntoView({ block: 'nearest' });
+    this._quickActiveIndex = i;
+  },
+
+  candidateQuickSearchKey(event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this._highlightQuickResult((this._quickActiveIndex ?? -1) + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      this._highlightQuickResult((this._quickActiveIndex ?? 0) - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (this._quickResults?.length) this._openQuickResult(Math.max(0, this._quickActiveIndex ?? 0));
+    } else if (event.key === 'Escape') {
+      event.target.value = '';
+      this._hideCandidateQuickResults();
+      event.target.blur();
+    }
+  },
+
+  _openQuickResult(i) {
+    const c = this._quickResults?.[i];
+    if (!c) return;
+    this._hideCandidateQuickResults();
+    router.navigate('candidate-detail', { id: c.id }, { replace: true });
+  },
+
+  _hideCandidateQuickResults() {
+    const box = document.getElementById('candidate-quick-results');
+    if (box) box.classList.add('hidden');
+  },
+
   // Candidate Detail View
   async candidateDetail(container, id) {
     const [candidate, allTodos] = await Promise.all([
@@ -4366,16 +4549,26 @@ const views = {
     const fileCount = files.length;
 
     container.innerHTML = `
-      <div class="mb-6">
+      <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <a href="#" onclick="router.back('candidates'); return false;" class="text-rose-600 hover:text-rose-700 font-medium">
           ← Back to Candidates
         </a>
+        <div class="relative w-full sm:w-80">
+          <svg class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z"></path>
+          </svg>
+          <input type="text" id="candidate-quick-search" placeholder="Sök annan kandidat..." autocomplete="off"
+                 class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-colors bg-white"
+                 oninput="views.candidateQuickSearch()" onfocus="views.candidateQuickSearch()"
+                 onkeydown="views.candidateQuickSearchKey(event)" onblur="setTimeout(() => views._hideCandidateQuickResults(), 150)">
+          <div id="candidate-quick-results" class="hidden absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 max-h-96 overflow-y-auto"></div>
+        </div>
       </div>
 
       <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6 mb-6 border border-slate-200">
         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
           <div>
-            <h2 class="text-xl sm:text-2xl font-bold text-slate-800">${this.escapeHtml(candidate.name)}</h2>
+            <h2 class="text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-2">${this._starButton(candidate, 'w-6 h-6')}<span>${this.escapeHtml(candidate.name)}</span></h2>
             ${candidate.role ? `<p class="text-slate-600">${this.escapeHtml(candidate.role)}</p>` : ''}
             <div class="flex items-center gap-2 flex-wrap mt-1">
               ${candidate.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(candidate.category)}">${this.escapeHtml(this._candidateCategories[candidate.category] || candidate.category)}</span>` : ''}
