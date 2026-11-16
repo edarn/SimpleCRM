@@ -115,7 +115,10 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      button next to the category filter limits the list to starred candidates
      (combined with the owner and category filters; the "new CVs" section is
      hidden while it is on). Merging duplicates keeps the star if any merged
-     profile had it; backups export and restore it.
+     profile had it; backups export and restore it. In a request's matched
+     candidates list, a starred candidate also gets an amber "★ Stjärnmärkt"
+     badge next to the name (display only), separate from the per-request
+     match star that pins a candidate to the top of that request.
    - **Quick search on the candidate detail page**: a "Sök annan kandidat..."
      box at the top of the detail page, next to "← Back to Candidates". Typing
      shows a dropdown of up to 10 matches from all team candidates (same fields

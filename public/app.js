@@ -8744,6 +8744,8 @@ We're looking for a senior Java developer..."></textarea>
               <div class="flex items-center gap-2">
                 <a href="#" onclick="router.navigate('candidate-detail', {id: '${m.candidateId}'}); return false;"
                    class="font-medium text-violet-600 hover:text-violet-700">${this.escapeHtml(m.candidateName || 'Unknown')}</a>
+                ${m.candidateIsStarred ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                      title="Kandidaten är stjärnmärkt i kandidatlistan (hög prioritet generellt) — stjärnan till vänster gäller bara den här förfrågan">${this._starSvg(true, 'w-3 h-3')}Stjärnmärkt</span>` : ''}
                 ${m.candidateRole ? `<span class="text-sm text-slate-500">${this.escapeHtml(m.candidateRole)}</span>` : ''}
                 ${m.candidateCategory ? `<span class="text-xs px-2 py-0.5 rounded-full ${
                   m.candidateCategory === 'in_progress' ? 'bg-emerald-100 text-emerald-700' :
