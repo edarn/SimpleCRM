@@ -3709,9 +3709,11 @@ const views = {
         resultsEl.scrollTop = resultsEl.scrollHeight;
       } else if (evt.status === 'duplicate') {
         const byName = evt.matchedBy === 'name';
-        const label = byName
-          ? 'matchade på namn — ingen e-post i CV:t'
-          : 'matchade befintlig profil (e-post)';
+        const label = evt.matchedBy === 'file'
+          ? 'exakt samma CV fanns redan — ingen ny fil sparad'
+          : byName
+            ? 'matchade på namn — ingen e-post i CV:t'
+            : 'matchade befintlig profil (e-post)';
         statusEl.textContent = `Merged into existing: ${evt.name} (${evt.index + 1}/${evt.total})`;
         resultsEl.innerHTML += `<div class="flex items-center gap-2 py-1 text-sm ${byName ? 'bg-amber-50 rounded px-1' : ''}">
           <span class="${byName ? 'text-amber-500' : 'text-blue-500'}" title="${this.escapeHtml(label)}">${byName ? '&#9888;' : '&#8635;'}</span>

@@ -109,6 +109,7 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, startInb
     const ids = [];
     const summaries = [];
     const candidateIds = [];
+    const matchIds = [];
 
     for (const s of skipped) {
       types.push('skipped'); ids.push(''); summaries.push(`Hoppade över ${s.name}: ${s.error}`);
@@ -130,8 +131,11 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, startInb
           continue;
         }
         candidateIds.push(result.candidateId);
+        if (!result.unchanged) matchIds.push(result.candidateId);
         types.push('candidate'); ids.push(result.candidateId);
-        summaries.push(`${result.status === 'duplicate' ? 'Uppdaterad (fanns redan)' : 'Ny kandidat'}: ${result.name}${result.role ? ` — ${result.role}` : ''}`);
+        const label = result.unchanged ? 'Samma CV fanns redan (ingen ny fil)'
+          : result.status === 'duplicate' ? 'Uppdaterad (fanns redan)' : 'Ny kandidat';
+        summaries.push(`${label}: ${result.name}${result.role ? ` — ${result.role}` : ''}`);
       } catch (err) {
         console.error(`Inbound CV ${att.name} failed:`, err.message);
         types.push('skipped'); ids.push(''); summaries.push(`Kunde inte importera ${att.name}: ${err.message}`);
@@ -164,7 +168,7 @@ module.exports = function ({ importCvFile, matchCandidatesInBackground, startInb
       processedAt: new Date().toISOString(),
     });
 
-    if (candidateIds.length) matchCandidatesInBackground(candidateIds, userId);
+    if (matchIds.length) matchCandidatesInBackground(matchIds, userId);
   }
 
   // Not a CV mail: hand it to the AI inbox exactly as if it had been pasted.

@@ -1671,6 +1671,22 @@ function normalizeName(name) {
     .toLowerCase();
 }
 
+// Candidate files in scope with exactly this byte size, with their candidate.
+// The cheap first filter for "is this exact file already stored?" — the caller
+// then compares content on disk.
+function findCandidateFilesBySize(fileSize, userId) {
+  const teamId = getUserTeamId(userId);
+  const scope = teamId
+    ? { where: 'c.team_id = ?', arg: teamId }
+    : { where: 'c.created_by = ? AND c.team_id IS NULL', arg: userId };
+  return db.prepare(`
+    SELECT cf.id, cf.candidate_id, cf.filename, cf.original_name, c.name AS candidate_name, c.role AS candidate_role
+    FROM candidate_files cf
+    JOIN candidates c ON c.id = cf.candidate_id
+    WHERE ${scope.where} AND cf.file_size = ?
+  `).all(scope.arg, fileSize);
+}
+
 function findCandidateByEmail(email, userId, excludeId = null) {
   const normalized = normalizeEmail(email);
   if (!normalized) return null;
@@ -3269,6 +3285,7 @@ module.exports = {
   updateCandidate,
   transferCandidate,
   setCandidateStarred,
+  findCandidateFilesBySize,
   deleteCandidate,
   createCandidateComment,
   updateCandidateComment,

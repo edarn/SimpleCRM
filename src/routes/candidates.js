@@ -1070,6 +1070,28 @@ router.post('/backfill-profiles', async (req, res) => {
 // same dedup ladder. `file` is { path, filename, size, mimetype } of a file
 // already in uploadsDir; it is removed if rejected. Returns
 // { status: 'created' | 'duplicate' | 'skipped', ... }; throws on AI/DB errors.
+function sha256File(p) {
+  return require('crypto').createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+}
+
+// The stored candidate file (in scope) with byte-identical content to the
+// freshly uploaded `file`, or null. Size first, so only same-size files are
+// read and hashed; files missing on disk are simply not a match.
+function findStoredCopy(file, userId) {
+  if (!uploadsDir || !file.size) return null;
+  const sameSize = data.findCandidateFilesBySize(file.size, userId);
+  if (!sameSize.length) return null;
+  const want = sha256File(file.path);
+  for (const f of sameSize) {
+    const p = path.join(uploadsDir, f.filename);
+    if (p === file.path) continue;
+    try {
+      if (sha256File(p) === want) return f;
+    } catch (_) { /* missing on disk */ }
+  }
+  return null;
+}
+
 async function importCvFile(file, originalName, { category = 'in_progress', createdComment, onStage = () => {} }, userId) {
   const { extractTextFromFile } = require('../lib/resume-parser');
   // parseCVWithProfile, not parseCV: the same single AI call returns the
@@ -1082,6 +1104,18 @@ async function importCvFile(file, originalName, { category = 'in_progress', crea
   if (!validateFileMagic(file.path, ext)) {
     try { fs.unlinkSync(file.path); } catch (_) {}
     return { status: 'skipped', error: 'File content does not match its extension' };
+  }
+
+  // Exactly this file already on a profile? Then there is nothing new: no
+  // second copy of the same CV, no AI call, no "CV uppdaterat" comment.
+  // Re-importing a batch used to stack identical files on every profile.
+  const sameFile = findStoredCopy(file, userId);
+  if (sameFile) {
+    try { fs.unlinkSync(file.path); } catch (_) {}
+    return {
+      status: 'duplicate', matchedBy: 'file', unchanged: true,
+      candidateId: sameFile.candidate_id, name: sameFile.candidate_name, role: sameFile.candidate_role || ''
+    };
   }
 
   onStage('extracting');
@@ -1263,6 +1297,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   let noEmail = 0;    // created with no email whatsoever
   let ambiguous = 0;  // created despite an existing candidate with the same name
   const createdIds = [];
+  const matchIds = [];
 
   for (let i = 0; i < req.files.length; i++) {
     const file = req.files[i];
@@ -1279,7 +1314,8 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
         sendEvent({ ...progress, status: 'skipped', error: result.error });
         continue;
       }
-      createdIds.push(result.candidateId); // merged ones are re-matched too
+      createdIds.push(result.candidateId); // merged ones go to the pipeline too
+      if (!result.unchanged) matchIds.push(result.candidateId); // an identical CV changes no match
       if (result.status === 'duplicate') {
         merged++;
         sendEvent({ ...progress, status: 'duplicate', matchedBy: result.matchedBy, candidateId: result.candidateId, name: result.name, role: result.role });
@@ -1313,7 +1349,7 @@ router.post('/import-cvs', upload.array('cvFiles', 50), async (req, res) => {
   sendEvent({ type: 'done', created, merged, failed, total, noEmail, ambiguous, pipelineAdded });
   res.end();
 
-  matchCandidatesInBackground(createdIds, userId);
+  matchCandidatesInBackground(matchIds, userId);
 });
 
 // Background: match each imported candidate against open requests, run

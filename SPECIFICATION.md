@@ -550,6 +550,15 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      open requests. The progress UI shows these as "merged" and the summary
      reports `N created, M merged`.
 
+     **Identical file first**: before any text extraction or AI call, the
+     upload is compared byte-for-byte (size, then SHA-256 of the files on disk)
+     with the candidate files already in scope. If the exact same file is
+     already stored, nothing is added — no second copy, no comment, no
+     re-match — the upload is discarded and the progress row says "exakt samma
+     CV fanns redan — ingen ny fil sparad" (`matchedBy: 'file'`, counted as
+     merged). The same applies to CVs forwarded by email. A *different* file
+     for a known person still goes through the ladder below and is attached.
+
      The check is a ladder, applied per CV:
 
      | Situation | Outcome |
