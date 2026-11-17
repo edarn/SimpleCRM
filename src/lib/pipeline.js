@@ -43,6 +43,15 @@ const TEAMS = [
   'Data Engineer',
 ];
 
+// Consultancies a candidate from our flow can end up placed through instead
+// of us. Stored on the row as the display name; anything else is cleared.
+const COMPETITORS = ['Afry', 'Emagine'];
+
+function normalizeCompetitor(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return COMPETITORS.find((c) => c.toLowerCase() === v) || '';
+}
+
 // Per-step wording. Generic "not started / in progress" reads badly on a
 // screen full of different steps, so each one gets its own verbs.
 const STEP_STATUS_LABELS = {
@@ -223,9 +232,14 @@ function deriveRow(row, candidate, now = new Date()) {
 
   const lastKey = STEP_KEYS[STEP_KEYS.length - 1];
   const done = !rejected && steps[lastKey].status === 'passed';
-  const outcome = rejected ? 'rejected' : done ? 'done' : 'active';
+  // Placed via a competitor trumps the steps: whatever they say, the row is
+  // finished — at the client, just not through us.
+  const placedVia = normalizeCompetitor(row.placedVia);
+  const outcome = placedVia ? 'competitor' : rejected ? 'rejected' : done ? 'done' : 'active';
 
-  const action = nextAction({ steps, rejected, failedIndex, done, row, label, isSub, now });
+  const action = placedVia
+    ? { kind: 'closed', label: `Tillsatt via ${placedVia}`, days: 0 }
+    : nextAction({ steps, rejected, failedIndex, done, row, label, isSub, now });
 
   return {
     client,
@@ -234,6 +248,7 @@ function deriveRow(row, candidate, now = new Date()) {
     stepLabels: stepsFor(client, isSub),
     isSubcontractor: isSub,
     outcome,
+    placedVia,
     progress,
     failedStep: rejected ? STEP_KEYS[failedIndex] : null,
     // Cells after a rejection are not "to do", they are not applicable.
@@ -309,8 +324,9 @@ function formatDate(value) {
   return `${d.getUTCDate()} ${MONTHS_SV[d.getUTCMonth()]}`;
 }
 
-// Klara överst, pågående därefter (längst i processen högst), avslag sist.
-const OUTCOME_RANK = { done: 0, active: 1, rejected: 2 };
+// Klara överst, sedan tillsatta via konkurrent, pågående därefter (längst i
+// processen högst), avslag sist.
+const OUTCOME_RANK = { done: 0, competitor: 1, active: 2, rejected: 3 };
 
 function teamRank(team) {
   const i = TEAMS.indexOf(team || '');
@@ -335,6 +351,11 @@ function compareRows(a, b) {
     if (a.startDate && b.startDate && a.startDate !== b.startDate) {
       return a.startDate < b.startDate ? -1 : 1;
     }
+  } else if (a.outcome === 'competitor') {
+    // One block per competitor, in COMPETITORS order; then by name below.
+    const ca = COMPETITORS.indexOf(a.placedVia);
+    const cb = COMPETITORS.indexOf(b.placedVia);
+    if (ca !== cb) return ca - cb;
   } else if (a.outcome === 'active') {
     if (a.progress !== b.progress) return b.progress - a.progress;
     // Same depth: the one that has been sitting longest floats up.
@@ -363,6 +384,7 @@ function summarize(rows) {
     active: activeRows.length,
     done: rows.filter((r) => r.outcome === 'done').length,
     rejected: rows.filter((r) => r.outcome === 'rejected').length,
+    competitor: rows.filter((r) => r.outcome === 'competitor').length,
     needsAction: activeRows.filter((r) => r.nextAction.kind === 'mine' || r.waitingDays > 0).length,
     awaitingFeedback: rows.filter((r) => r.outcome === 'rejected' && r.nextAction.kind === 'mine').length,
     employment: rows.filter((r) => !r.isSubcontractor).length,
@@ -383,6 +405,8 @@ module.exports = {
   STEP_KEYS,
   STATUSES,
   TEAMS,
+  COMPETITORS,
+  normalizeCompetitor,
   STEP_STATUS_LABELS,
   SUB_STEP_STATUS_LABELS,
   GENERIC_STATUS_LABELS,

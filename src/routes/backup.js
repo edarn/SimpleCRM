@@ -259,12 +259,13 @@ function importBackupData(importData, userId, teamId) {
     let steps = {};
     try { steps = JSON.parse(pr.steps_json || '{}'); } catch (_) { steps = {}; }
     const result = db.prepare(`
-      INSERT INTO client_pipeline (id, client, candidate_id, team, steps_json, feedback_status, feedback_date, start_date, ended_at, note, team_id, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO client_pipeline (id, client, candidate_id, team, steps_json, feedback_status, feedback_date, start_date, ended_at, note, placed_via, team_id, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(client, candidate_id) DO NOTHING
     `).run(data.generateId(), pipelineLib.normalizeClient(pr.client), newCandidateId, pipelineLib.normalizeTeam(pr.team),
       JSON.stringify(pipelineLib.normalizeSteps(steps)), pr.feedback_status === 'done' ? 'done' : 'pending',
       pr.feedback_date || '', pr.start_date || '', pr.ended_at || null, pr.note || '',
+      pipelineLib.normalizeCompetitor(pr.placed_via),
       teamId, author(pr.created_by), pr.created_at || now, now);
     if (result.changes) bump('clientPipeline');
   }

@@ -29,6 +29,7 @@ router.get('/:client', (req, res) => {
       client,
       clientLabel: pipeline.clientLabel(client),
       teams: pipeline.TEAMS,
+      competitors: pipeline.COMPETITORS,
       steps: pipeline.stepsFor(client, false),
       stepsSubcontractor: pipeline.stepsFor(client, true),
       // Shipped so the browser never has to keep its own copy of the wording.
@@ -121,7 +122,7 @@ router.patch('/:client/rows/:id', (req, res) => {
   try {
     const body = req.body || {};
     const patch = {};
-    for (const key of ['team', 'startDate', 'note', 'endedAt', 'feedbackStatus', 'feedbackDate']) {
+    for (const key of ['team', 'startDate', 'note', 'endedAt', 'feedbackStatus', 'feedbackDate', 'placedVia']) {
       if (body[key] !== undefined) patch[key] = body[key];
     }
     const result = data.updatePipelineRow(req.params.id, patch, req.session.userId);

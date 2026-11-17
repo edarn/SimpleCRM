@@ -933,6 +933,20 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      sist and faintly red. Section headers are inserted where the outcome
      changes. Klara are ordered by team (in the team list's order, no team
      last), then missing start date first, then soonest start.
+   - **Tillsatta via konkurrent**: a candidate from our flow can end up placed
+     at the client through a competitor (Afry or Emagine — `COMPETITORS` in
+     `src/lib/pipeline.js`) instead of us. Set per row with "Tillsatt via
+     konkurrent" (Nej / Afry / Emagine) in the step dialog, or "Via konkurrent"
+     next to the team on the candidate page's Apple section; stored as
+     `client_pipeline.placed_via` (unknown names are cleared) and sent via
+     `PATCH …/rows/:id { placedVia }`. When set it overrides the steps: the
+     outcome is `competitor`, the next action reads "Tillsatt via Afry", and
+     the row sorts in its own section **TILLSATTA VIA KONKURRENT** between
+     Klara and Pågående (grouped by competitor, then name). Those rows are
+     faded (full opacity on hover) and carry a grey "VIA AFRY" badge. A "Via
+     konkurrent N" filter chip appears when there are any. They do not count
+     as our placements (not in "tillsatta" or Klara & startande). Backups
+     export and restore the field.
    - **Layout**: the Apple route widens the page (max 1680px, slimmer side
      margins) so *Nästa åtgärd* gets the room; in the matrix the comment sits
      beside the status rather than under it, keeping rows low. The list (in

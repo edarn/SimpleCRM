@@ -2405,6 +2405,7 @@ function formatPipelineRow(row) {
     startDate: row.start_date || '',
     endedAt: row.ended_at || null,
     note: row.note || '',
+    placedVia: row.placed_via || '',
     createdBy: row.created_by,
     createdByUsername: row.created_by_username || null,
     createdAt: row.created_at,
@@ -2541,6 +2542,10 @@ function updatePipelineRow(id, patch, userId) {
   if (patch.note !== undefined) {
     fields.push('note = ?');
     args.push(String(patch.note || '').slice(0, 2000));
+  }
+  if (patch.placedVia !== undefined) {
+    fields.push('placed_via = ?');
+    args.push(pipelineLib.normalizeCompetitor(patch.placedVia));
   }
   if (patch.endedAt !== undefined) {
     fields.push('ended_at = ?');

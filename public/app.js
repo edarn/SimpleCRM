@@ -5130,6 +5130,7 @@ const views = {
 
   _APPLE_OUTCOMES: {
     done: { label: 'KLARA', cls: 'bg-emerald-50 text-emerald-700' },
+    competitor: { label: 'TILLSATTA VIA KONKURRENT', cls: 'bg-slate-50 text-slate-500' },
     active: { label: 'PÅGÅENDE', cls: 'bg-white text-slate-700' },
     rejected: { label: 'AVSLAG', cls: 'bg-red-50 text-red-800' },
   },
@@ -5208,6 +5209,7 @@ const views = {
       if (s.filter === 'feedback' && !(r.outcome === 'rejected' && r.nextAction.kind === 'mine')) return false;
       if (s.filter === 'done' && r.outcome !== 'done') return false;
       if (s.filter === 'rejected' && r.outcome !== 'rejected') return false;
+      if (s.filter === 'competitor' && r.outcome !== 'competitor') return false;
       if (s.team && r.team !== s.team) return false;
       if (s.form === 'employment' && r.isSubcontractor) return false;
       if (s.form === 'subcontractor' && !r.isSubcontractor) return false;
@@ -5274,6 +5276,7 @@ const views = {
           ${chip('feedback', 'Att återkoppla', sum.awaitingFeedback, 'warn')}
           ${chip('done', 'Klara', sum.done)}
           ${chip('rejected', 'Avslag', sum.rejected)}
+          ${sum.competitor ? chip('competitor', 'Via konkurrent', sum.competitor) : ''}
         </div>
         <div class="flex gap-2 flex-wrap">
           <select onchange="views.changeAppleFacet('form', this.value)"
@@ -5347,14 +5350,18 @@ const views = {
       : r.outcome === 'active' && (r.nextAction.kind === 'mine' || r.waitingDays > 0) ? 'bg-amber-50/40'
       : r.outcome === 'done' ? this._appleTeamTone(r.team)
       : '';
-    const dim = r.outcome === 'rejected' ? 'text-slate-500' : 'text-slate-800';
+    const dim = r.outcome === 'rejected' || r.outcome === 'competitor' ? 'text-slate-500' : 'text-slate-800';
+    // Placed through a competitor: kept visible for the record, but faded so
+    // it does not compete with our own placements and the active work.
+    const fade = r.outcome === 'competitor' ? 'opacity-60 hover:opacity-100 transition-opacity' : '';
 
     return `
-      <div data-row-id="${r.id}" class="grid items-center px-5 py-1.5 border-b border-slate-100 ${tone}" style="${this._APPLE_GRID}">
+      <div data-row-id="${r.id}" class="grid items-center px-5 py-1.5 border-b border-slate-100 ${tone} ${fade}" style="${this._APPLE_GRID}">
         <div class="pr-3 min-w-0">
           <div class="flex items-center gap-2 min-w-0">
             <a href="#" onclick="router.navigate('candidate-detail', {id: '${r.candidateId}'}); return false;"
                class="text-sm font-semibold ${dim} hover:text-rose-600 truncate">${this.escapeHtml(r.candidateName)}</a>
+            ${this._applePlacedViaBadge(r)}
             ${this._appleFormBadge(r.isSubcontractor)}
           </div>
           <div class="text-xs mt-0.5 truncate">
@@ -5382,6 +5389,21 @@ const views = {
 
   _appleTeamTone(team) {
     return this._APPLE_TEAM_TONES[team] || '';
+  },
+
+  _applePlacedViaBadge(r) {
+    return r.placedVia
+      ? `<span class="shrink-0 text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full" title="Tillsatt hos ${this.escapeHtml(r.clientLabel || 'kunden')} via ${this.escapeHtml(r.placedVia)}">VIA ${this.escapeHtml(r.placedVia.toUpperCase())}</span>`
+      : '';
+  },
+
+  // Dropdown for "placed via a competitor". `onchange` is the handler call.
+  _applePlacedViaSelect(row, attrs, cls) {
+    const list = (this._appleBoard && this._appleBoard.competitors) || ['Afry', 'Emagine'];
+    return `<select ${attrs} class="${cls}">
+      <option value="" ${!row.placedVia ? 'selected' : ''}>Nej</option>
+      ${list.map((c) => `<option value="${this.escapeHtml(c)}" ${row.placedVia === c ? 'selected' : ''}>${this.escapeHtml(c)}</option>`).join('')}
+    </select>`;
   },
 
   _appleFormBadge(isSubcontractor) {
@@ -5671,6 +5693,12 @@ const views = {
         <p class="text-xs text-red-900 mt-2 leading-relaxed">Resten av stegen blir inte aktuella och raden hamnar under <strong>Avslag</strong>. Tills rutan är ikryssad står <strong>Återkoppla till kandidaten</strong> som nästa åtgärd.</p>
       </div>
 
+      <div class="flex items-center gap-3 border-t border-slate-100 pt-3 mb-4">
+        <label for="apple-placed-via" class="text-xs font-medium text-slate-600">Tillsatt hos ${this.escapeHtml(row.clientLabel || 'kunden')} via konkurrent</label>
+        ${this._applePlacedViaSelect(row, 'id="apple-placed-via"', 'px-2 py-1 border border-slate-300 rounded-md text-sm bg-white text-slate-700')}
+        <span class="text-[11px] text-slate-400">Raden hamnar då under "Tillsatta via konkurrent".</span>
+      </div>
+
       <div class="flex justify-between items-center gap-2">
         <button onclick="views.removeFromApple('${rowId}')" class="text-[13px] text-red-600 hover:text-red-700">Ta bort ur flödet</button>
         <span class="flex gap-2">
@@ -5694,9 +5722,14 @@ const views = {
     const date = document.getElementById('apple-step-date').value;
     const note = document.getElementById('apple-step-note').value;
     const feedback = document.getElementById('apple-feedback');
+    const placedViaEl = document.getElementById('apple-placed-via');
+    const row = ((this._appleBoard && this._appleBoard.rows) || []).find((r) => r.id === rowId);
     const client = this._appleState.client;
     try {
       await api.put(`/api/pipeline/${client}/rows/${rowId}/steps/${stepKey}`, { status, date, note });
+      if (placedViaEl && row && placedViaEl.value !== (row.placedVia || '')) {
+        await api.patch(`/api/pipeline/${client}/rows/${rowId}`, { placedVia: placedViaEl.value });
+      }
       // The step write resets the feedback flag whenever the row is no longer
       // rejected, so this only ever runs on a row that still is.
       if (status === 'failed' && feedback) {
@@ -5932,6 +5965,8 @@ const views = {
                 <option value="" ${!row.team ? 'selected' : ''}>Utan team</option>
                 ${teams.map((t) => `<option value="${this.escapeHtml(t)}" ${row.team === t ? 'selected' : ''}>${this.escapeHtml(t)}</option>`).join('')}
               </select>
+              · Via konkurrent
+              ${this._applePlacedViaSelect(row, `onchange="views.setAppleRowPlacedVia('${row.id}', this.value)"`, 'ml-1 px-2 py-1 border border-slate-300 rounded text-xs bg-white text-slate-700')}
               · tillagd ${new Date(row.createdAt).toLocaleDateString('sv-SE')}${row.createdByUsername ? ' av ' + this.escapeHtml(row.createdByUsername) : ''}
             </p>
           </div>
@@ -5977,6 +6012,15 @@ const views = {
       await this.reloadAppleBoard(rowId);
     } catch (err) {
       alert('Kunde inte byta team: ' + (err.message || err));
+    }
+  },
+
+  async setAppleRowPlacedVia(rowId, placedVia) {
+    try {
+      await api.patch(`/api/pipeline/${this._appleState.client}/rows/${rowId}`, { placedVia });
+      await this.reloadAppleBoard(rowId);
+    } catch (err) {
+      alert('Kunde inte spara: ' + (err.message || err));
     }
   },
 

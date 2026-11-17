@@ -487,6 +487,10 @@ function migrateExistingData() {
   } catch (err) {
     console.log('client_pipeline index error:', err.message);
   }
+  // Placed at the client, but through a competitor (Afry, Emagine) rather
+  // than us. '' = no. When set it overrides whatever the steps say: the row
+  // is finished, just not ours. See COMPETITORS in src/lib/pipeline.js.
+  addColumnIfNotExists('client_pipeline', 'placed_via', "TEXT DEFAULT ''");
 
   try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_candidate_offers_candidate_id ON candidate_offers(candidate_id)`);
