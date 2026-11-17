@@ -73,8 +73,12 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      Ticking it reveals two free-text fields, **Konsultbolag** and
      **Kontaktperson på bolaget** (`subcontractor_company` /
      `subcontractor_contact`, max 300 chars). They are kept if the box is
-     unticked, shown on the detail page for subcontractors, searchable from the
-     candidates list, and the company replaces the profile role in the Apple view.
+     unticked, searchable from the candidates list, and the company replaces
+     the profile role in the Apple view. The checkbox and both fields are also
+     **editable directly on the candidate detail page** (an Underkonsult box
+     under the contact details, shown for every candidate): the checkbox saves
+     at once and updates the header badge, the text fields autosave after a
+     pause in typing or on leaving the field — only the touched field is sent.
    - **Edit Candidate autosaves** — there is no Save button when editing. Text
      fields save after a pause in typing (and on leaving the field), checkbox,
      category and file save at once; a status line says Sparar… / Sparat ✓ or

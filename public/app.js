@@ -4540,6 +4540,86 @@ const views = {
     if (box) box.classList.add('hidden');
   },
 
+  // ---- Underkonsult, editable right on the detail page ----------------------
+  // Same fields as in Edit Candidate, saved the same way (only the touched
+  // field is sent): the checkbox at once, the text fields after a pause in
+  // typing or when leaving the field.
+  _candidateSubcontractorBox(c) {
+    const field = (key, id, label, value, placeholder) => `
+      <div>
+        <label for="${id}" class="block text-xs font-medium text-slate-500 mb-1">${label}</label>
+        <input type="text" id="${id}" maxlength="300" value="${this.escapeHtml(value || '')}" placeholder="${placeholder}"
+               oninput="views.candidateSubEdited('${c.id}', '${key}', this.value)"
+               onblur="views.flushCandidateSubSave()"
+               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors">
+      </div>`;
+    return `
+        <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+          <div class="flex items-center justify-between gap-3">
+            <label class="flex items-center gap-2.5 cursor-pointer">
+              <input type="checkbox" id="detail-subcontractor" ${c.isSubcontractor ? 'checked' : ''}
+                     onchange="views.toggleCandidateSubcontractor('${c.id}', this.checked)"
+                     class="h-4 w-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+              <span class="text-sm font-medium text-slate-700">Underkonsult</span>
+              <span class="text-xs text-slate-400 hidden sm:inline">— anlitas via eget bolag eller underleverantör</span>
+            </label>
+            <span id="detail-sub-status" class="text-xs text-slate-400" aria-live="polite"></span>
+          </div>
+          <div id="detail-sub-fields" class="${c.isSubcontractor ? '' : 'hidden'} grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            ${field('subcontractorCompany', 'detail-sub-company', 'Konsultbolag', c.subcontractorCompany, 't.ex. Acme Consulting AB')}
+            ${field('subcontractorContact', 'detail-sub-contact', 'Kontaktperson på bolaget', c.subcontractorContact, 'Namn, e-post eller telefon')}
+          </div>
+        </div>`;
+  },
+
+  _candSubSave: { candidateId: null, pending: {}, timer: null, chain: Promise.resolve() },
+
+  toggleCandidateSubcontractor(candidateId, checked) {
+    document.getElementById('detail-sub-fields')?.classList.toggle('hidden', !checked);
+    if (this._currentCandidate?.id === candidateId) this._currentCandidate.isSubcontractor = checked;
+    const badge = document.getElementById('candidate-sub-badge');
+    if (badge) badge.innerHTML = this._subcontractorBadge({ isSubcontractor: checked }, 'py-1');
+    this.candidateSubEdited(candidateId, 'isSubcontractor', checked, true);
+  },
+
+  candidateSubEdited(candidateId, key, value, immediate = false) {
+    const st = this._candSubSave;
+    if (st.candidateId && st.candidateId !== candidateId) this.flushCandidateSubSave();
+    st.candidateId = candidateId;
+    st.pending[key] = value;
+    if (this._currentCandidate?.id === candidateId) this._currentCandidate[key] = value;
+    clearTimeout(st.timer);
+    if (!immediate) this._setSubStatus('Ändrat…', 'text-slate-400');
+    st.timer = setTimeout(() => this.flushCandidateSubSave(), immediate ? 0 : 800);
+  },
+
+  flushCandidateSubSave() {
+    const st = this._candSubSave;
+    clearTimeout(st.timer);
+    st.timer = null;
+    const fields = st.pending;
+    const candidateId = st.candidateId;
+    if (!candidateId || !Object.keys(fields).length) return st.chain;
+    st.pending = {};
+    st.chain = st.chain.then(async () => {
+      this._setSubStatus('Sparar…', 'text-slate-400');
+      try {
+        await api.put(`/api/candidates/${candidateId}`, fields);
+        this._setSubStatus('Sparat ✓', 'text-emerald-600');
+      } catch (err) {
+        this._setSubStatus('Kunde inte spara: ' + (err.message || err), 'text-red-600');
+      }
+    });
+    return st.chain;
+  },
+
+  _setSubStatus(text, cls) {
+    const el = document.getElementById('detail-sub-status');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'text-xs ' + cls;
+  },
+
   // Candidate Detail View
   async candidateDetail(container, id) {
     const [candidate, allTodos] = await Promise.all([
@@ -4574,7 +4654,7 @@ const views = {
             ${candidate.role ? `<p class="text-slate-600">${this.escapeHtml(candidate.role)}</p>` : ''}
             <div class="flex items-center gap-2 flex-wrap mt-1">
               ${candidate.category ? `<span class="px-2 py-1 rounded-full text-xs font-medium ${this._categoryBadgeClass(candidate.category)}">${this.escapeHtml(this._candidateCategories[candidate.category] || candidate.category)}</span>` : ''}
-              ${this._subcontractorBadge(candidate, 'py-1')}
+              <span id="candidate-sub-badge">${this._subcontractorBadge(candidate, 'py-1')}</span>
             </div>
           </div>
           <div class="flex gap-2 flex-wrap">
@@ -4606,9 +4686,9 @@ const views = {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           ${candidate.email ? `<div><span class="text-slate-500">Email:</span> <a href="mailto:${this.escapeHtml(candidate.email)}" class="text-rose-600 hover:text-rose-700">${this.escapeHtml(candidate.email)}</a></div>` : ''}
           ${candidate.phone ? `<div><span class="text-slate-500">Phone:</span> <span class="text-slate-700">${this.escapeHtml(candidate.phone)}</span></div>` : ''}
-          ${candidate.isSubcontractor && candidate.subcontractorCompany ? `<div><span class="text-slate-500">Konsultbolag:</span> <span class="text-slate-700">${this.escapeHtml(candidate.subcontractorCompany)}</span></div>` : ''}
-          ${candidate.isSubcontractor && candidate.subcontractorContact ? `<div><span class="text-slate-500">Kontaktperson:</span> <span class="text-slate-700">${this.escapeHtml(candidate.subcontractorContact)}</span></div>` : ''}
         </div>
+
+        ${this._candidateSubcontractorBox(candidate)}
 
         ${candidate.skills ? `
           <div class="mt-4 pt-4 border-t border-slate-200">
