@@ -5104,12 +5104,12 @@ const views = {
 
   setAppleFilter(filter) {
     this._appleState.filter = filter;
-    this.renderAppleBody();
+    this.renderAppleBody({ keepScroll: false }); // a new selection starts at the top
   },
 
   changeAppleFacet(key, value) {
     this._appleState[key] = value;
-    this.renderAppleBody();
+    this.renderAppleBody({ keepScroll: false }); // a new selection starts at the top
   },
 
   filterAppleRows() {
@@ -5136,13 +5136,19 @@ const views = {
     });
   },
 
-  renderAppleBody() {
+  renderAppleBody({ keepScroll = true } = {}) {
     const body = document.getElementById('apple-body');
     if (!body) return;
     const board = this._appleBoard;
+    // The list scrolls inside its own box, which is rebuilt here — keep its
+    // position, or every status change would jump back to the top.
+    const old = document.getElementById('apple-scroll');
+    const keep = old && keepScroll ? { top: old.scrollTop, left: old.scrollLeft } : null;
     body.innerHTML = this._appleState.tab === 'roster'
       ? this._appleRosterHtml(board)
       : this._appleFlowHtml(board);
+    const box = document.getElementById('apple-scroll');
+    if (box && keep) { box.scrollTop = keep.top; box.scrollLeft = keep.left; }
   },
 
   // ----- the flow (matrix) -----
@@ -5207,9 +5213,11 @@ const views = {
         </div>
       </div>
 
-      <!-- From xl up the matrix fits, so the box clips instead of scrolling:
-           a scroll container would trap the sticky header inside it. -->
-      <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-x-auto xl:overflow-x-clip">
+      <!-- The box is its own scroll area (both ways, at most a screen high),
+           so the sticky column header stays visible whatever the width.
+           Sticky against the page did not work: below xl the box needs
+           horizontal scroll, and any overflow box traps a sticky child. -->
+      <div id="apple-scroll" class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-auto" style="max-height: calc(100vh - 1.5rem)">
         <div style="min-width: 1220px">
           <div class="sticky top-0 z-10 grid items-end px-5 pt-2.5 pb-2 bg-slate-50 border-b border-slate-200" style="${this._APPLE_GRID}">
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">KANDIDAT</div>
@@ -5422,9 +5430,9 @@ const views = {
       </div>
 
       ${placed.length === 0 ? '<p class="text-sm text-slate-400">Ingen är klar ännu.</p>' : `
-      <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-x-auto">
+      <div id="apple-scroll" class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-auto" style="max-height: calc(100vh - 1.5rem)">
         <div style="min-width: 900px">
-          <div class="grid items-center px-5 py-2.5 bg-slate-50 border-b border-slate-200" style="${this._APPLE_ROSTER_GRID}">
+          <div class="sticky top-0 z-10 grid items-center px-5 py-2.5 bg-slate-50 border-b border-slate-200" style="${this._APPLE_ROSTER_GRID}">
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">NAMN</div>
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">KONSULTBOLAG</div>
             <div class="text-[11px] font-bold text-slate-500 tracking-wide">AVTAL</div>

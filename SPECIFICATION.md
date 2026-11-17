@@ -931,10 +931,14 @@ A lightweight, multi-user CRM system for managing companies, contacts, job candi
      last), then missing start date first, then soonest start.
    - **Layout**: the Apple route widens the page (max 1680px, slimmer side
      margins) so *Nästa åtgärd* gets the room; in the matrix the comment sits
-     beside the status rather than under it, keeping rows low. The column
-     header row is sticky while scrolling from the xl breakpoint up — below
-     that the matrix needs horizontal scrolling, and a scroll container would
-     trap a sticky header, so it scrolls with the rows there.
+     beside the status rather than under it, keeping rows low. The list (in
+     both *Flödet* and *Klara & startande*) scrolls inside its own box, at
+     most one screen high and scrolling both ways, so the column header row
+     stays visible at every width. The box keeps its scroll position when a
+     status change re-renders it, and starts at the top when the filter chips
+     or form/team selects change.
+   - **Step wording**: the client interview step reads *Ej bokad → Bokad →
+     Genomförd* (the active state was formerly "Väntar på tider").
    - **Team tint**: placed consultants (Klara in the flow, every row in Klara &
      startande) get a very faint background per team — sky for Java Backend,
      yellow for TypeScript Frontend, violet iOS, teal Java/Scala, rose Machine

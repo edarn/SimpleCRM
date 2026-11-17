@@ -49,7 +49,7 @@ const STEP_STATUS_LABELS = {
   code_test: { pending: 'Kodprov ej skickat', active: 'Kodprov skickat', passed: 'Kodprov ok' },
   screening: { pending: 'Ej bokad', active: 'Bokad', passed: 'Screening ok' },
   presented: { pending: 'Ej presenterad', active: 'Skickad, väntar på besked', passed: 'Presenterad' },
-  client_interview: { pending: 'Ej bokad', active: 'Väntar på tider', passed: 'Genomförd' },
+  client_interview: { pending: 'Ej bokad', active: 'Bokad', passed: 'Genomförd' },
   offer: { pending: 'Erbjudande ej skickat', active: 'Erbjudande skickat', passed: 'Erbjudande accepterat' },
   signed: { pending: 'Ej signerat', active: 'Skickat för signering', passed: 'Signerat' },
   confirmed: { pending: 'Ej skickat', active: 'Skickat', passed: 'Skickat' },
